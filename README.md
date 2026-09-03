@@ -1,5 +1,9 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+# SQLLens
+
+SQLLens is an AI-assisted SQL stored procedure analysis and optimization platform designed to ingest stored procedures, execute them against SQL Server or PostgreSQL, capture execution telemetry, analyze IO and timing metrics, and propose optimization recommendations with LLM-backed reviews. The project combines a Next.js application shell, a local execution engine, telemetry parsers, and model management workflows for review, comparison, and auditing.
+
 ## Getting Started
 
 First, run the development server:
@@ -20,6 +24,110 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Architecture Overview
+
+SqlLens is built as a layered system that separates end-user workflows from execution and analysis components. The architecture is deliberately split between a web application layer, a SQL execution engine, telemetry parsers, and a Hugging Face Transformers-powered optimization layer.
+
+### System Components
+
+- SqlLens Engine: Executes stored procedures in local simulation mode or via real database drivers for SQL Server (`mssql`) and PostgreSQL (`pg`), and records execution statistics and audit logs.
+- LLM Layer: Uses Hugging Face `transformers` models to review, explain, and optimize stored procedures based on captured telemetry, query patterns, and IO anomalies.
+- SQL Server / PostgreSQL: Source systems where stored procedures run, producing `STATISTICS IO`, `STATISTICS TIME`, and execution plans.
+- Telemetry Parsers: Normalize raw SQL engine output into structured metrics such as logical reads, physical reads, scan counts, CPU time, elapsed time, and hot tables.
+- Audit Log Store: Persists execution records to `audit_logs` and supports later comparison and review.
+
+### Core Data Flow
+
+1. SP Extraction: A stored procedure definition is entered via the app UI or API.
+2. Execution + Stats Capture: The engine executes the SP in simulation or live mode and gathers raw IO / time output.
+3. Telemetry Normalization: Parsers convert raw outputs into machine-readable performance metrics.
+4. Comparative Analysis: The original and optimized SPs are compared using logical reads, scan counts, and elapsed time.
+5. LLM Optimization: The Transformers-based LLM layer reviews the procedure and suggests index, query, or rewrite improvements.
+6. Upsert / Persistence: The results, comparison summaries, and audit metadata are stored for later inspection and recommendation tracking.
+
+```mermaid
+flowchart LR
+    UI[Next.js UI / AppShell]
+    SP[Stored Procedure Input]
+    ENG[SqlLens Engine]
+    EXEC[Execution + Stats IO + Time]
+    PARSE[Telemetry Parsers]
+    LLM[Hugging Face Transformers]
+    OPT[Optimization Suggestions]
+    COMP[Compare / Audit / Review]
+    STORE[(SQLite / Audit Logs / Metadata)]
+
+    UI --> SP
+    SP --> ENG
+    ENG --> EXEC
+    EXEC --> PARSE
+    PARSE --> COMP
+    PARSE --> LLM
+    LLM --> OPT
+    OPT --> COMP
+    COMP --> STORE
+```
+
+## Network Topology & Deployment Diagram
+
+SqlLens supports a flexible deployment model spanning local edge execution and remote managed services, with a local Hugging Face Transformers inference path as the primary AI layer.
+
+### Deployment Boundaries
+
+- Local / Edge deployment:
+  - Next.js app runs locally on developer machines or a private edge node.
+  - Hugging Face Transformers executes locally in-process or through a privately hosted local inference service.
+  - SQLite or local audit storage can persist execution metadata and application state.
+  - SQL connectivity remains inside the private trust boundary when connecting to local SQL Server or PostgreSQL instances.
+
+- Remote / Managed deployment:
+  - Managed SQL Server or PostgreSQL instances can be accessed over the network.
+  - Remote model endpoints or managed AI APIs may be used if configured for cloud inference.
+  - Cloud-hosted telemetry, review services, or shared model backends may be used if the deployment requires them.
+
+### Protocol and Port Reference
+
+| Component | Network Path | Typical Port / Protocol | Purpose |
+| --- | --- | --- | --- |
+| Web App UI | HTTP / HTTPS | 3000 | User interface and operational dashboard |
+| SQL Server | TDS / TLS | 1433 | SQL Server connections |
+| PostgreSQL | PostgreSQL wire protocol | 5432 | PostgreSQL connectivity |
+| Local Transformers Runtime | In-process / local REST bridge if enabled | 8000 or local IPC | Local model inference within the same trust boundary |
+| Managed LLM API | HTTPS / REST | 443 | Remote model provider access |
+| Audit Log / Local Storage | File system / local IPC | N/A | Persistence of stored results |
+
+```mermaid
+flowchart TB
+    subgraph Local[Local / Edge Deployment]
+        UI[Next.js App]
+        ENG[SqlLens Engine]
+        HF[Local Hugging Face<br/>Transformers]
+        AUDIT[(Audit Logs / SQLite)]
+        SQLLocal[(Local SQL Server / Postgres)]
+    end
+
+    subgraph Cloud[Managed / Remote Services]
+        SQLRemote[(Managed SQL Server / Postgres)]
+        LLMCloud[Managed LLM API]
+    end
+
+    UI --> ENG
+    ENG -->|TDS / TLS| SQLLocal
+    ENG -->|TDS / TLS| SQLRemote
+    ENG --> AUDIT
+    UI --> HF
+    UI -->|HTTPS / REST| LLMCloud
+    HF --> ENG
+    LLMCloud --> ENG
+```
+
+### Security and Data-in-Transit Boundaries
+
+- SQL connectivity is typically carried over TDS/TLS for SQL Server and encrypted client traffic for PostgreSQL where configured.
+- Local Hugging Face Transformers inference remains inside the local trust boundary unless an explicit local REST bridge is exposed externally.
+- Managed API traffic crosses a cloud boundary and should use TLS and secret management (API keys, environment variables, or secure secret stores).
+- Audit logs and execution outputs should be treated as sensitive operational data and protected according to database and application policy.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
@@ -34,3 +142,10 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Changelog Summary
+
+- Updated the Architecture Overview to reflect the Hugging Face Transformers-based AI layer instead of a generic LLM abstraction.
+- Kept the local/edge vs. managed deployment model while clarifying the local trust boundary for Transformers-based inference.
+- Revised the deployment diagram and port reference to emphasize local Transformers execution and optional local REST bridging.
+- Preserved the original Getting Started, Learn More, and Deploy sections while adding SQLLens-specific topology and security details.
