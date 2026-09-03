@@ -1,11 +1,10 @@
-import type { Metadata } from 'next';
-import { Providers } from './providers';
-import { Navbar } from '@/components/layout/Navbar';
-import './globals.css';
+import type { Metadata } from "next";
+import "./globals.css";
+import { AppShell } from "../components/AppShell";
 
 export const metadata: Metadata = {
-  title: 'SQLLens - AI Powered Stored Procedure Analyzer',
-  description: 'Review, compare, and audit SQL Stored Procedures with AI recommendations.',
+  title: "SQLLens - AI Powered Stored Procedure Analyzer",
+  description: "Review, compare, and audit SQL Stored Procedures with AI recommendations.",
 };
 
 export default function RootLayout({
@@ -16,10 +15,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body suppressHydrationWarning>
-        <Providers>
-          <Navbar />
-          {children}
-        </Providers>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

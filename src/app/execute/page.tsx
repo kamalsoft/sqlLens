@@ -3,8 +3,8 @@
 import { useState } from 'react';
 import {
   Box, Container, Heading, Text, Textarea, Button, Flex,
-  Spinner, Badge, Grid, GridItem, Input, Select, Separator,
-  Tabs, NumberInput, Switch,
+  Spinner, Badge, Grid, Input, Separator,
+  Tabs,
 } from '@chakra-ui/react';
 import { AuditAnalysis } from '@/lib/audit-analyzer';
 
@@ -284,26 +284,17 @@ export default function ExecutePage() {
           <Grid templateColumns={{ base: '1fr', md: 'repeat(3, 1fr)' }} gap={4}>
             <Box>
               <Text fontSize="xs" color="gray.400" mb={1}>Engine</Text>
-              <Select.Root
-                value={[engine]}
-                onValueChange={(d) => setEngine(d.value[0] as any)}
-                size="sm"
+              <select
+                value={engine}
+                onChange={(e) =>
+                  setEngine(e.target.value as 'simulation' | 'mssql' | 'postgres')
+                }
+                className="w-full rounded-md border border-gray-600 bg-gray-800 px-3 py-2 text-white outline-none ring-0 focus:border-orange-500"
               >
-                <Select.Trigger bg="gray.800" borderColor="gray.600" color="white">
-                  <Select.ValueText />
-                </Select.Trigger>
-                <Select.Content bg="gray.800" borderColor="gray.600">
-                  <Select.Item item={{ value: 'simulation', label: '🧪 Simulation (no DB needed)' }} value="simulation">
-                    🧪 Simulation
-                  </Select.Item>
-                  <Select.Item item={{ value: 'mssql', label: '🗄 SQL Server (mssql)' }} value="mssql">
-                    🗄 SQL Server
-                  </Select.Item>
-                  <Select.Item item={{ value: 'postgres', label: '🐘 PostgreSQL (pg)' }} value="postgres">
-                    🐘 PostgreSQL
-                  </Select.Item>
-                </Select.Content>
-              </Select.Root>
+                <option value="simulation">🧪 Simulation (no DB needed)</option>
+                <option value="mssql">🗄 SQL Server (mssql)</option>
+                <option value="postgres">🐘 PostgreSQL (pg)</option>
+              </select>
             </Box>
 
             {engine !== 'simulation' && (
@@ -330,14 +321,12 @@ export default function ExecutePage() {
                 </Box>
                 {engine === 'mssql' && (
                   <Flex align="center" gap={3} pt={4}>
-                    <Switch.Root
+                    <input
+                      type="checkbox"
                       checked={trustCert}
-                      onCheckedChange={(d) => setTrustCert(d.checked)}
-                      colorPalette="blue"
-                      size="sm"
-                    >
-                      <Switch.Track><Switch.Thumb /></Switch.Track>
-                    </Switch.Root>
+                      onChange={(e) => setTrustCert(e.target.checked)}
+                      className="h-4 w-4 rounded border-gray-600 bg-gray-700 text-blue-500"
+                    />
                     <Text fontSize="xs" color="gray.400">Trust Server Certificate</Text>
                   </Flex>
                 )}

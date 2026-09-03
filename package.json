@@ -16,13 +16,16 @@
     "@prisma/client": "^7.10.0",
     "better-sqlite3": "^13.0.3",
     "framer-motion": "^13.1.1",
+    "mssql": "^12.7.0",
     "next": "16.3.3",
     "next-themes": "^0.4.6",
+    "pg": "^8.23.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "uuid": "^14.0.2"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -31,6 +34,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.3",
     "prisma": "^8.0.0-rc.12",
+    "tailwindcss": "^4.3.3",
     "typescript": "^5"
   }
 }

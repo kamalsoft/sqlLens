@@ -294,7 +294,9 @@ function parseRawStatisticsOutput(raw: string): ExecutionStats {
   }
 
   const cpuMatch = raw.match(/CPU time = (\d+) ms,\s+elapsed time = (\d+) ms/i);
-  const execMatch = raw.match(/SQL Server Execution Times.*?CPU time = (\d+) ms.*?elapsed time = (\d+) ms/si);
+  const execMatch = raw.match(
+    /SQL Server Execution Times[\s\S]*?CPU time = (\d+) ms[\s\S]*?elapsed time = (\d+) ms/i
+  );
 
   return {
     parseAndCompileTime: cpuMatch ? +cpuMatch[2] : 0,
