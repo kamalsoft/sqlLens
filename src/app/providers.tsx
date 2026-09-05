@@ -1,17 +1,17 @@
-'use client';
+"use client";
 
-import { ChakraProvider, defaultSystem } from '@chakra-ui/react';
-import { useEffect, useState } from 'react';
+import { ChakraProvider, defaultSystem } from "@chakra-ui/react";
+import { useEffect, useState } from "react";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false);
-  
+
   useEffect(() => {
     setMounted(true);
   }, []);
 
   if (!mounted) {
-    return <div style={{ visibility: 'hidden', height: '100vh' }} />;
+    return <div style={{ minHeight: "100vh" }} />;
   }
 
   return (

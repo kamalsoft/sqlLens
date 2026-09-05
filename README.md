@@ -149,3 +149,84 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 - Kept the local/edge vs. managed deployment model while clarifying the local trust boundary for Transformers-based inference.
 - Revised the deployment diagram and port reference to emphasize local Transformers execution and optional local REST bridging.
 - Preserved the original Getting Started, Learn More, and Deploy sections while adding SQLLens-specific topology and security details.
+
+## Roadmap
+
+### Phase 1: Complete Core Workflows
+
+- [ ] Connect the Settings form fields to controlled state.
+- [ ] Wire the Settings save action to `handleSave`.
+- [ ] Persist provider, model, API key, and execution preferences securely.
+- [ ] Replace dashboard mock analysis with `/api/analysis`.
+- [ ] Add loading, success, and error states to all primary workflows.
+- [ ] Validate stored procedure input before execution or review.
+
+### Phase 2: SQL Execution and Analysis
+
+- [ ] Complete SQL Server execution through `mssql`.
+- [ ] Complete PostgreSQL execution through `pg`.
+- [ ] Capture execution plans, `STATISTICS IO`, and `STATISTICS TIME`.
+- [ ] Normalize CPU time, elapsed time, logical reads, physical reads, and scan counts.
+- [ ] Add configurable connection testing.
+- [ ] Add query timeout, cancellation, and safe parameter handling.
+- [ ] Persist execution results and audit records.
+
+### Phase 3: Local Transformers Integration
+
+- [ ] Connect the review workflow to the Hugging Face Transformers runtime.
+- [ ] Add model loading, availability, and inference status handling.
+- [ ] Support configurable model, temperature, and context window settings.
+- [ ] Add prompt templates for review, optimization, comparison, and audit workflows.
+- [ ] Prevent SQL source code and credentials from leaving the local trust boundary by default.
+- [ ] Add inference timeout and fallback behavior.
+
+### Phase 4: Review, Compare, and Recommendations
+
+- [ ] Implement stored procedure review end to end.
+- [ ] Compare original and optimized procedures using normalized telemetry.
+- [ ] Display recommendations grouped by severity and category.
+- [ ] Add before/after metrics for reads, scans, CPU, and elapsed time.
+- [ ] Add recommendation acceptance, rejection, and notes.
+- [ ] Add shareable review results with access control and expiration.
+
+### Phase 5: Model Management
+
+- [ ] Validate model metadata before download.
+- [ ] Add download progress reporting.
+- [ ] Add cancellation and retry support.
+- [ ] Prevent duplicate downloads.
+- [ ] Add model checksum and integrity validation.
+- [ ] Add model deletion and disk-usage reporting.
+- [ ] Refresh installed model status from the filesystem or runtime.
+
+### Phase 6: Authentication and Security
+
+- [ ] Connect login and logout UI to the authentication APIs.
+- [ ] Protect review, execution, audit, and model-management routes.
+- [ ] Store credentials and API keys using secure server-side storage.
+- [ ] Redact credentials and sensitive SQL from logs.
+- [ ] Add CSRF, rate limiting, and request validation.
+- [ ] Enforce TLS for remote SQL and model connections.
+
+### Phase 7: Reliability and Quality
+
+- [ ] Add unit tests for telemetry parsers and analysis helpers.
+- [ ] Add API route tests for authentication, execution, review, and model downloads.
+- [ ] Add component tests for forms and loading/error states.
+- [ ] Add end-to-end tests for the primary review workflow.
+- [ ] Add lint, type-check, and production-build checks to CI.
+- [ ] Document supported Node.js, database, and Transformers runtime versions.
+
+### Definition of Basic-Functionality Complete
+
+SQLLens can be considered minimally complete when a user can:
+
+1. Sign in and access a protected workspace.
+2. Configure a local Transformers model.
+3. Submit a stored procedure for review.
+4. Execute it safely against a configured SQL Server or PostgreSQL database.
+5. Capture and parse execution telemetry.
+6. Receive an optimization review based on the procedure and telemetry.
+7. Compare original and optimized results.
+8. Persist and reopen the audit record.
+9. Manage installed models with reliable progress and error handling.

@@ -33,18 +33,21 @@ import { AppShell } from "../../components/AppShell";
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
-  const [saved, setSaved] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
-    const raw = localStorage.getItem("sqlens-settings");
-    if (!raw) return;
-
-    try {
-      const parsed = JSON.parse(raw) as AppSettings;
-      setSettings({ ...defaultSettings, ...parsed });
-    } catch {
-      // ignore invalid local storage content
-    }
+    void fetch("/api/appconfig", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Unable to load settings");
+        return response.json() as Promise<AppSettings>;
+      })
+      .then((config) => setSettings(config))
+      .catch((error) => {
+        setMessage(error instanceof Error ? error.message : "Unable to load settings");
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   const updateField = <K extends keyof AppSettings>(
@@ -54,12 +57,31 @@ export default function SettingsPage() {
     setSettings((current) => ({ ...current, [key]: value }));
   };
 
-  const handleSave = () => {
-    localStorage.setItem("sqlens-settings", JSON.stringify(settings));
-    setSaved(true);
+  async function handleSave() {
+    setSaving(true);
+    setMessage("");
 
-    window.setTimeout(() => setSaved(false), 1800);
-  };
+    try {
+      const response = await fetch("/api/appconfig", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settings),
+      });
+
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Unable to save settings");
+      }
+
+      setSettings(payload);
+      setMessage("Settings saved.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to save settings");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <>
@@ -83,22 +105,43 @@ export default function SettingsPage() {
         <div className="form-grid">
           <div className="field">
             <label className="label">Model Provider</label>
-            <select className="select" defaultValue="OpenAI">
-              <option>OpenAI</option>
-              <option>Azure OpenAI</option>
-              <option>Ollama</option>
-              <option>Hugging Face</option>
+            <select
+              value={settings.provider}
+              onChange={(event) =>
+                setSettings((current) => ({
+                  ...current,
+                  provider: event.target.value,
+                }))
+              }
+            >
+              <option value="Hugging Face">Hugging Face</option>
             </select>
           </div>
 
           <div className="field">
             <label className="label">Default Model</label>
-            <input className="input" defaultValue="gpt-4o-mini" />
+            <input
+              value={settings.defaultModel}
+              onChange={(event) =>
+                setSettings((current) => ({
+                  ...current,
+                  defaultModel: event.target.value,
+                }))
+              }
+            />
           </div>
 
           <div className="field full">
             <label className="label">Download Directory</label>
-            <input className="input" defaultValue="~/models" />
+            <input
+              value={settings.downloadDirectory}
+              onChange={(event) =>
+                setSettings((current) => ({
+                  ...current,
+                  downloadDirectory: event.target.value,
+                }))
+              }
+            />
           </div>
 
           <div className="field">
@@ -146,6 +189,12 @@ export default function SettingsPage() {
           </div>
         </div>
       </section>
+
+      <button type="button" onClick={handleSave} disabled={loading || saving}>
+        {saving ? "Saving..." : "Save Settings"}
+      </button>
+
+      {message && <p>{message}</p>}
     </>
   );
 }
