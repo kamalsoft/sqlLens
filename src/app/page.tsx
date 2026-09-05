@@ -1,179 +1,156 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import Link from "next/link";
-import { AppShell } from "../components/AppShell";
+import { useEffect, useState } from "react";
 
-const metricCards = [
-  { label: "Active SPs", value: "128", delta: "+12.4%", tone: "blue" },
-  { label: "Avg. latency", value: "118ms", delta: "-8.3%", tone: "green" },
-  { label: "Index gaps", value: "09", delta: "+2", tone: "amber" },
-  { label: "Risk score", value: "26/100", delta: "-6.1%", tone: "red" },
-];
+type Analysis = {
+  id: string;
+  procedureName: string;
+  status: string;
+  elapsedMs: number;
+  logicalReads: number;
+  createdAt: string;
+};
 
-const recentRuns = [
-  { name: "usp_LoadCustomerOrders", status: "Healthy", duration: "1.2s", model: "gpt-4o-mini" },
-  { name: "usp_RebuildInventory", status: "Warning", duration: "2.8s", model: "phi-3-mini" },
-  { name: "usp_InvoiceSummary", status: "Critical", duration: "4.4s", model: "mistral-7b" },
-];
+type OverviewData = {
+  totalAnalyses: number;
+  completedAnalyses: number;
+  averageElapsedMs: number;
+  totalLogicalReads: number;
+  recentAnalyses: Analysis[];
+};
 
-const recommendations = [
-  "Add nonclustered index on OrderId filter path",
-  "Replace repeated scalar subqueries with a temp aggregate",
-  "Reduce table scans in usp_InvoiceSummary by narrowing date predicate",
-];
+export default function OverviewPage() {
+  const [data, setData] = useState<OverviewData | null>(null);
+  const [error, setError] = useState("");
 
-export default function HomePage() {
-  const [isRunning, setIsRunning] = useState(false);
-  const [analysis, setAnalysis] = useState<{
-    result: string;
-    summary: string;
-    score: number;
-    tables: string[];
-    nextAction: string;
-  } | null>(null);
+  useEffect(() => {
+    async function loadOverview() {
+      try {
+        const response = await fetch("/api/analysis", {
+          cache: "no-store",
+        });
 
-  const lastUpdated = useMemo(() => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), []);
+        const contentType = response.headers.get("content-type") || "";
+        const payload = contentType.includes("application/json")
+          ? await response.json()
+          : null;
 
-  const runAnalysis = () => {
-    setIsRunning(true);
+        if (!response.ok) {
+          throw new Error(
+            payload?.error || `Unable to load overview (${response.status})`
+          );
+        }
 
-    window.setTimeout(() => {
-      setAnalysis({
-        result: "Passed with warnings",
-        summary: "The stored procedure shows no blocking issues, but there are 3 scan-heavy hotspots and 1 missing index candidate.",
-        score: 74,
-        tables: ["SalesOrderHeader", "SalesOrderDetail", "Customer", "InvoiceHeader"],
-        nextAction: "Prioritize the missing index on OrderId before the next release window.",
-      });
-      setIsRunning(false);
-    }, 700);
-  };
+        setData(payload);
+      } catch (cause) {
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : "Unable to load overview"
+        );
+      }
+    }
+
+    void loadOverview();
+  }, []);
 
   return (
-    <AppShell>
-      <div className="dashboard-page">
-        <header className="page-header">
-          <div>
-            <p className="page-kicker">Overview</p>
-            <h1 className="page-title">SQL Performance Command Center</h1>
-          </div>
+    <main className="overview-page">
+      <header className="overview-header">
+        <div>
+          <span className="overview-eyebrow">Workspace</span>
+          <h1>Overview</h1>
+          <p>Monitor stored procedure analysis activity and performance.</p>
+        </div>
+      </header>
 
-          <div className="page-actions">
-            <Link href="/settings" className="button button-secondary">
-              Settings
-            </Link>
-            <button type="button" className="button button-primary" onClick={runAnalysis} disabled={isRunning}>
-              {isRunning ? "Running analysis..." : "Analysis SP"}
-            </button>
-          </div>
-        </header>
-
-        <section className="stats-grid">
-          {metricCards.map((card) => (
-            <article key={card.label} className={`metric-card tone-${card.tone}`}>
-              <div className="metric-label">{card.label}</div>
-              <div className="metric-value">{card.value}</div>
-              <div className="metric-delta">{card.delta}</div>
+      {error ? (
+        <div className="overview-alert">{error}</div>
+      ) : !data ? (
+        <div className="overview-empty">Loading overview...</div>
+      ) : (
+        <>
+          <section className="overview-metrics" aria-label="Analysis metrics">
+            <article className="overview-metric">
+              <span>Total analyses</span>
+              <strong>{data.totalAnalyses}</strong>
+              <small>All submitted analyses</small>
             </article>
-          ))}
-        </section>
 
-        <section className="content-grid">
-          <div className="panel panel-card wide-panel">
-            <div className="section-title-row">
+            <article className="overview-metric">
+              <span>Completed</span>
+              <strong>{data.completedAnalyses}</strong>
+              <small>Successfully completed</small>
+            </article>
+
+            <article className="overview-metric">
+              <span>Average elapsed time</span>
+              <strong>{data.averageElapsedMs} ms</strong>
+              <small>Across completed analyses</small>
+            </article>
+
+            <article className="overview-metric">
+              <span>Logical reads</span>
+              <strong>{data.totalLogicalReads.toLocaleString()}</strong>
+              <small>Total captured reads</small>
+            </article>
+          </section>
+
+          <section className="overview-section">
+            <div className="overview-section-heading">
               <div>
-                <p className="page-kicker">Latest run</p>
-                <h2 className="section-title">Execution Summary</h2>
+                <span className="overview-eyebrow">Activity</span>
+                <h2>Recent analyses</h2>
               </div>
-              <span className="muted-tag">Updated {lastUpdated}</span>
+              <span className="overview-count">
+                {data.recentAnalyses.length} records
+              </span>
             </div>
 
-            {analysis ? (
-              <div className="analysis-panel">
-                <div className="analysis-header">
-                  <span className="status-pill success">{analysis.result}</span>
-                  <span className="score-pill">Score: {analysis.score}/100</span>
-                </div>
-
-                <p className="analysis-summary">{analysis.summary}</p>
-
-                <div className="analysis-columns">
-                  <div>
-                    <h3>Tables scanned</h3>
-                    <ul className="simple-list">
-                      {analysis.tables.map((table) => (
-                        <li key={table}>{table}</li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div>
-                    <h3>Recommended next action</h3>
-                    <p className="analysis-note">{analysis.nextAction}</p>
-                  </div>
-                </div>
+            {data.recentAnalyses.length === 0 ? (
+              <div className="overview-empty">
+                <strong>No analyses yet</strong>
+                <p>
+                  Run a stored procedure review to see results here.
+                </p>
               </div>
             ) : (
-              <div className="empty-state">
-                <p>No analysis run yet.</p>
-                <span>Use “Analysis SP” to generate a mock review result.</span>
+              <div className="overview-table-wrapper">
+                <table className="overview-table">
+                  <thead>
+                    <tr>
+                      <th>Procedure</th>
+                      <th>Status</th>
+                      <th>Elapsed time</th>
+                      <th>Logical reads</th>
+                      <th>Created</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.recentAnalyses.map((analysis) => (
+                      <tr key={analysis.id}>
+                        <td>{analysis.procedureName}</td>
+                        <td>
+                          <span
+                            className={`analysis-status ${analysis.status}`}
+                          >
+                            {analysis.status}
+                          </span>
+                        </td>
+                        <td>{analysis.elapsedMs} ms</td>
+                        <td>{analysis.logicalReads.toLocaleString()}</td>
+                        <td>
+                          {new Date(analysis.createdAt).toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
-          </div>
-
-          <div className="panel panel-card">
-            <div className="section-title-row">
-              <div>
-                <p className="page-kicker">Insights</p>
-                <h2 className="section-title">Recommendations</h2>
-              </div>
-            </div>
-
-            <ul className="recommendations-list">
-              {recommendations.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          </div>
-        </section>
-
-        <section className="panel panel-card">
-          <div className="section-title-row">
-            <div>
-              <p className="page-kicker">Recent activity</p>
-              <h2 className="section-title">Stored Procedure Runs</h2>
-            </div>
-          </div>
-
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Procedure</th>
-                  <th>Status</th>
-                  <th>Duration</th>
-                  <th>Model</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentRuns.map((row) => (
-                  <tr key={row.name}>
-                    <td>{row.name}</td>
-                    <td>
-                      <span className={`status-pill ${row.status === "Healthy" ? "success" : row.status === "Warning" ? "warning" : "danger"}`}>
-                        {row.status}
-                      </span>
-                    </td>
-                    <td>{row.duration}</td>
-                    <td>{row.model}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </div>
-    </AppShell>
+          </section>
+        </>
+      )}
+    </main>
   );
 }

@@ -8,7 +8,7 @@ const navItems = [
   { href: "/review", label: "Review SP", icon: "▣" },
   { href: "/execute", label: "Execute", icon: "▶" },
   { href: "/compare", label: "Compare", icon: "⇄" },
-  { href: "/settings", label: "Settings", icon: "⚙" },
+/*  { href: "/settings", label: "Settings", icon: "⚙" }, */
   { href: "/manage-models", label: "Models", icon: "◎" },
 ];
 

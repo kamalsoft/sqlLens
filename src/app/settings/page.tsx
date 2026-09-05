@@ -84,7 +84,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <>
+    <AppShell>
       <header className="page-header">
         <div>
           <p className="page-kicker">Configuration</p>
@@ -195,6 +195,6 @@ export default function SettingsPage() {
       </button>
 
       {message && <p>{message}</p>}
-    </>
+    </AppShell>
   );
 }
