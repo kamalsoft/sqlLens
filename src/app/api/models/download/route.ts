@@ -1,19 +1,27 @@
+import os from "node:os";
+import path from "node:path";
 import { createWriteStream } from "node:fs";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import {
   access,
   mkdir,
-  readdir,
   readFile,
+  readdir,
+  rename,
+  rm,
   stat,
   unlink,
   writeFile,
 } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { pipeline } from "node:stream/promises";
-import { Readable } from "node:stream";
 import { NextResponse } from "next/server";
+
 import { readAppConfig } from "@/lib/app-config";
+import { validateDownloadedModel } from "@/lib/validate-model";
+import {
+  ModelDownloadError,
+  downloadRepository,
+} from "@/lib/huggingface-download";
 
 type DownloadRequest = {
   modelId?: string;
@@ -32,13 +40,20 @@ type HuggingFaceFile = {
   size?: number;
 };
 
+type ModelMetadata = {
+  id: string;
+  name: string;
+  sourceUrl: string;
+  downloadedAt: string;
+};
+
 function resolveDirectory(value?: string) {
   const configured = value?.trim() || "~/models";
 
   return path.resolve(
     configured.startsWith("~/")
       ? path.join(os.homedir(), configured.slice(2))
-      : configured
+      : configured,
   );
 }
 
@@ -56,10 +71,7 @@ function modelDirectory(root: string, modelId: string) {
 function validateModelUrl(value: string) {
   const url = new URL(value);
 
-  if (
-    url.protocol !== "https:" ||
-    url.hostname !== "huggingface.co"
-  ) {
+  if (url.protocol !== "https:" || url.hostname !== "huggingface.co") {
     throw new Error("Only HTTPS Hugging Face URLs are supported");
   }
 
@@ -67,7 +79,7 @@ function validateModelUrl(value: string) {
 
   if (parts.length < 2) {
     throw new Error(
-      "Use a Hugging Face model URL such as https://huggingface.co/org/model. Dataset URLs are not supported."
+      "Use a Hugging Face model URL such as https://huggingface.co/org/model. Dataset URLs are not supported.",
     );
   }
 
@@ -78,27 +90,25 @@ function validateModelUrl(value: string) {
 }
 
 function authHeaders(token?: string): HeadersInit {
-  return token
-    ? { Authorization: `Bearer ${token}` }
-    : {};
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 async function getRepositoryFiles(
   owner: string,
   repository: string,
-  token?: string
+  token?: string,
 ) {
   const response = await fetch(
     `https://huggingface.co/api/models/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`,
     {
       headers: authHeaders(token),
       cache: "no-store",
-    }
+    },
   );
 
   if (!response.ok) {
     throw new Error(
-      `Unable to read Hugging Face metadata: HTTP ${response.status}`
+      `Unable to read Hugging Face metadata: HTTP ${response.status}`,
     );
   }
 
@@ -128,7 +138,7 @@ async function downloadFile(
   repository: string,
   filename: string,
   destination: string,
-  token?: string
+  token?: string,
 ) {
   const url =
     `https://huggingface.co/${encodeURIComponent(owner)}/` +
@@ -141,9 +151,7 @@ async function downloadFile(
   });
 
   if (!response.ok || !response.body) {
-    throw new Error(
-      `Failed to download ${filename}: HTTP ${response.status}`
-    );
+    throw new Error(`Failed to download ${filename}: HTTP ${response.status}`);
   }
 
   await mkdir(path.dirname(destination), { recursive: true });
@@ -151,10 +159,8 @@ async function downloadFile(
   const temporaryFile = `${destination}.part`;
 
   await pipeline(
-    Readable.fromWeb(
-      response.body as Parameters<typeof Readable.fromWeb>[0]
-    ),
-    createWriteStream(temporaryFile)
+    Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]),
+    createWriteStream(temporaryFile),
   );
 
   const fileStats = await stat(temporaryFile);
@@ -201,6 +207,8 @@ async function modelAlreadyInstalled(directory: string) {
 }
 
 export async function POST(request: Request) {
+  let temporaryDestination: string | undefined;
+
   try {
     const body = (await request.json()) as DownloadRequest;
     const config = await readAppConfig();
@@ -208,7 +216,7 @@ export async function POST(request: Request) {
     if (!body.modelId || !body.sourceUrl) {
       return NextResponse.json(
         { error: "modelId and sourceUrl are required" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -216,87 +224,85 @@ export async function POST(request: Request) {
     const root = resolveDirectory(config.downloadDirectory);
     const destination = modelDirectory(root, body.modelId);
 
-    if (await modelAlreadyInstalled(destination)) {
+    temporaryDestination = `${destination}.download-${Date.now()}`;
+
+    await rm(temporaryDestination, { recursive: true, force: true });
+    await mkdir(temporaryDestination, { recursive: true });
+
+    await downloadRepository(
+      owner,
+      repository,
+      temporaryDestination,
+      config.apiKey?.trim() || undefined,
+    );
+
+    await writeFile(
+      path.join(temporaryDestination, "sqlens-model.json"),
+      JSON.stringify(
+        {
+          id: body.modelId,
+          name: body.name || body.modelId,
+          sourceUrl: body.sourceUrl,
+          downloadedAt: new Date().toISOString(),
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const validation = await validateDownloadedModel(temporaryDestination);
+
+    if (!validation.valid) {
+      await rm(temporaryDestination, { recursive: true, force: true });
+
       return NextResponse.json(
         {
-          ok: false,
-          exists: true,
-          message: `${body.name || body.modelId} already exists`,
-          path: destination,
+          error:
+            "Downloaded model is incomplete or not compatible with Transformers.js.",
+          modelId: body.modelId,
+          validation,
         },
-        { status: 409 }
+        { status: 422 },
       );
     }
 
-    await mkdir(destination, { recursive: true });
-
-    const files = await getRepositoryFiles(owner, repository, config.apiKey || undefined);
-    const concurrency = Math.max(
-      1,
-      Math.min(body.settings?.maxConcurrentDownloads || 2, 4)
-    );
-
-    let index = 0;
-
-    async function worker() {
-      while (index < files.length) {
-        const filename = files[index++];
-        const target = path.resolve(destination, filename);
-
-        if (!target.startsWith(`${destination}${path.sep}`)) {
-          throw new Error(`Invalid model filename: ${filename}`);
-        }
-
-        await downloadFile(
-          owner,
-          repository,
-          filename,
-          target,
-          config.apiKey || undefined
-        );
-      }
-    }
-
-    await Promise.all(
-      Array.from(
-        { length: Math.min(concurrency, files.length) },
-        () => worker()
-      )
-    );
-
-    const metadata = {
-      id: body.modelId,
-      name: body.name || body.modelId,
-      provider: "Hugging Face",
-      sourceUrl: body.sourceUrl,
-      directory: destination,
-      files,
-      installedAt: new Date().toISOString(),
-    };
-
-    await writeFile(
-      path.join(destination, "sqlens-model.json"),
-      JSON.stringify(metadata, null, 2),
-      "utf8"
-    );
-
-    const size = await calculateSize(destination);
+    await rm(destination, { recursive: true, force: true });
+    await rename(temporaryDestination, destination);
 
     return NextResponse.json({
       ok: true,
+      modelId: body.modelId,
       path: destination,
-      filesDownloaded: files.length,
-      size: formatSize(size),
+      size: formatSize(await calculateSize(destination)),
+      validation: await validateDownloadedModel(destination),
     });
   } catch (error) {
+    if (temporaryDestination) {
+      await rm(temporaryDestination, {
+        recursive: true,
+        force: true,
+      });
+    }
+
+    if (error instanceof ModelDownloadError) {
+      return NextResponse.json(
+        {
+          error: error.message,
+          details: error.details,
+        },
+        { status: 422 },
+      );
+    }
+
     return NextResponse.json(
       {
         error:
           error instanceof Error
             ? error.message
-            : "Hugging Face model download failed",
+            : "Model download failed",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

@@ -1,87 +1,125 @@
-import { NextResponse } from 'next/server';
-import db from '@/db';
-import { analyzeStoredProcedure } from '@/lib/ai-transformer';
-import { v4 as uuidv4 } from 'uuid';
-import { cookies } from 'next/headers';
+import { NextResponse } from "next/server";
+import { pipeline } from "@huggingface/transformers";
+import { getInstalledModels } from "@/lib/installed-models";
 
-export async function POST(req: Request) {
-  try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get('session_token')?.value;
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
-    const body = await req.json();
-    const { storedProcedure } = body as { storedProcedure: string };
+type ReviewRequest = {
+  modelId?: string;
+  sql?: string;
+};
 
-    if (!storedProcedure?.trim()) {
-      return NextResponse.json({ error: 'storedProcedure is required' }, { status: 400 });
-    }
+const pipelines = new Map<string, Promise<unknown>>();
 
-    // Resolve session if available
-    let sessionId = 'anonymous';
-    if (token) {
-      const session = db.prepare('SELECT id FROM sessions WHERE token = ? AND is_active = 1').get(token) as any;
-      if (session) sessionId = session.id;
-    }
+async function getModelPipeline(directory: string) {
+  let loaded = pipelines.get(directory);
 
-    // Run AI analysis
-    const result = await analyzeStoredProcedure(storedProcedure);
+  if (!loaded) {
+    loaded = pipeline("text-generation", directory, {
+      dtype: "q4",
+      device: "cpu",
+    });
 
-    // Persist to DB
-    const auditId = uuidv4();
-    const sharedToken = uuidv4();
-
-    // Ensure anonymous session exists for unauthenticated use
-    if (sessionId === 'anonymous') {
-      const anonExists = db.prepare("SELECT id FROM sessions WHERE id = 'anonymous'").get();
-      if (!anonExists) {
-        const anonUserId = 'anonymous-user';
-        const anonUserExists = db.prepare("SELECT id FROM users WHERE id = ?").get(anonUserId);
-        if (!anonUserExists) {
-          db.prepare("INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?)").run(anonUserId, 'anonymous', 'n/a');
-        }
-        db.prepare("INSERT INTO sessions (id, user_id, token, is_active) VALUES ('anonymous', ?, 'anonymous', 1)").run(anonUserId);
-      }
-    }
-
-    db.prepare(`
-      INSERT INTO audit_requests (id, session_id, type, request_payload, response_payload, shared_token)
-      VALUES (?, ?, 'REVIEW', ?, ?, ?)
-    `).run(auditId, sessionId, JSON.stringify({ storedProcedure }), JSON.stringify(result), sharedToken);
-
-    return NextResponse.json({ id: auditId, sharedToken, result });
-  } catch (error: any) {
-    console.error('[review/route]', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    pipelines.set(directory, loaded);
   }
+
+  return loaded;
 }
 
-export async function GET(req: Request) {
+export async function POST(request: Request) {
   try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get('session_token')?.value;
-    const url = new URL(req.url);
-    const id = url.searchParams.get('id');
+    const body = (await request.json()) as ReviewRequest;
+    const sql = body.sql?.trim();
 
-    if (id) {
-      // Fetch specific audit by id
-      const audit = db.prepare('SELECT * FROM audit_requests WHERE id = ?').get(id) as any;
-      if (!audit) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-      return NextResponse.json({ ...audit, result: JSON.parse(audit.response_payload) });
+    if (!body.modelId || !sql) {
+      return NextResponse.json(
+        { error: "modelId and sql are required" },
+        { status: 400 }
+      );
     }
 
-    // Fetch all reviews for current session
-    if (!token) return NextResponse.json({ audits: [] });
-    const session = db.prepare('SELECT id FROM sessions WHERE token = ? AND is_active = 1').get(token) as any;
-    if (!session) return NextResponse.json({ audits: [] });
+    const models = await getInstalledModels();
+    const model = models.find((item) => item.id === body.modelId);
 
-    const audits = db.prepare(`
-      SELECT id, type, created_at, shared_token FROM audit_requests 
-      WHERE session_id = ? AND type = 'REVIEW' 
-      ORDER BY created_at DESC LIMIT 50
-    `).all(session.id);
+    if (!model) {
+      return NextResponse.json(
+        { error: "The selected model is not installed" },
+        { status: 404 }
+      );
+    }
 
-    return NextResponse.json({ audits });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!model.compatible) {
+      return NextResponse.json(
+        {
+          error:
+            `Model "${model.name}" is downloaded but cannot run locally. ` +
+            "An ONNX file is required under the model's onnx directory.",
+        },
+        { status: 422 }
+      );
+    }
+
+    const generator = (await getModelPipeline(model.directory)) as (
+      prompt: string,
+      options: {
+        max_new_tokens: number;
+        temperature: number;
+        do_sample: boolean;
+        return_full_text: boolean;
+      }
+    ) => Promise<Array<{ generated_text?: string }>>;
+
+    const prompt = `You are an expert SQL Server performance reviewer.
+Analyze the following stored procedure.
+
+Return valid JSON only with this schema:
+{
+  "summary": "string",
+  "issues": [
+    {
+      "severity": "critical|high|medium|low",
+      "title": "string",
+      "explanation": "string",
+      "recommendation": "string"
+    }
+  ],
+  "rewrittenProcedure": "string",
+  "confidence": 0
+}
+
+Stored procedure:
+<sql>
+${sql}
+</sql>`;
+
+    const output = await generator(prompt, {
+      max_new_tokens: 1200,
+      temperature: 0.2,
+      do_sample: false,
+      return_full_text: false,
+    });
+
+    const text = output[0]?.generated_text?.trim();
+
+    if (!text) {
+      throw new Error("The selected model returned no result");
+    }
+
+    return NextResponse.json({
+      model: model.id,
+      result: text,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Stored procedure analysis failed",
+      },
+      { status: 500 }
+    );
   }
 }

@@ -230,3 +230,78 @@ SQLLens can be considered minimally complete when a user can:
 7. Compare original and optimized results.
 8. Persist and reopen the audit record.
 9. Manage installed models with reliable progress and error handling.
+
+## Download and Validate Transformer Models
+
+The `scripts/validate_model.py` script downloads a Hugging Face model, mirrors its repository structure, validates required files, computes SHA-256 checksums, and only finalizes the model after successful validation.
+
+### Usage
+
+```bash
+cd /Users/kamalsoft/dev/dbPro/sqlens
+
+python3 scripts/validate_model.py \
+  onnx-community/Qwen2.5-0.5B-Instruct-ONNX
+```
+
+For a private Hugging Face repository:
+
+```bash
+HF_TOKEN=hf_your_token python3 scripts/validate_model.py owner/model
+```
+
+The script also accepts the token from the `HF_TOKEN` environment variable.
+
+### Validation stages
+
+1. Read repository metadata and detect the model architecture.
+2. Download all repository files while preserving nested directories.
+3. Validate configuration, tokenizer, and model weight files.
+4. Compute SHA-256 checksums and compare available manifests.
+5. Write validation metadata and finalize the model directory.
+
+Incomplete or invalid downloads are removed automatically.
+
+### Output
+
+Validated models are stored under:
+
+```text
+downloads/models/<owner>_<model>/
+├── config.json
+├── tokenizer.json
+├── tokenizer_config.json
+├── onnx/
+├── checksums.json
+└── sqlens-model.json
+```
+
+The `sqlens-model.json` file contains the model ID, source URL, detected architecture, and validation status.
+
+### Requirements
+
+A model must contain:
+
+- `config.json`
+- At least one supported weight file:
+  - `.safetensors`
+  - `.bin`
+  - `.pt`
+  - `.pth`
+- At least one tokenizer asset:
+  - `tokenizer.json`
+  - `tokenizer.model`
+  - `vocab.json`
+  - `spiece.model`
+
+For the local Transformers.js inference route, the model must additionally contain compatible ONNX weights, such as:
+
+```text
+onnx/model_quantized.onnx
+```
+
+Original Hugging Face repositories containing only `.safetensors` files are valid Transformer repositories but cannot be executed by the current ONNX-based Transformers.js route.
+
+### Failure behavior
+
+If required files are missing, files are empty, checksums do not match, or the repository cannot be downloaded, the script exits with status `1` and removes the temporary download.

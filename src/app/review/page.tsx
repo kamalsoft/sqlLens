@@ -1,162 +1,246 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import {
-  Box, Container, Heading, Text, Textarea, Button, Flex,
-  Spinner, Badge, Input,
-} from '@chakra-ui/react';
-import { ReviewPanel } from '@/components/review/ReviewPanel';
-import { ReviewResult } from '@/lib/ai-transformer';
+import { useEffect, useState } from "react";
+
+type Model = {
+  id: string;
+  name: string;
+  directory?: string;
+  compatible: boolean;
+};
+
+type ReviewResponse = {
+  model?: string;
+  result?: string;
+  error?: string;
+};
 
 export default function ReviewPage() {
-  const [sp, setSp] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<ReviewResult | null>(null);
-  const [sharedToken, setSharedToken] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [models, setModels] = useState<Model[]>([]);
+  const [modelId, setModelId] = useState("");
+  const [sql, setSql] = useState("");
+  const [result, setResult] = useState("");
+  const [error, setError] = useState("");
+  const [loadingModels, setLoadingModels] = useState(true);
+  const [analyzing, setAnalyzing] = useState(false);
 
-  async function handleReview() {
-    if (!sp.trim()) return;
-    setLoading(true);
-    setError(null);
-    setResult(null);
-    setSharedToken(null);
+  useEffect(() => {
+    async function loadModels() {
+      try {
+        const response = await fetch("/api/review/models", {
+          cache: "no-store",
+        });
+
+        const payload = (await response.json()) as {
+          models?: Model[];
+          error?: string;
+        };
+
+        if (!response.ok) {
+          throw new Error(payload.error || "Unable to load installed models");
+        }
+
+        const installedModels = payload.models ?? [];
+        setModels(installedModels);
+        setModelId(installedModels[0]?.id ?? "");
+      } catch (cause) {
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : "Unable to load installed models"
+        );
+      } finally {
+        setLoadingModels(false);
+      }
+    }
+
+    void loadModels();
+  }, []);
+
+  async function analyzeProcedure() {
+    const procedure = sql.trim();
+
+    if (!modelId) {
+      setError("Select an installed model.");
+      return;
+    }
+
+    if (!procedure) {
+      setError("Paste a stored procedure before analyzing.");
+      return;
+    }
+
+    setAnalyzing(true);
+    setError("");
+    setResult("");
+
     try {
-      const res = await fetch('/api/review', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ storedProcedure: sp }),
+      const response = await fetch("/api/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          modelId,
+          sql: procedure,
+          max_new_tokens: 1200,
+          temperature: 0.2,
+          do_sample: false,
+          return_full_text: false,
+        }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Analysis failed');
-      setResult(data.result);
-      setSharedToken(data.sharedToken);
-    } catch (e: any) {
-      setError(e.message);
+
+      const payload = (await response.json()) as ReviewResponse;
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Stored procedure analysis failed");
+      }
+
+      if (!payload.result) {
+        throw new Error("The selected model returned an empty result.");
+      }
+
+      setResult(payload.result);
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Stored procedure analysis failed"
+      );
     } finally {
-      setLoading(false);
+      setAnalyzing(false);
     }
   }
 
-  function copyShareLink() {
-    if (!sharedToken) return;
-    navigator.clipboard.writeText(`${window.location.origin}/share/${sharedToken}`);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
+  const selectedModel = models.find((model) => model.id === modelId);
+  const canAnalyze = Boolean(
+    selectedModel?.compatible && sql.trim() && !analyzing
+  );
+
+  const compatibleModels = models.filter((model) => model.compatible);
 
   return (
-    <Box minH="100vh" bg="gray.950" color="white">
-      <Container maxW="container.xl" py={10}>
+    <main className="review-page">
+      <header className="review-hero">
+        <div>
+          <span className="review-eyebrow">R001</span>
+          <h1>Review Stored Procedure</h1>
+          <p>
+            Select an installed Hugging Face model and analyze a SQL Server
+            stored procedure locally.
+          </p>
+        </div>
+      </header>
 
-        {/* Page Header */}
-        <Box mb={8}>
-          <Flex align="center" gap={3} mb={2}>
-            <Badge colorPalette="blue" size="lg" px={3} py={1} borderRadius="full">R001</Badge>
-            <Heading as="h1" size="2xl" bgGradient="to-r" gradientFrom="blue.400" gradientTo="cyan.400" bgClip="text">
-              Review Stored Procedure
-            </Heading>
-          </Flex>
-          <Text color="gray.400" fontSize="lg">
-            Paste your SQL Stored Procedure to get a deep AI-powered analysis with bottleneck detection, 5 Why's, and an actionable verdict.
-          </Text>
-        </Box>
+      {error && (
+        <div className="review-alert" role="alert">
+          {error}
+        </div>
+      )}
 
-        {/* Input Area */}
-        <Box bg="gray.900" borderWidth="1px" borderColor="gray.700" borderRadius="xl" p={6} mb={6}>
-          <Text color="gray.300" fontSize="sm" fontWeight="semibold" mb={3} textTransform="uppercase" letterSpacing="wider">
-            Stored Procedure SQL
-          </Text>
-          <Textarea
-            value={sp}
-            onChange={(e) => setSp(e.target.value)}
-            placeholder={`-- Paste your Stored Procedure here
-CREATE PROCEDURE usp_GetCustomerOrders
-  @CustomerId INT
+      <section className="review-layout">
+        <div className="review-panel">
+          <div className="review-panel-heading">
+            <div>
+              <span className="review-step">01</span>
+              <h2>Configure analysis</h2>
+            </div>
+            <span className="review-local-badge">Local model</span>
+          </div>
+
+          <label className="review-field">
+            <span>Model</span>
+            <select
+              value={modelId}
+              onChange={(event) => {
+                setModelId(event.target.value);
+                setError("");
+              }}
+              disabled={loadingModels || models.length === 0 || analyzing}
+            >
+              {loadingModels ? (
+                <option value="">Loading installed models...</option>
+              ) : models.length === 0 ? (
+                <option value="">
+                  No downloaded models found
+                </option>
+              ) : (
+                compatibleModels.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.name}
+                  </option>
+                ))
+              )}
+            </select>
+
+            {selectedModel && (
+              <small className="review-field-help">
+                {selectedModel.id}
+              </small>
+            )}
+          </label>
+
+          <label className="review-field">
+            <span>Stored procedure</span>
+            <textarea
+              value={sql}
+              onChange={(event) => {
+                setSql(event.target.value);
+                setError("");
+              }}
+              placeholder={`CREATE PROCEDURE dbo.GetOrders
+  @CustomerId int
 AS
 BEGIN
-  SELECT * FROM Orders WHERE CustomerId = @CustomerId
+  SELECT *
+  FROM dbo.Orders
+  WHERE CustomerId = @CustomerId;
 END`}
-            minH="280px"
-            fontFamily="mono"
-            fontSize="sm"
-            bg="gray.950"
-            color="cyan.100"
-            borderColor="gray.600"
-            _focus={{ borderColor: 'blue.500', boxShadow: '0 0 0 1px var(--chakra-colors-blue-500)' }}
-            _placeholder={{ color: 'gray.600' }}
-            resize="vertical"
-          />
+              rows={20}
+              spellCheck={false}
+              disabled={analyzing}
+            />
+            <small className="review-field-help">
+              {sql.length.toLocaleString()} characters
+            </small>
+          </label>
 
-          <Flex justify="space-between" align="center" mt={4}>
-            <Text fontSize="xs" color="gray.500">{sp.length} characters</Text>
-            <Flex gap={3}>
-              {sp && (
-                <Button variant="ghost" colorPalette="gray" size="sm" onClick={() => { setSp(''); setResult(null); setError(null); }}>
-                  Clear
-                </Button>
-              )}
-              <Button
-                colorPalette="blue"
-                size="md"
-                onClick={handleReview}
-                loading={loading}
-                loadingText="Analyzing..."
-                disabled={!sp.trim() || loading}
-                px={8}
-              >
-                🔍 Analyze SP
-              </Button>
-            </Flex>
-          </Flex>
-        </Box>
+          <button
+            type="button"
+            className="review-analyze-button"
+            onClick={() => void analyzeProcedure()}
+            disabled={!canAnalyze}
+          >
+            {analyzing ? "Analyzing stored procedure..." : "Analyze SP"}
+          </button>
+        </div>
 
-        {/* Loading State */}
-        {loading && (
-          <Flex justify="center" align="center" py={16} gap={4} direction="column">
-            <Spinner size="xl" color="blue.400" borderWidth="3px" />
-            <Text color="gray.400">Running deep analysis on your Stored Procedure...</Text>
-          </Flex>
-        )}
+        <div className="review-panel review-results-panel">
+          <div className="review-panel-heading">
+            <div>
+              <span className="review-step">02</span>
+              <h2>Analysis results</h2>
+            </div>
+          </div>
 
-        {/* Error State */}
-        {error && (
-          <Box bg="red.950" borderWidth="1px" borderColor="red.700" borderRadius="xl" p={5} mb={6}>
-            <Text color="red.300" fontWeight="semibold">⚠️ Analysis Failed</Text>
-            <Text color="red.400" fontSize="sm" mt={1}>{error}</Text>
-          </Box>
-        )}
-
-        {/* Results */}
-        {result && !loading && (
-          <Box>
-            {/* Share bar */}
-            {sharedToken && (
-              <Box bg="gray.900" borderWidth="1px" borderColor="gray.700" borderRadius="xl" p={4} mb={6}>
-                <Flex align="center" gap={3}>
-                  <Text color="gray.400" fontSize="sm" flexShrink={0}>🔗 Shareable link:</Text>
-                  <Input
-                    readOnly
-                    value={`${typeof window !== 'undefined' ? window.location.origin : ''}/share/${sharedToken}`}
-                    size="sm"
-                    bg="gray.950"
-                    borderColor="gray.600"
-                    color="blue.300"
-                    fontFamily="mono"
-                    fontSize="xs"
-                  />
-                  <Button size="sm" colorPalette={copied ? 'green' : 'blue'} variant="outline" onClick={copyShareLink} flexShrink={0}>
-                    {copied ? '✓ Copied' : 'Copy'}
-                  </Button>
-                </Flex>
-              </Box>
-            )}
-
-            <ReviewPanel result={result} title="🔬 SP Analysis Results" />
-          </Box>
-        )}
-      </Container>
-    </Box>
+          {analyzing ? (
+            <div className="review-state">
+              <div className="review-spinner" />
+              <strong>Running local analysis</strong>
+              <p>The selected model is processing your procedure.</p>
+            </div>
+          ) : result ? (
+            <pre className="review-result">{result}</pre>
+          ) : (
+            <div className="review-state">
+              <div className="review-state-icon">✦</div>
+              <strong>No analysis yet</strong>
+              <p>
+                Select a model, paste a stored procedure, and choose Analyze
+                SP.
+              </p>
+            </div>
+          )}
+        </div>
+      </section>
+    </main>
   );
 }
