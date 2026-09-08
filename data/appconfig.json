@@ -8,5 +8,9 @@
   "temperature": 0.2,
   "contextWindow": 128000,
   "apiKey": "",
-  "allowTelemetry": false
+  "allowTelemetry": false,
+  "prompt": {
+    "analysisSP": "~/dev/dbPro/sqlens/data/prompts/analysisSP.md",
+    "explainStatistic": "~/dev/dbPro/sqlens/data/prompts/explainStatistic.md"
+  }
 }

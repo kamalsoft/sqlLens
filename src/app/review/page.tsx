@@ -9,9 +9,21 @@ type Model = {
   compatible: boolean;
 };
 
+type AnalysisResult = {
+  summary: string;
+  issues: Array<{
+    severity: "critical" | "high" | "medium" | "low";
+    title: string;
+    explanation: string;
+    recommendation: string;
+  }>;
+  rewrittenProcedure: string;
+  confidence: number;
+};
+
 type ReviewResponse = {
   model?: string;
-  result?: string;
+  result?: AnalysisResult;
   error?: string;
 };
 
@@ -19,7 +31,7 @@ export default function ReviewPage() {
   const [models, setModels] = useState<Model[]>([]);
   const [modelId, setModelId] = useState("");
   const [sql, setSql] = useState("");
-  const [result, setResult] = useState("");
+  const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState("");
   const [loadingModels, setLoadingModels] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
@@ -72,7 +84,7 @@ export default function ReviewPage() {
 
     setAnalyzing(true);
     setError("");
-    setResult("");
+    setResult(null);
 
     try {
       const response = await fetch("/api/review", {
@@ -228,7 +240,26 @@ END`}
               <p>The selected model is processing your procedure.</p>
             </div>
           ) : result ? (
-            <pre className="review-result">{result}</pre>
+            <section>
+              <h3>Summary</h3>
+              <p>{result.summary}</p>
+
+              <h3>Issues</h3>
+              {result.issues.map((issue, index) => (
+                <article key={`${issue.title}-${index}`}>
+                  <strong>
+                    {issue.severity.toUpperCase()}: {issue.title}
+                  </strong>
+                  <p>{issue.explanation}</p>
+                  <p>{issue.recommendation}</p>
+                </article>
+              ))}
+
+              <h3>Rewritten Procedure</h3>
+              <pre>{result.rewrittenProcedure}</pre>
+
+              <p>Confidence: {result.confidence}</p>
+            </section>
           ) : (
             <div className="review-state">
               <div className="review-state-icon">✦</div>

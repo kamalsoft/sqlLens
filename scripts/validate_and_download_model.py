@@ -9,9 +9,10 @@ import tempfile
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote
-
+from urllib.request import Request, urlopen
+import re
 
 ROOT = Path(__file__).resolve().parents[1] / "downloads" / "models"
 
@@ -25,22 +26,48 @@ WEIGHT_EXTENSIONS = (
 
 PRESERVE_FAILED_DOWNLOADS = True
 
+MODEL_ID_PART = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+REJECTED_CONTENT_TYPES = {
+    "text/html",
+    "application/xhtml+xml",
+}
 
 class ModelValidationError(Exception):
     pass
 
 
-def fetch_json(url: str, token: str | None = None):
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
-    request = Request(url, headers=headers)
+def get_headers(token: str | None = None) -> dict[str, str]:
+    headers = {"User-Agent": "sqlens-model-validator/1.0"}
+    if token and token.strip() and token.strip().lower() != "none":
+        headers["Authorization"] = f"Bearer {token.strip()}"
+    return headers
 
-    with urlopen(request, timeout=60) as response:
-        return json.loads(response.read())
+
+def fetch_json(url: str, token: str | None = None):
+    request = Request(url, headers=get_headers(token))
+
+    try:
+        with urlopen(request, timeout=60) as response:
+            return json.loads(response.read())
+    except HTTPError as error:
+        if error.code == 401:
+            raise ModelValidationError(
+                "Hugging Face returned 401 Unauthorized. "
+                "The token is missing, expired, or lacks repository access."
+            ) from error
+        if error.code == 404:
+            raise ModelValidationError(
+                "Hugging Face returned 404 Not Found. "
+                "Check the model spelling and letter casing."
+            ) from error
+        raise ModelValidationError(
+            f"Hugging Face metadata request failed with HTTP {error.code}"
+        ) from error
 
 
 def download_file(url: str, destination: Path, token: str | None = None):
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
-    request = Request(url, headers=headers)
+    request = Request(url, headers=get_headers(token))
 
     destination.parent.mkdir(parents=True, exist_ok=True)
 
@@ -113,15 +140,10 @@ def discover_architecture(metadata: dict) -> dict:
 
 
 def validate_structure(root: Path, files: list[str], architecture: dict):
-    relative_files = {
-        file.replace(os.sep, "/")
-        for file in files
-    }
+    relative_files = {file.replace(os.sep, "/") for file in files}
 
     weights = sorted(
-        file
-        for file in relative_files
-        if file.lower().endswith(WEIGHT_EXTENSIONS)
+        file for file in relative_files if file.lower().endswith(WEIGHT_EXTENSIONS)
     )
 
     missing = []
@@ -131,8 +153,7 @@ def validate_structure(root: Path, files: list[str], architecture: dict):
 
     if not weights:
         missing.append(
-            "at least one model weight file "
-            "(.safetensors, .bin, .pt, .pth, or .onnx)"
+            "at least one model weight file (.safetensors, .bin, .pt, .pth, or .onnx)"
         )
 
     tokenizer_files = {
@@ -142,9 +163,7 @@ def validate_structure(root: Path, files: list[str], architecture: dict):
         "spiece.model",
     }
 
-    tokenizer_matches = sorted(
-        relative_files.intersection(tokenizer_files)
-    )
+    tokenizer_matches = sorted(relative_files.intersection(tokenizer_files))
 
     if not tokenizer_matches:
         missing.append("tokenizer asset")
@@ -152,8 +171,7 @@ def validate_structure(root: Path, files: list[str], architecture: dict):
     empty = sorted(
         file
         for file in relative_files
-        if (root / file).is_file()
-        and (root / file).stat().st_size == 0
+        if (root / file).is_file() and (root / file).stat().st_size == 0
     )
 
     if missing or empty:
@@ -171,9 +189,7 @@ def validate_structure(root: Path, files: list[str], architecture: dict):
         raise ModelValidationError(
             json.dumps(
                 {
-                    "message": (
-                        f"Invalid {architecture['family']} model structure"
-                    ),
+                    "message": f"Invalid {architecture['family']} model structure",
                     "details": details,
                 },
                 indent=2,
@@ -268,23 +284,23 @@ def write_failure_report(
 
 
 def download_model(model_id: str, token: str | None):
-    if "/" not in model_id:
-        raise ModelValidationError("Model ID must use the owner/model format")
+    owner, repository = validate_model_id(model_id)
 
-    owner, repository = model_id.split("/", 1)
     destination = ROOT / model_id.replace("/", "_")
-    temporary = Path(tempfile.mkdtemp(prefix=f"{destination.name}.", dir=ROOT))
+    temporary = Path(
+        tempfile.mkdtemp(prefix=f"{destination.name}.", dir=ROOT)
+    )
 
     try:
         print(f"[1/5] Reading repository metadata: {model_id}")
 
         api_url = (
             f"https://huggingface.co/api/models/"
-            f"{quote(owner)}/{quote(repository)}"
+            f"{quote(owner, safe='')}/{quote(repository, safe='')}"
         )
+
         metadata = fetch_json(api_url, token)
         architecture = discover_architecture(metadata)
-        print(f"      Architecture: {architecture}")
 
         siblings = metadata.get("siblings", [])
         files = [
@@ -293,10 +309,9 @@ def download_model(model_id: str, token: str | None):
             if item.get("rfilename")
         ]
 
-        if not files:
-            raise ModelValidationError("Repository contains no files")
+        preflight_model(model_id, metadata, files, token)
 
-        print(f"[2/5] Mirroring {len(files)} repository files")
+        print(f"[3/5] Mirroring {len(files)} repository files")
 
         expected: dict[str, str] = {}
 
@@ -308,17 +323,19 @@ def download_model(model_id: str, token: str | None):
                 expected[filename] = lfs["sha256"]
 
         for filename in files:
-            encoded_path = "/".join(quote(part) for part in filename.split("/"))
+            encoded_path = "/".join(
+                quote(part, safe="") for part in filename.split("/")
+            )
             url = (
-                f"https://huggingface.co/{quote(owner)}/"
-                f"{quote(repository)}/resolve/main/{encoded_path}"
+                f"https://huggingface.co/{quote(owner, safe='')}/"
+                f"{quote(repository, safe='')}/resolve/main/{encoded_path}"
             )
             download_file(url, temporary / filename, token)
 
-        print("[3/5] Validating directory structure")
+        print("[4/5] Validating directory structure")
         validate_structure(temporary, files, architecture)
 
-        print("[4/5] Verifying checksums")
+        print("[5/5] Verifying checksums")
         expected.update(parse_checksum_manifests(temporary))
         verify_checksums(temporary, expected)
 
@@ -356,6 +373,98 @@ def download_model(model_id: str, token: str | None):
             )
 
         raise
+
+
+def validate_model_id(model_id: str) -> tuple[str, str]:
+    value = model_id.strip()
+    parts = value.split("/")
+
+    if (
+        value != model_id
+        or len(parts) != 2
+        or not all(MODEL_ID_PART.fullmatch(part) for part in parts)
+    ):
+        raise ModelValidationError(
+            f"Invalid model ID {model_id!r}. Expected exact owner/model spelling."
+        )
+
+    return parts[0], parts[1]
+
+
+def head_file(url: str, token: str | None = None) -> dict[str, str]:
+    request = Request(
+        url,
+        headers=get_headers(token),
+        method="HEAD",
+    )
+
+    try:
+        with urlopen(request, timeout=60) as response:
+            content_type = response.headers.get(
+                "Content-Type",
+                "",
+            ).split(";", 1)[0].lower()
+
+            if content_type in REJECTED_CONTENT_TYPES:
+                raise ModelValidationError(
+                    f"Expected model file but received {content_type}: {url}"
+                )
+
+            return {
+                "status": str(response.status),
+                "contentType": content_type,
+                "contentLength": response.headers.get(
+                    "Content-Length",
+                    "",
+                ),
+                "etag": response.headers.get("ETag", ""),
+            }
+    except HTTPError as error:
+        raise ModelValidationError(
+            f"Header check failed with HTTP {error.code}: {url}"
+        ) from error
+    except URLError as error:
+        raise ModelValidationError(
+            f"Header check failed for {url}: {error.reason}"
+        ) from error
+
+
+def preflight_model(
+    model_id: str,
+    metadata: dict,
+    files: list[str],
+    token: str | None,
+):
+    returned_id = metadata.get("id")
+
+    if returned_id and returned_id != model_id:
+        raise ModelValidationError(
+            f"Model ID mismatch: requested {model_id!r}, "
+            f"Hub returned {returned_id!r}"
+        )
+
+    if not files:
+        raise ModelValidationError(
+            f"Repository {model_id!r} contains no downloadable files"
+        )
+
+    owner, repository = model_id.split("/", 1)
+    print(f"[2/5] Verifying headers for {len(files)} files")
+
+    header_report: dict[str, dict[str, str]] = {}
+
+    for filename in files:
+        encoded_path = "/".join(
+            quote(part, safe="") for part in filename.split("/")
+        )
+        url = (
+            f"https://huggingface.co/{quote(owner, safe='')}/"
+            f"{quote(repository, safe='')}/resolve/main/{encoded_path}"
+        )
+
+        header_report[filename] = head_file(url, token)
+
+    metadata["_sqlensHeaderReport"] = header_report
 
 
 def main():

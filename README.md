@@ -233,21 +233,22 @@ SQLLens can be considered minimally complete when a user can:
 
 ## Download and Validate Transformer Models
 
-The `scripts/validate_model.py` script downloads a Hugging Face model, mirrors its repository structure, validates required files, computes SHA-256 checksums, and only finalizes the model after successful validation.
+The `scripts/validate_and_download_model.py` script downloads a Hugging Face model, mirrors its repository structure, validates required files, computes SHA-256 checksums, and only finalizes the model after successful validation.
 
 ### Usage
 
 ```bash
 cd /Users/kamalsoft/dev/dbPro/sqlens
 
-python3 scripts/validate_model.py \
+python3 scripts/validate_and_download_model.py \
   onnx-community/Qwen2.5-0.5B-Instruct-ONNX
 ```
+
 
 For a private Hugging Face repository:
 
 ```bash
-HF_TOKEN=hf_your_token python3 scripts/validate_model.py owner/model
+HF_TOKEN=hf_your_token python3 scripts/validate_and_download_model.py owner/model
 ```
 
 The script also accepts the token from the `HF_TOKEN` environment variable.
@@ -305,3 +306,5 @@ Original Hugging Face repositories containing only `.safetensors` files are vali
 ### Failure behavior
 
 If required files are missing, files are empty, checksums do not match, or the repository cannot be downloaded, the script exits with status `1` and removes the temporary download.
+
+
