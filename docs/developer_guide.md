@@ -859,3 +859,67 @@ Check documentation status:
 git status --short docs
 git add docs
 ```
+
+## Development Do's and Don'ts
+
+### Do
+
+- Read `AGENTS.md` before modifying Next.js code.
+- Review the relevant Next.js guidance under `node_modules/next/dist/docs/` before changing framework APIs or conventions.
+- Keep filesystem, model, and database operations in server-side modules.
+- Read `downloadDirectory` from `data/appconfig.json`; do not hard-code local paths.
+- Validate model identifiers, model metadata, downloaded files, and ONNX compatibility.
+- Treat SQL input as untrusted text.
+- Validate and sanitize API input and model-generated JSON.
+- Keep prompt changes synchronized with API parsing and UI rendering.
+- Run the applicable build, lint, test, and Python validation commands before submitting changes.
+- Update relevant documentation when routes, configuration, prompts, scripts, or workflows change.
+- Keep secrets, model weights, generated files, and local configuration out of Git.
+- Use focused branches and commits.
+- Preserve failed model-download reports for diagnosis.
+
+### Don't
+
+- Do not assume current Next.js behavior from prior versions.
+- Do not modify framework APIs without consulting the installed Next.js documentation.
+- Do not execute submitted SQL without explicit authorization and safety controls.
+- Do not expose SQL text, credentials, access tokens, connection strings, or local paths in logs or responses.
+- Do not render an entire response object directly as a React child.
+- Do not treat a directory containing only `config.json` as a valid model.
+- Do not rename Safetensors, GGUF, or MLX files to ONNX filenames.
+- Do not use hard-coded developer-specific paths.
+- Do not commit `keys.md`, `.env*`, Hugging Face tokens, model files, `.next/`, `node_modules/`, or Python cache files.
+- Do not claim an endpoint, script, migration, test, or feature is implemented solely because a filename exists.
+- Do not change prompt output schemas without updating validation, types, UI code, and documentation.
+- Do not delete failed downloads before reviewing their validation report.
+- Do not bypass authentication or authorization checks for convenience.
+- Do not commit generated changes without reviewing `git diff`.
+- Do not mark a roadmap feature `[COMPLETED]` without runtime verification.
+
+### Required checks
+
+```bash
+git diff --check
+npm run
+npm run build
+python3 -m py_compile scripts/validate_and_download_model.py
+```
+
+Run linting and tests only when the corresponding scripts exist in `package.json`.
+
+Before committing:
+
+```bash
+git status --short
+git diff --stat
+git diff --cached --check
+```
+
+## Agent and Documentation Maintenance
+
+`AGENTS.md` is the authoritative guide for automated coding agents. `CLAUDE.md`
+delegates to it and should not duplicate its rules.
+
+When repository behavior changes, update the appropriate documentation and verify
+that README links resolve. Keep roadmap statuses evidence-based and do not document
+unverified routes, scripts, migrations, or runtime behavior.
