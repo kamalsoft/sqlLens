@@ -307,4 +307,14 @@ Original Hugging Face repositories containing only `.safetensors` files are vali
 
 If required files are missing, files are empty, checksums do not match, or the repository cannot be downloaded, the script exits with status `1` and removes the temporary download.
 
+## Documentation
 
+- [Developer Guide](docs/developer_guide.md)
+- [Architecture](docs/architecture.md)
+- [API Reference](docs/api.md)
+- [Configuration](docs/configuration.md)
+- [Model Management](docs/model-management.md)
+- [Prompting](docs/prompting.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Contributing](docs/contributing.md)
+- [Changelog](docs/changelog.md)
