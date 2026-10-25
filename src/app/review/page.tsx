@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { useApi } from "@/components/api-client";
 import { ReviewResultView } from "@/components/review/ReviewResultView";
+import { NOT_SQL_ERROR, looksLikeSql } from "@/lib/validation/sql-input";
 import {
-  DEFAULT_SCHEMA_VERSION,
   type ReviewV1,
   type ReviewV2,
   type SchemaVersion,
@@ -15,6 +15,8 @@ type Model = {
   name: string;
   directory?: string;
   compatible: boolean;
+  parameterEstimate?: number | null;
+  small?: boolean;
 };
 
 type ModelStatus = {
@@ -30,16 +32,49 @@ type ReviewResponse = {
   id?: string;
   model?: string;
   schemaVersion?: SchemaVersion;
+  lowConfidence?: boolean;
+  schemaFallback?: boolean;
   promptPath?: string;
   result?: ReviewV1 | ReviewV2;
 };
 
-type ReviewOutput = { schemaVersion: SchemaVersion; result: ReviewV1 | ReviewV2 };
+type ReviewOutput = {
+  schemaVersion: SchemaVersion;
+  result: ReviewV1 | ReviewV2;
+  lowConfidence: boolean;
+  schemaFallback: boolean;
+};
+
+/** Strips Markdown code fences and pretty-prints the JSON part when it parses. */
+function formatRawOutput(text: string): string {
+  const unfenced = text.replace(/^\s*```[a-z]*\s*$/gim, "").trim();
+  const start = unfenced.indexOf("{");
+  const end = unfenced.lastIndexOf("}");
+  if (start === -1 || end <= start) return unfenced;
+  try {
+    const pretty = JSON.stringify(JSON.parse(unfenced.slice(start, end + 1)), null, 2);
+    return [unfenced.slice(0, start).trim(), pretty, unfenced.slice(end + 1).trim()]
+      .filter(Boolean)
+      .join("\n\n");
+  } catch {
+    return unfenced;
+  }
+}
+
+function sizeLabel(model: Model): string | null {
+  if (typeof model.parameterEstimate !== "number") return null;
+  const b = model.parameterEstimate / 1e9;
+  const size = `~${Number(b.toFixed(b < 10 ? 1 : 0))}B parameters`;
+  return model.small ? `${size} — small model; Auto uses v1` : `${size}; Auto uses v2`;
+}
 
 function failureMessage(status: number, error: string | null): string {
   if (status === 429) return `The reviewer is busy. ${error ?? "Wait for the current review to finish, then retry."}`;
   if (status === 504) return "The model timed out. Try a smaller input or a smaller model.";
-  if (status === 502) return "The model's output could not be parsed as a valid review.";
+  if (status === 502) {
+    const generic = "The model's output could not be parsed as a valid review.";
+    return error && error !== "Unable to parse model response" ? `${generic} ${error}` : generic;
+  }
   return error ?? "Stored procedure analysis failed";
 }
 
@@ -49,11 +84,11 @@ export default function ReviewPage() {
   const [modelId, setModelId] = useState("");
   const [sql, setSql] = useState("");
   const [result, setResult] = useState<ReviewOutput | null>(null);
-  const [schemaVersion, setSchemaVersion] = useState<SchemaVersion>(DEFAULT_SCHEMA_VERSION);
+  const [schemaVersion, setSchemaVersion] = useState<SchemaVersion | "auto">("auto");
   const [statuses, setStatuses] = useState<ModelStatus[]>([]);
   const [audits, setAudits] = useState<AuditItem[]>([]);
   const [executionAuditId, setExecutionAuditId] = useState("");
-  const [details, setDetails] = useState("");
+  const [rawOutput, setRawOutput] = useState<{ text: string; validation: string } | null>(null);
   const [error, setError] = useState("");
   const [loadingModels, setLoadingModels] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
@@ -109,10 +144,15 @@ export default function ReviewPage() {
       return;
     }
 
+    if (!looksLikeSql(procedure)) {
+      setError(NOT_SQL_ERROR);
+      return;
+    }
+
     setAnalyzing(true);
     setError("");
     setResult(null);
-    setDetails("");
+    setRawOutput(null);
 
     const res = await api<ReviewResponse>(
       "/api/review",
@@ -122,7 +162,7 @@ export default function ReviewPage() {
         body: JSON.stringify({
           modelId,
           sql: procedure,
-          schemaVersion,
+          ...(schemaVersion === "auto" ? {} : { schemaVersion }),
           ...(executionAuditId ? { executionAuditId } : {}),
         }),
       },
@@ -132,7 +172,9 @@ export default function ReviewPage() {
     if (res.ok) {
       if (res.data?.result) {
         setResult({
-          schemaVersion: res.data.schemaVersion ?? schemaVersion,
+          schemaVersion: res.data.schemaVersion ?? (schemaVersion === "auto" ? "v2" : schemaVersion),
+          lowConfidence: res.data.lowConfidence === true,
+          schemaFallback: res.data.schemaFallback === true,
           result: res.data.result,
         });
       } else {
@@ -140,9 +182,29 @@ export default function ReviewPage() {
       }
     } else if (res.status !== 401) {
       setError(failureMessage(res.status, res.error));
-      const d = res.details as { responsePreview?: unknown } | null;
+      const d = res.details as
+        | {
+            message?: unknown;
+            responseText?: unknown;
+            responsePreview?: unknown;
+            responseTail?: unknown;
+            responseCharacters?: unknown;
+          }
+        | null;
       if (res.status === 502 && d && typeof d.responsePreview === "string") {
-        setDetails(d.responsePreview);
+        let text: string;
+        if (typeof d.responseText === "string") {
+          text = d.responseText;
+        } else {
+          const parts = [d.responsePreview];
+          if (typeof d.responseCharacters === "number" && d.responseCharacters > d.responsePreview.length) {
+            const tail = typeof d.responseTail === "string" ? d.responseTail : "";
+            parts.push(`… (${d.responseCharacters} characters) …`, tail);
+          }
+          text = parts.join("\n");
+        }
+        const validation = typeof d.message === "string" ? d.message.split("; response ended with:")[0] : "";
+        setRawOutput({ text: formatRawOutput(text), validation });
       }
     }
     setAnalyzing(false);
@@ -172,7 +234,6 @@ export default function ReviewPage() {
       {error && (
         <div className="review-alert" role="alert">
           {error}
-          {details && <pre aria-label="Response preview">{details}</pre>}
         </div>
       )}
 
@@ -214,6 +275,12 @@ export default function ReviewPage() {
             {selectedModel && (
               <small className="review-field-help">
                 {selectedModel.id}
+                {sizeLabel(selectedModel) && (
+                  <>
+                    {" "}
+                    <span data-testid="model-size">{sizeLabel(selectedModel)}</span>
+                  </>
+                )}
               </small>
             )}
           </label>
@@ -234,9 +301,10 @@ export default function ReviewPage() {
             <span>Result schema</span>
             <select
               value={schemaVersion}
-              onChange={(event) => setSchemaVersion(event.target.value as SchemaVersion)}
+              onChange={(event) => setSchemaVersion(event.target.value as SchemaVersion | "auto")}
               disabled={analyzing}
             >
+              <option value="auto">Auto (recommended)</option>
               <option value="v2">v2 (tables: findings, performance, security, testing)</option>
               <option value="v1">v1 (summary and issues)</option>
             </select>
@@ -310,7 +378,28 @@ END`}
               <p>The selected model is processing your procedure.</p>
             </div>
           ) : result ? (
-            <ReviewResultView schemaVersion={result.schemaVersion} result={result.result} />
+            <>
+              {result.lowConfidence && (
+                <div className="review-alert" role="note" data-testid="low-confidence">
+                  Small model — low-confidence results; verify every finding
+                </div>
+              )}
+              {result.schemaFallback && (
+                <div className="review-alert" role="note" data-testid="schema-fallback">
+                  The model answered in the simpler v1 format instead of the requested v2 tables.
+                </div>
+              )}
+              <ReviewResultView schemaVersion={result.schemaVersion} result={result.result} />
+            </>
+          ) : rawOutput ? (
+            <>
+              <div className="review-alert" role="note" data-testid="raw-output-note">
+                The model&apos;s answer could not be turned into structured findings, so its raw
+                output is shown below. Treat it as unverified and check every claim.
+              </div>
+              <pre className="review-code" aria-label="Response preview">{rawOutput.text}</pre>
+              {rawOutput.validation && <p>Validation: {rawOutput.validation}</p>}
+            </>
           ) : (
             <div className="review-state">
               <div className="review-state-icon">✦</div>

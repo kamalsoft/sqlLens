@@ -1,8 +1,8 @@
 # Now
 
-- **PAUSED** (user, 2026-10-24). No agent running.
-- At pause: typecheck 0, `npm test` 230/230. Nothing committed.
-- Done: W0. W1 complete. Of W2–W4: P2-01–P2-07, P6-08, P3-01–P3-07 (P3-07 UI), P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P1-04, P6-03b/c, P6-06/P6-07 (backend and execute parts).
-- Interrupted (may be partially edited, check before resuming): ai-models #6/P4-01/P4-02/P5-x; frontend P2-08.
-- Pending: security sign-off on execution, share and fixes (was interrupted); P4-01, P4-02, P5-01–P5-08, P2-08, P5-07, P7-02–P7-10; sql-engine fix (store `comparison.metrics`); backend fix (share status on the audit record).
-- User action: run `npm run admin:set-password` (migration 002 deactivated old sessions).
+- **IDLE**, waiting on the user (2026-10-25). No agent running. Nothing committed.
+- Lead-verified: typecheck 0, eslint 0, `npm test` 272/272, `git diff --check` clean.
+- Done this session: backend share status; P2-08 (+ fixes); ai-models #6, P4-01, P4-02; security part 2 + Low fixes; D-034 C; lint to 0; hydration fix (Emotion registry); overview null crash; maxNewTokens + evidence filter + 502 details; D-035 C (model-size, auto v1, lowConfidence, catalog Qwen2.5-1.5B-Instruct, review UI).
+- User: downloading `onnx-community/Qwen2.5-1.5B-Instruct` through Manage Models (~1.6 GB).
+- Pending: security sign-off on D-034 and ai-models changes (download safeRemove, review/compare owner lookups, telemetry in prompts); drop `textFilePath` from ExecutionResult (sql-engine); compare + share pages to compare-v1 (frontend); P5-01–P5-06; P5-08 (+ Python downloader allow-list, ~17 GB today); P5-07; P7-02–P7-10.
+- User action: `npm run admin:set-password`.

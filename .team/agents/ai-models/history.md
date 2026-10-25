@@ -15,3 +15,8 @@ Append-only learnings (date, task ID, fact, evidence path:line). Scribe promotes
 - `downloadDirectory` config rule now requires a path under $HOME (backend), so route tests bypass it by mocking `readAppConfig` in tests/unit/review-route.test.ts.
 - Prompts: templates hold a bare `{{STORED_PROCEDURE}}`; `buildPrompt` adds the `<stored_procedure>` tags (do not add tags in the template).
 - Experiment (Qwen2.5-0.5B q4, temp 0.2, 700 tokens, dynamic-SQL sample): first rewrite (placeholder-free example) 0/7 valid (unterminated strings, severity "none", missing testingTable.test). After adding a "single line, \n escapes, all keys" rule and a quote-free example: 3/5 valid, failures = truncation at 700 tokens and a malformed array. Enum copying is gone. Small sample, not statistically meaningful.
+
+## 2026-10-25 W1#6, P4-01, P4-02
+- Download route: all rm calls go through safeRemove (path containment vs download root); unsafe modelId -> 400; cleanup errors logged, never returned.
+- Shared helpers: extract-json, model-run (resolve + error mapping), review-telemetry, compare (schema + prompt, single-pass placeholder replace).
+- Compare persists response {result, metrics, originalAuditId, optimizedAuditId}; elapsed_ms/logical_reads columns left null to avoid double-counting stats.

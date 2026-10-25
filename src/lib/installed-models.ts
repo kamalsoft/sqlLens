@@ -2,6 +2,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { readAppConfig } from "@/lib/app-config";
+import { isSmallModel, readParameterEstimate } from "@/lib/model-size";
 
 type ModelMetadata = {
   modelId?: string;
@@ -13,6 +14,10 @@ export type InstalledModel = {
   name: string;
   directory: string;
   compatible: boolean;
+  /** Estimated parameters from config.json, or null when unknown. */
+  parameterEstimate: number | null;
+  /** True when the estimate is known and under 1B. */
+  small: boolean;
 };
 
 const ONNX_MODEL_NAMES = new Set([
@@ -88,11 +93,14 @@ export async function getInstalledModels(): Promise<InstalledModel[]> {
         continue;
       }
 
+      const parameterEstimate = await readParameterEstimate(directory);
       models.push({
         id,
         name: id,
         directory,
         compatible: true,
+        parameterEstimate,
+        small: isSmallModel(parameterEstimate),
       });
     } catch {
       // Ignore incomplete or non-ONNX model directories.

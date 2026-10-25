@@ -1,4 +1,5 @@
 import "server-only";
+import { realpathSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -21,6 +22,7 @@ export type AppConfig = {
   defaultEngine: Engine;
   maxSqlLength: number;
   inferenceTimeoutMs: number;
+  maxNewTokens: number;
   logSqlText: boolean;
   shareTtlHours: number;
 };
@@ -40,6 +42,7 @@ export const defaultAppConfig: AppConfig = {
   defaultEngine: "simulation",
   maxSqlLength: 100000,
   inferenceTimeoutMs: 120000,
+  maxNewTokens: 1536,
   logSqlText: true,
   shareTtlHours: 24,
 };
@@ -51,11 +54,40 @@ export function resolveDownloadDirectory(value: string): string {
   return path.resolve(expanded);
 }
 
+/** realpath of the nearest existing ancestor, with the non-existent tail re-appended. */
+function realpathNearest(p: string): string {
+  const tail: string[] = [];
+  let cur = p;
+  for (;;) {
+    try {
+      return path.join(realpathSync(cur), ...tail.reverse());
+    } catch {
+      const parent = path.dirname(cur);
+      if (parent === cur) return p;
+      tail.push(path.basename(cur));
+      cur = parent;
+    }
+  }
+}
+
+function underHome(home: string, target: string): boolean {
+  if (target === home || !target.startsWith(home + path.sep)) return false;
+  // Reject dot-directories (~/.ssh, ~/.aws, ...) directly under home.
+  return !path.relative(home, target).split(path.sep)[0].startsWith(".");
+}
+
 const safeDirectory: Rule = (v) => {
   if (typeof v !== "string" || v.length === 0 || v.length > 1024 || v.includes("\0")) return false;
   const home = path.resolve(os.homedir());
   const resolved = resolveDownloadDirectory(v);
-  return path.isAbsolute(resolved) && resolved !== home && resolved.startsWith(home + path.sep);
+  if (!path.isAbsolute(resolved) || !underHome(home, resolved)) return false;
+  let realHome: string;
+  try {
+    realHome = realpathSync(home);
+  } catch {
+    return false;
+  }
+  return underHome(realHome, realpathNearest(resolved));
 };
 
 const str: Rule = (v) => typeof v === "string" && v.length > 0 && v.length <= 1024;
@@ -87,8 +119,9 @@ const rules: Record<keyof AppConfig, Rule> = {
   defaultEngine: (v) => v === "simulation" || v === "mssql" || v === "postgres",
   maxSqlLength: int(1, 5_000_000),
   inferenceTimeoutMs: int(1000, 3_600_000),
+  maxNewTokens: int(64, 8192),
   logSqlText: bool,
-  shareTtlHours: int(1, 24 * 365),
+  shareTtlHours: int(1, 720),
 };
 
 /**

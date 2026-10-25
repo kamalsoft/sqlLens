@@ -20,3 +20,14 @@ describe('C17 text log', () => {
     expect(readFileSync(r.textFilePath, 'utf-8')).toContain('secret_column');
   });
 });
+
+describe('scrubConnection', () => {
+  it('scrubs short passwords/users as whole tokens and escapes regex chars', async () => {
+    const { scrubConnection } = await import('@/lib/sp-executor');
+    expect(scrubConnection("Login failed for user 'sa' pw a1", { username: 'sa', password: 'a1' }))
+      .toBe("Login failed for user '[redacted]' pw [redacted]");
+    expect(scrubConnection('bad pw ($', { password: '($' })).toBe('bad pw [redacted]');
+    expect(scrubConnection('cannot parse password', { password: 'a' })).toBe('cannot parse password');
+    expect(scrubConnection('x secret123 y', { password: 'secret123' })).toBe('x [redacted] y');
+  });
+});

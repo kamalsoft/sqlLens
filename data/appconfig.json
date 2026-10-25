@@ -12,7 +12,8 @@
   "queryTimeoutMs": 30000,
   "defaultEngine": "simulation",
   "maxSqlLength": 100000,
-  "inferenceTimeoutMs": 120000,
+  "inferenceTimeoutMs": 600000,
+  "maxNewTokens": 3072,
   "logSqlText": true,
   "shareTtlHours": 24,
   "prompt": {

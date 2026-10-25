@@ -13,6 +13,7 @@ const h = vi.hoisted(() => {
     hang: false,
     cancelled: 0,
     release: null as null | (() => void),
+    trancount: 2,
   };
   return { state };
 });
@@ -27,6 +28,7 @@ vi.mock('mssql', () => {
     async run(text: string) {
       s.texts.push(text);
       if (/^SET STATISTICS/.test(text)) return { recordsets: [] };
+      if (/@@TRANCOUNT/.test(text)) return { recordsets: [[{ tc: s.trancount }]] };
       if (s.hang) await new Promise<void>((_, rej) => { s.release = () => rej(Object.assign(new Error('Canceled.'), { code: 'ECANCEL' })); });
       if (s.failBatch) throw s.failBatch;
       for (const m of s.infos) this.handlers.forEach((cb) => cb({ message: m }));
@@ -69,7 +71,7 @@ const IO = "Table 'Orders'. Scan count 1, logical reads 42, physical reads 2, re
 const TIME = ' SQL Server Execution Times:\n   CPU time = 5 ms,  elapsed time = 9 ms.';
 
 beforeEach(() => {
-  Object.assign(h.state, { calls: [], inputs: [], texts: [], infos: [], recordsets: [], failBatch: null, hang: false, cancelled: 0, release: null });
+  Object.assign(h.state, { calls: [], inputs: [], texts: [], infos: [], recordsets: [], failBatch: null, hang: false, cancelled: 0, release: null, trancount: 2 });
 });
 
 describe('mssql TLS defaults (P6-08)', () => {
@@ -148,6 +150,39 @@ describe('executeMssql', () => {
   it('rejects COMMIT inside a batch before connecting', async () => {
     await expect(executeMssql(conn, { kind: 'batch', sql: 'UPDATE t SET a=1; COMMIT' }, opts)).rejects.toThrow(/Transaction control/);
     expect(h.state.calls).toEqual([]);
+  });
+});
+
+describe('D-034 batch hardening', () => {
+  it.each([
+    'EXEC dbo.p', 'exec(\'COMMIT\')', 'EXECUTE sp_who', 'SELECT 1;exec sp_x',
+    "sp_executesql N'COMMIT'", 'EXEC [sp_executesql] N\'x\'', 'EXEC\n  dbo.p',
+  ])('rejects %s in batch mode before connecting', async (sqlText) => {
+    await expect(executeMssql(conn, { kind: 'batch', sql: sqlText }, opts)).rejects.toThrow(/use procedure mode to run procedures/);
+    expect(h.state.calls).toEqual([]);
+  });
+
+  it('allows the word exec inside strings, comments and identifiers', async () => {
+    await executeMssql(conn, { kind: 'batch', sql: "SELECT 'exec x', [exec] FROM t -- EXEC y" }, opts);
+    expect(h.state.calls).toContain('begin');
+  });
+
+  it('opens a nested transaction and probes @@TRANCOUNT after the batch', async () => {
+    await executeMssql(conn, { kind: 'batch', sql: 'UPDATE t SET a = 1' }, opts);
+    expect(h.state.texts[0]).toContain('BEGIN TRAN');
+    expect(h.state.texts.at(-1)).toContain('@@TRANCOUNT');
+  });
+
+  it('errors and still rolls back when the count drops below 2', async () => {
+    h.state.trancount = 1;
+    await expect(executeMssql(conn, { kind: 'batch', sql: 'SELECT 1' }, opts)).rejects.toThrow(/escaped the batch/);
+    expect(h.state.calls).toEqual(['connect', 'begin', 'rollback', 'close']);
+  });
+
+  it('procedure mode is unchanged (no transaction, no probe)', async () => {
+    await executeMssql(conn, { kind: 'procedure', name: 'dbo.p', params: [] }, opts);
+    expect(h.state.texts.join('\n')).not.toMatch(/BEGIN TRAN|@@TRANCOUNT/);
+    expect(h.state.calls).not.toContain('begin');
   });
 });
 

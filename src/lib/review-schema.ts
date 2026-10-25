@@ -38,6 +38,27 @@ const SECURITY_AREAS = [
   "input_validation",
 ] as const;
 
+/**
+ * A suggested nonclustered index. The model proposes table and columns; the
+ * route keeps it only when they appear in the SQL and adds `createStatement`.
+ */
+export type IndexRecommendation = {
+  table: string;
+  keyColumns: string[];
+  includeColumns: string[];
+  reason: string;
+  evidence: string;
+  createStatement?: string;
+};
+
+/**
+ * Server-set outcome of the rewrite: provided, none (model returned ""),
+ * invalid (not SQL, removed), unsafe (writes to tables the original does not,
+ * removed; `rewriteDetail` names them) or truncated (cut off by the token
+ * limit, removed).
+ */
+export type RewriteStatus = "provided" | "none" | "invalid" | "unsafe" | "truncated";
+
 export type ReviewV1 = {
   summary: string;
   issues: Array<{
@@ -48,6 +69,10 @@ export type ReviewV1 = {
   }>;
   rewrittenProcedure: string;
   confidence: number;
+  indexRecommendations: IndexRecommendation[];
+  rewriteNotes: string[];
+  rewriteStatus?: RewriteStatus;
+  rewriteDetail?: string;
 };
 
 export type ReviewV2 = {
@@ -82,6 +107,10 @@ export type ReviewV2 = {
   }>;
   rewrittenProcedure: string;
   limitations: string[];
+  indexRecommendations: IndexRecommendation[];
+  rewriteNotes: string[];
+  rewriteStatus?: RewriteStatus;
+  rewriteDetail?: string;
 };
 
 function fail(path: string, message: string): never {
@@ -113,16 +142,50 @@ function asConfidence(value: unknown, path: string): number {
   return n;
 }
 
+/**
+ * Small models often omit trailing fields. Absent (undefined/null) optional
+ * fields get a conservative default; present-but-wrong values still fail.
+ * Confidence defaults to 0 so an incomplete answer never looks trustworthy.
+ */
+function orDefault<T>(value: unknown, fallback: T, parse: (value: unknown) => T): T {
+  return value === undefined || value === null ? fallback : parse(value);
+}
+
 function asEnum<T extends string>(
   value: unknown,
   allowed: readonly T[],
   path: string,
 ): T {
-  const normalized = String(value ?? "").toLowerCase();
+  // "Error Handling" / "error-handling" -> "error_handling"
+  const normalized = String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
   if (!(allowed as readonly string[]).includes(normalized)) {
     fail(path, `must be one of ${allowed.join("|")} (got ${JSON.stringify(value)})`);
   }
   return normalized as T;
+}
+
+function asStringList(value: unknown, path: string): string[] {
+  return asArray(value, path).map((v, i) => asString(v, `${path}[${i}]`));
+}
+
+function asRewriteNotes(value: unknown): string[] {
+  return orDefault<unknown[]>(value, [], (v) => asArray(v, "rewriteNotes")).filter(
+    (note): note is string => typeof note === "string" && note.trim().length > 0,
+  );
+}
+
+function asIndexRecommendations(value: unknown): IndexRecommendation[] {
+  return orDefault<unknown[]>(value, [], (v) => asArray(v, "indexRecommendations")).map((raw, i) => {
+    const p = `indexRecommendations[${i}]`;
+    const r = asObject(raw, p);
+    return {
+      table: asString(r.table, `${p}.table`),
+      keyColumns: asStringList(r.keyColumns, `${p}.keyColumns`),
+      includeColumns: orDefault(r.includeColumns, [], (v) => asStringList(v, `${p}.includeColumns`)),
+      reason: orDefault(r.reason, "", (v) => asString(v, `${p}.reason`)),
+      evidence: orDefault(r.evidence, "", (v) => asString(v, `${p}.evidence`)),
+    };
+  });
 }
 
 export function validateReviewV1(value: unknown): ReviewV1 {
@@ -135,14 +198,20 @@ export function validateReviewV1(value: unknown): ReviewV1 {
       severity: asEnum(item.severity, SEVERITIES, `${p}.severity`),
       title: asString(item.title, `${p}.title`),
       explanation: asString(item.explanation, `${p}.explanation`),
-      recommendation: asString(item.recommendation, `${p}.recommendation`),
+      recommendation: orDefault(item.recommendation, "", (v) =>
+        asString(v, `${p}.recommendation`),
+      ),
     };
   });
   return {
     summary,
     issues,
-    rewrittenProcedure: asString(c.rewrittenProcedure, "rewrittenProcedure"),
-    confidence: asConfidence(c.confidence, "confidence"),
+    rewrittenProcedure: orDefault(c.rewrittenProcedure, "", (v) =>
+      asString(v, "rewrittenProcedure"),
+    ),
+    confidence: orDefault(c.confidence, 0, (v) => asConfidence(v, "confidence")),
+    indexRecommendations: asIndexRecommendations(c.indexRecommendations),
+    rewriteNotes: asRewriteNotes(c.rewriteNotes),
   };
 }
 
@@ -150,57 +219,59 @@ export function validateReviewV2(value: unknown): ReviewV2 {
   const c = asObject(value, "$");
   const summary = asString(c.summary, "summary");
   const overallRisk = asEnum(c.overallRisk, RISKS, "overallRisk");
-  const confidence = asConfidence(c.confidence, "confidence");
+  const confidence = orDefault(c.confidence, 0, (v) => asConfidence(v, "confidence"));
 
-  const findingsTable = asArray(c.findingsTable, "findingsTable").map((raw, i) => {
-    const p = `findingsTable[${i}]`;
-    const r = asObject(raw, p);
-    return {
-      category: asEnum(r.category, FINDING_CATEGORIES, `${p}.category`),
-      finding: asString(r.finding, `${p}.finding`),
-      evidence: asString(r.evidence, `${p}.evidence`),
-      severity: asEnum(r.severity, SEVERITIES, `${p}.severity`),
-      recommendation: asString(r.recommendation, `${p}.recommendation`),
-    };
-  });
+  // A malformed row is dropped (and counted) instead of failing the review;
+  // a table that is present but not an array still fails.
+  let dropped = 0;
+  const rows = <T>(value: unknown, path: string, parse: (r: Record<string, unknown>, p: string) => T): T[] =>
+    orDefault<unknown[]>(value, [], (v) => asArray(v, path)).flatMap((raw, i) => {
+      try {
+        return [parse(asObject(raw, `${path}[${i}]`), `${path}[${i}]`)];
+      } catch {
+        dropped += 1;
+        return [];
+      }
+    });
+  const recommendation = (r: Record<string, unknown>, p: string) =>
+    orDefault(r.recommendation, "", (v) => asString(v, `${p}.recommendation`));
 
-  const performanceTable = asArray(c.performanceTable, "performanceTable").map((raw, i) => {
-    const p = `performanceTable[${i}]`;
-    const r = asObject(raw, p);
-    return {
-      area: asEnum(r.area, PERFORMANCE_AREAS, `${p}.area`),
-      observation: asString(r.observation, `${p}.observation`),
-      evidence: asString(r.evidence, `${p}.evidence`),
-      impact: asEnum(r.impact, IMPACTS, `${p}.impact`),
-      recommendation: asString(r.recommendation, `${p}.recommendation`),
-    };
-  });
+  const findingsTable = rows(c.findingsTable, "findingsTable", (r, p) => ({
+    category: asEnum(r.category, FINDING_CATEGORIES, `${p}.category`),
+    finding: asString(r.finding, `${p}.finding`),
+    evidence: asString(r.evidence, `${p}.evidence`),
+    severity: asEnum(r.severity, SEVERITIES, `${p}.severity`),
+    recommendation: recommendation(r, p),
+  }));
 
-  const securityTable = asArray(c.securityTable, "securityTable").map((raw, i) => {
-    const p = `securityTable[${i}]`;
-    const r = asObject(raw, p);
-    return {
-      area: asEnum(r.area, SECURITY_AREAS, `${p}.area`),
-      observation: asString(r.observation, `${p}.observation`),
-      evidence: asString(r.evidence, `${p}.evidence`),
-      risk: asEnum(r.risk, IMPACTS, `${p}.risk`),
-      recommendation: asString(r.recommendation, `${p}.recommendation`),
-    };
-  });
+  const performanceTable = rows(c.performanceTable, "performanceTable", (r, p) => ({
+    area: asEnum(r.area, PERFORMANCE_AREAS, `${p}.area`),
+    observation: asString(r.observation, `${p}.observation`),
+    evidence: asString(r.evidence, `${p}.evidence`),
+    impact: asEnum(r.impact, IMPACTS, `${p}.impact`),
+    recommendation: recommendation(r, p),
+  }));
 
-  const testingTable = asArray(c.testingTable, "testingTable").map((raw, i) => {
-    const p = `testingTable[${i}]`;
-    const r = asObject(raw, p);
-    return {
-      test: asString(r.test, `${p}.test`),
-      purpose: asString(r.purpose, `${p}.purpose`),
-      expectedResult: asString(r.expectedResult, `${p}.expectedResult`),
-    };
-  });
+  const securityTable = rows(c.securityTable, "securityTable", (r, p) => ({
+    area: asEnum(r.area, SECURITY_AREAS, `${p}.area`),
+    observation: asString(r.observation, `${p}.observation`),
+    evidence: asString(r.evidence, `${p}.evidence`),
+    risk: asEnum(r.risk, IMPACTS, `${p}.risk`),
+    recommendation: recommendation(r, p),
+  }));
 
-  const limitations = asArray(c.limitations, "limitations").map((raw, i) =>
-    asString(raw, `limitations[${i}]`),
+  const testingTable = rows(c.testingTable, "testingTable", (r, p) => ({
+    test: asString(r.test, `${p}.test`),
+    purpose: asString(r.purpose, `${p}.purpose`),
+    expectedResult: asString(r.expectedResult, `${p}.expectedResult`),
+  }));
+
+  const limitations = orDefault<unknown[]>(c.limitations, [], (v) => asArray(v, "limitations")).filter(
+    (item): item is string => typeof item === "string",
   );
+  if (dropped > 0) {
+    limitations.push(`${dropped} row(s) removed because they did not match the review schema.`);
+  }
 
   return {
     summary,
@@ -210,8 +281,12 @@ export function validateReviewV2(value: unknown): ReviewV2 {
     performanceTable,
     securityTable,
     testingTable,
-    rewrittenProcedure: asString(c.rewrittenProcedure, "rewrittenProcedure"),
+    rewrittenProcedure: orDefault(c.rewrittenProcedure, "", (v) =>
+      asString(v, "rewrittenProcedure"),
+    ),
     limitations,
+    indexRecommendations: asIndexRecommendations(c.indexRecommendations),
+    rewriteNotes: asRewriteNotes(c.rewriteNotes),
   };
 }
 

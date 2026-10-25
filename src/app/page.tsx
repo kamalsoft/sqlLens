@@ -5,10 +5,11 @@ import { useApi } from "@/components/api-client";
 
 type Analysis = {
   id: string;
-  procedureName: string;
+  type: string;
+  recordNumber: number | null;
   status: string;
-  elapsedMs: number;
-  logicalReads: number;
+  elapsedMs: number | null;
+  logicalReads: number | null;
   createdAt: string;
 };
 
@@ -104,7 +105,7 @@ export default function OverviewPage() {
                 <table className="overview-table">
                   <thead>
                     <tr>
-                      <th>Procedure</th>
+                      <th>Record</th>
                       <th>Status</th>
                       <th>Elapsed time</th>
                       <th>Logical reads</th>
@@ -114,7 +115,10 @@ export default function OverviewPage() {
                   <tbody>
                     {data.recentAnalyses.map((analysis) => (
                       <tr key={analysis.id}>
-                        <td>{analysis.procedureName}</td>
+                        <td>
+                          {analysis.type}
+                          {analysis.recordNumber !== null ? ` #${analysis.recordNumber}` : ""}
+                        </td>
                         <td>
                           <span
                             className={`analysis-status ${analysis.status}`}
@@ -122,8 +126,12 @@ export default function OverviewPage() {
                             {analysis.status}
                           </span>
                         </td>
-                        <td>{analysis.elapsedMs} ms</td>
-                        <td>{analysis.logicalReads.toLocaleString()}</td>
+                        <td>{analysis.elapsedMs !== null ? `${analysis.elapsedMs} ms` : "Not captured"}</td>
+                        <td>
+                          {analysis.logicalReads !== null
+                            ? analysis.logicalReads.toLocaleString()
+                            : "Not captured"}
+                        </td>
                         <td>
                           {new Date(analysis.createdAt).toLocaleString()}
                         </td>

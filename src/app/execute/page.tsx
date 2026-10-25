@@ -1,28 +1,36 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
-  Box, Container, Heading, Text, Textarea, Button, Flex,
+  Box, Container, Heading, Text, Button, Flex,
   Spinner, Badge, Grid, Input, Separator,
 } from '@chakra-ui/react';
 import type { AuditAnalysis } from '@/lib/audit-analyzer';
 import type { ExecutionResult } from '@/lib/sp-executor';
 import { useApi } from '@/components/api-client';
+import {
+  TargetEditor, buildTarget, emptyDraft, isDraftEmpty,
+  type TargetDraft,
+} from '@/components/execute/target-editor';
 
-// Tolerant of extra fields (e.g. schemaVersion, id) added by later API changes.
-type WithExecution = AuditAnalysis & { execution: ExecutionResult };
 type ComparisonAnalysis = AuditAnalysis & {
-  improvementPercent?: number;
+  improvementPercent?: number | null;
   comparisonSummary?: string;
 };
+type Side = { execution: ExecutionResult; analysis: AuditAnalysis };
+// Mirrors the result built in src/app/api/execute/route.ts.
 type ExecuteResult =
-  | { mode: 'single'; execution: ExecutionResult; analysis: AuditAnalysis }
+  | { mode: 'single'; simulated?: boolean;
+  warnings?: string[]; execution: ExecutionResult; analysis: AuditAnalysis }
   | {
       mode: 'compare';
-      original: WithExecution;
-      optimized: WithExecution;
+      simulated?: boolean;
+  warnings?: string[];
+      original: Side;
+      optimized: Side;
       comparison: ComparisonAnalysis;
     };
+type TestInfo = { ok: boolean; message: string };
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -91,11 +99,11 @@ function AnalysisPanel({ analysis, title }: { analysis: AuditAnalysis; title: st
           <Grid templateColumns="1fr 1fr" gap={4}>
             <Box p={4} bg="gray.800" borderRadius="lg">
               <Text fontSize="xs" color="gray.500" mb={1}>Parse & Compile</Text>
-              <Text color="cyan.300" fontWeight="bold">{analysis.timeAnalysis.parseTimeMs}ms</Text>
+              <Text color="cyan.300" fontWeight="bold">{analysis.timeAnalysis.parseTimeMs === null ? 'Not captured' : `${analysis.timeAnalysis.parseTimeMs}ms`}</Text>
             </Box>
             <Box p={4} bg="gray.800" borderRadius="lg">
               <Text fontSize="xs" color="gray.500" mb={1}>Execution</Text>
-              <Text color="cyan.300" fontWeight="bold">{analysis.timeAnalysis.executeTimeMs}ms</Text>
+              <Text color="cyan.300" fontWeight="bold">{analysis.timeAnalysis.executeTimeMs === null ? 'Not captured' : `${analysis.timeAnalysis.executeTimeMs}ms`}</Text>
             </Box>
           </Grid>
           <Box mt={3} p={4} bg="gray.800" borderRadius="lg" borderLeftWidth="3px" borderColor="cyan.500">
@@ -190,7 +198,6 @@ function RawStatsPanel({ execution }: { execution: ExecutionResult }) {
       {show && (
         <Box p={5}>
           <Flex gap={4} mb={4} flexWrap="wrap">
-            {execution.stats.simulated && <Badge colorPalette="yellow">Simulated</Badge>}
             <Badge colorPalette="blue">Record #{execution.recordNumber}</Badge>
             <Badge colorPalette="gray">Engine: {execution.connectionEngine}</Badge>
             <Badge colorPalette="gray">{execution.executedAt}</Badge>
@@ -200,9 +207,9 @@ function RawStatsPanel({ execution }: { execution: ExecutionResult }) {
             overflowX="auto" fontFamily="mono" whiteSpace="pre-wrap" lineHeight="tall">
             {execution.stats.rawOutput}
           </Box>
-          <Text fontSize="xs" color="gray.500" mt={3}>
-            📁 Audit log saved: {execution.textFilePath}
-          </Text>
+          {(execution as { textFilePath?: string }).textFilePath && (
+            <Text fontSize="xs" color="gray.500" mt={3}>📁 Audit log saved</Text>
+          )}
         </Box>
       )}
     </Box>
@@ -216,8 +223,9 @@ function RawStatsPanel({ execution }: { execution: ExecutionResult }) {
 export default function ExecutePage() {
   const api = useApi();
   const [mode, setMode] = useState<'single' | 'compare'>('single');
-  const [originalSP, setOriginalSP] = useState('');
-  const [optimizedSP, setOptimizedSP] = useState('');
+  const [kind, setKind] = useState<'procedure' | 'batch'>('batch');
+  const [original, setOriginal] = useState<TargetDraft>(emptyDraft());
+  const [optimized, setOptimized] = useState<TargetDraft>(emptyDraft());
   const [engine, setEngine] = useState<'simulation' | 'mssql' | 'postgres'>('simulation');
   const [host, setHost] = useState('localhost');
   const [port, setPort] = useState('1433');
@@ -227,12 +235,69 @@ export default function ExecutePage() {
   const [trustCert, setTrustCert] = useState(true);
 
   const [loading, setLoading] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testInfo, setTestInfo] = useState<TestInfo | null>(null);
   const [result, setResult] = useState<ExecuteResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'compare' | 'original' | 'optimized'>('compare');
+  const abortRef = useRef<AbortController | null>(null);
+
+  const [portError, setPortError] = useState<string | null>(null);
+
+  /** Returns false (and sets a field error) when the port is not an integer in 1-65535. */
+  function validatePort(): boolean {
+    const n = Number(port);
+    if (port.trim() === '' || !Number.isInteger(n) || n < 1 || n > 65535) {
+      setPortError('Port must be a whole number between 1 and 65535');
+      return false;
+    }
+    setPortError(null);
+    return true;
+  }
+
+  const connection = () => ({
+    host, port: Number(port), database, username, password,
+    ...(engine === 'mssql' ? { trustServerCertificate: trustCert } : {}),
+  });
+
+  async function handleTest() {
+    if (engine === 'simulation') return;
+    if (!validatePort()) return;
+    setTesting(true);
+    setTestInfo(null);
+    const res = await api<{ serverVersion?: string }>(
+      '/api/connections/test',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ engine, connection: connection() }),
+      },
+      'Connection test failed'
+    );
+    if (res.ok) {
+      setTestInfo({ ok: true, message: `Connected${res.data?.serverVersion ? `: ${res.data.serverVersion}` : ''}` });
+    } else if (res.status !== 401) {
+      setTestInfo({ ok: false, message: res.error ?? 'Connection test failed' });
+    }
+    setTesting(false);
+  }
+
+  function handleCancel() {
+    abortRef.current?.abort();
+  }
 
   async function handleExecute() {
-    if (!originalSP.trim()) return;
+    if (isDraftEmpty(kind, original)) return;
+    if (engine !== 'simulation' && !validatePort()) return;
+    const orig = buildTarget(kind, original);
+    if (!orig.ok) { setError(orig.error); return; }
+    let opt: ReturnType<typeof buildTarget> | null = null;
+    if (mode === 'compare') {
+      opt = buildTarget(kind, optimized);
+      if (!opt.ok) { setError(opt.error); return; }
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoading(true);
     setError(null);
     setResult(null);
@@ -242,21 +307,22 @@ export default function ExecutePage() {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           mode,
-          originalSP,
-          optimizedSP: mode === 'compare' ? optimizedSP : undefined,
-          connection: {
-            engine,
-            host, port: parseInt(port), database, username, password,
-            trustServerCertificate: trustCert,
-          },
+          engine,
+          ...(engine !== 'simulation' ? { connection: connection() } : {}),
+          original: orig.target,
+          ...(opt && opt.ok ? { optimized: opt.target } : {}),
         }),
       },
       'Execution failed'
     );
+    abortRef.current = null;
     if (res.ok && res.data) {
       setResult(res.data.result);
+    } else if (controller.signal.aborted) {
+      setError('Execution cancelled');
     } else if (res.status !== 401) {
       setError(res.error ?? 'Execution failed');
     }
@@ -298,6 +364,18 @@ export default function ExecutePage() {
           </Button>
         </Flex>
 
+        {/* Target kind toggle */}
+        <Flex gap={3} mb={6} role="group" aria-label="Target kind">
+          <Button size="sm" colorPalette="cyan" variant={kind === 'procedure' ? 'solid' : 'outline'}
+            aria-pressed={kind === 'procedure'} onClick={() => setKind('procedure')}>
+            Procedure
+          </Button>
+          <Button size="sm" colorPalette="cyan" variant={kind === 'batch' ? 'solid' : 'outline'}
+            aria-pressed={kind === 'batch'} onClick={() => setKind('batch')}>
+            Batch
+          </Button>
+        </Flex>
+
         {/* Connection Config */}
         <Box bg="gray.900" borderWidth="1px" borderColor="gray.700" borderRadius="xl" p={6} mb={6}>
           <Text fontSize="sm" fontWeight="semibold" color="gray.300" mb={4} textTransform="uppercase" letterSpacing="wider">
@@ -327,7 +405,8 @@ export default function ExecutePage() {
                 </Box>
                 <Box>
                   <Text fontSize="xs" color="gray.400" mb={1}>Port</Text>
-                  <Input size="sm" value={port} onChange={e => setPort(e.target.value)} bg="gray.800" borderColor="gray.600" color="white" placeholder="1433" />
+                  <Input size="sm" value={port} onChange={e => setPort(e.target.value)} bg="gray.800" borderColor="gray.600" color="white" placeholder="1433" aria-label="Port" aria-invalid={portError !== null} />
+                  {portError && <Text fontSize="xs" color="red.300" mt={1} role="alert">{portError}</Text>}
                 </Box>
                 <Box>
                   <Text fontSize="xs" color="gray.400" mb={1}>Database</Text>
@@ -355,6 +434,17 @@ export default function ExecutePage() {
               </>
             )}
           </Grid>
+          {engine !== 'simulation' && (
+            <Flex mt={4} gap={3} align="center">
+              <Button size="sm" variant="outline" colorPalette="blue" onClick={handleTest}
+                loading={testing} loadingText="Testing..." disabled={testing || !host.trim() || !database.trim()}>
+                Test connection
+              </Button>
+              {testInfo && (
+                <Text fontSize="sm" role="status" color={testInfo.ok ? 'green.300' : 'red.300'}>{testInfo.message}</Text>
+              )}
+            </Flex>
+          )}
           {engine === 'simulation' && (
             <Box mt={4} p={3} bg="blue.950" borderRadius="lg" borderWidth="1px" borderColor="blue.800">
               <Text fontSize="sm" color="blue.300">
@@ -373,19 +463,9 @@ export default function ExecutePage() {
                 {mode === 'compare' ? 'Current SP' : 'Stored Procedure'}
               </Text>
             </Flex>
-            <Textarea
-              value={originalSP}
-              onChange={e => setOriginalSP(e.target.value)}
+            <TargetEditor
+              kind={kind} draft={original} onChange={setOriginal} color={mode === 'compare' ? 'red.200' : 'cyan.100'}
               placeholder="-- Paste your Stored Procedure here..."
-              minH="240px"
-              fontFamily="mono"
-              fontSize="sm"
-              bg="gray.950"
-              color={mode === 'compare' ? 'red.200' : 'cyan.100'}
-              borderColor="gray.600"
-              _focus={{ borderColor: 'orange.500' }}
-              _placeholder={{ color: 'gray.600' }}
-              resize="vertical"
             />
           </Box>
 
@@ -395,26 +475,19 @@ export default function ExecutePage() {
                 <Badge colorPalette="green" variant="subtle">OPTIMIZED</Badge>
                 <Text fontSize="sm" fontWeight="semibold" color="gray.300" textTransform="uppercase" letterSpacing="wider">Improved SP</Text>
               </Flex>
-              <Textarea
-                value={optimizedSP}
-                onChange={e => setOptimizedSP(e.target.value)}
+              <TargetEditor
+                kind={kind} draft={optimized} onChange={setOptimized} color="green.200"
                 placeholder="-- Paste your Optimized SP here..."
-                minH="240px"
-                fontFamily="mono"
-                fontSize="sm"
-                bg="gray.950"
-                color="green.200"
-                borderColor="gray.600"
-                _focus={{ borderColor: 'green.500' }}
-                _placeholder={{ color: 'gray.600' }}
-                resize="vertical"
               />
             </Box>
           )}
         </Grid>
 
         {/* Execute button */}
-        <Flex justify="flex-end" mb={8}>
+        <Flex justify="flex-end" gap={3} mb={8}>
+          {loading && (
+            <Button size="lg" variant="outline" colorPalette="red" onClick={handleCancel}>Cancel</Button>
+          )}
           <Button
             colorPalette="orange"
             size="lg"
@@ -422,7 +495,7 @@ export default function ExecutePage() {
             onClick={handleExecute}
             loading={loading}
             loadingText="Executing..."
-            disabled={!originalSP.trim() || (mode === 'compare' && !optimizedSP.trim()) || loading}
+            disabled={isDraftEmpty(kind, original) || (mode === 'compare' && isDraftEmpty(kind, optimized)) || loading}
           >
             ▶ Execute & Audit
           </Button>
@@ -449,6 +522,16 @@ export default function ExecutePage() {
         {/* Results */}
         {result && !loading && (
           <Box display="flex" flexDirection="column" gap={6}>
+            {result.warnings && result.warnings.length > 0 && (
+              <Box bg="yellow.950" borderWidth="1px" borderColor="yellow.700" borderRadius="xl" p={4} role="status">
+                <Text color="yellow.300" fontWeight="semibold" fontSize="sm">Warnings</Text>
+                {result.warnings.map((w, i) => <Text key={i} color="yellow.200" fontSize="sm">{w}</Text>)}
+              </Box>
+            )}
+            {(result.simulated ??
+              (result.mode === 'single' ? result.execution.stats.simulated : result.original.execution.stats.simulated)) && (
+              <Box><Badge colorPalette="yellow">Simulated</Badge></Box>
+            )}
 
             {result.mode === 'single' ? (
               <>
@@ -458,7 +541,7 @@ export default function ExecutePage() {
             ) : (
               <>
                 {/* Comparison improvement strip */}
-                {result.comparison.improvementPercent !== undefined && (
+                {result.comparison.improvementPercent != null && (
                   <Box p={5} borderRadius="xl" borderWidth="1px"
                     bg={result.comparison.improvementPercent > 0 ? 'green.950' : 'red.950'}
                     borderColor={result.comparison.improvementPercent > 0 ? 'green.700' : 'red.700'}>
@@ -492,13 +575,13 @@ export default function ExecutePage() {
                 {activeTab === 'compare' && <AnalysisPanel analysis={result.comparison} title="📊 Comparative Audit" />}
                 {activeTab === 'original' && (
                   <>
-                    <AnalysisPanel analysis={result.original} title="🔴 Original SP Audit" />
+                    <AnalysisPanel analysis={result.original.analysis} title="🔴 Original SP Audit" />
                     <RawStatsPanel execution={result.original.execution} />
                   </>
                 )}
                 {activeTab === 'optimized' && (
                   <>
-                    <AnalysisPanel analysis={result.optimized} title="🟢 Optimized SP Audit" />
+                    <AnalysisPanel analysis={result.optimized.analysis} title="🟢 Optimized SP Audit" />
                     <RawStatsPanel execution={result.optimized.execution} />
                   </>
                 )}

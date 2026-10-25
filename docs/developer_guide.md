@@ -37,9 +37,12 @@ sqlens/
 ├── data/
 │   ├── appconfig.json
 │   └── prompts/
-│       ├── analysisSP.md
-│       ├── analysisSP-verylarge.md
-│       └── explainStatistic.md
+│       ├── analysisSP.md              # v2 review (default for larger models)
+│       ├── analysisSP.v1.md           # v1 review (default for small models)
+│       ├── analysisSP-verylarge.md    # detailed v2 variant (set prompt.analysisSP to use it)
+│       ├── review-with-telemetry.md   # v2 review with execution telemetry
+│       ├── compare.md                 # original vs optimized comparison
+│       └── explainStatistic.md        # not loaded by any route yet
 ├── docs/
 │   ├── architecture.md
 │   ├── api.md
@@ -157,6 +160,16 @@ Contains the SQL Server review prompt. The prompt defines:
 - Limitations and confidence requirements.
 
 Prompt changes can affect model output and should be reviewed like source-code changes.
+
+All review prompts follow the same output rules:
+
+- Example objects use angle-bracket placeholders and neutral enum values, never a real finding; small models copy example content into their answers.
+- `rewrittenProcedure` holds the complete restructured procedure when findings call for changes (`""` otherwise), with `rewriteNotes` listing each change; it is the last key, so a cut-off loses only the rewrite.
+- Strings use `\n` and `\"` escapes; evidence must be text copied from the SQL (v2 rows with other evidence are dropped by the route).
+- SQL injection is reported only when the procedure builds and executes a SQL string.
+- `indexRecommendations` lists tables and columns only; the prompts forbid CREATE INDEX text, and `src/lib/index-recommendations.ts` verifies each row against the SQL and generates the DDL.
+
+`tests/unit/prompt-contracts.test.ts` checks every bundled prompt: required placeholders, no code fences, an example that passes the real validator, and every allowed enum value accepted by the schema.
 
 ### `docs/`
 

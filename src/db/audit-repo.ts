@@ -26,13 +26,15 @@ export type AuditSummary = {
   status: string;
   recordNumber: number | null;
   hasShare: boolean;
+  shared: boolean;
+  shareExpiresAt: string | null;
+  elapsedMs: number | null;
+  logicalReads: number | null;
 };
 
 export type AuditRecord = AuditSummary & {
   request: unknown;
   response: unknown;
-  elapsedMs: number | null;
-  logicalReads: number | null;
   schemaVersion: string | null;
   modelId: string | null;
 };
@@ -48,6 +50,8 @@ type Row = {
   shared_token: string | null;
   share_expires_at: string | null;
   share_revoked: number | null;
+  elapsed_ms: number | null;
+  logical_reads: number | null;
 };
 
 function shareActive(r: Row, now = Date.now()): boolean {
@@ -57,6 +61,7 @@ function shareActive(r: Row, now = Date.now()): boolean {
 }
 
 function summary(r: Row): AuditSummary {
+  const active = shareActive(r);
   return {
     id: r.id,
     type: r.type,
@@ -65,7 +70,11 @@ function summary(r: Row): AuditSummary {
     simulated: r.simulated === 1,
     status: r.status ?? "ok",
     recordNumber: r.record_number,
-    hasShare: shareActive(r),
+    hasShare: active,
+    shared: active,
+    shareExpiresAt: active ? r.share_expires_at : null,
+    elapsedMs: r.elapsed_ms,
+    logicalReads: r.logical_reads,
   };
 }
 
@@ -78,7 +87,7 @@ function parse(text: string | null): unknown {
   }
 }
 
-const SUMMARY_COLS = "id, type, created_at, engine, simulated, status, record_number, shared_token, share_expires_at, share_revoked";
+const SUMMARY_COLS = "id, type, created_at, engine, simulated, status, record_number, shared_token, share_expires_at, share_revoked, elapsed_ms, logical_reads";
 
 export function insertAudit(input: InsertAuditInput): { id: string; recordNumber: number } {
   const id = randomUUID();
@@ -113,7 +122,7 @@ export function insertAudit(input: InsertAuditInput): { id: string; recordNumber
 export function getAudit(id: string, sessionId: string): AuditRecord | null {
   const r = db
     .prepare(
-      `SELECT ${SUMMARY_COLS}, request_payload, response_payload, elapsed_ms, logical_reads, schema_version, model_id
+      `SELECT ${SUMMARY_COLS}, request_payload, response_payload, schema_version, model_id
        FROM audit_requests WHERE id = ? AND session_id = ?`
     )
     .get(id, sessionId) as

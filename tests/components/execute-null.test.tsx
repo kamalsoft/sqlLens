@@ -13,7 +13,7 @@ const result = {
   mode: "single",
   execution: {
     recordNumber: 1, connectionEngine: "simulation", executedAt: "now", success: true,
-    spLabel: "SP", textFilePath: "x.log", stats: { rawOutput: "raw", simulated: true },
+    spLabel: "SP", stats: { rawOutput: "raw", simulated: true },
   },
   analysis: {
     performanceGrade: null, gradeRationale: "n/a", summary: "s",

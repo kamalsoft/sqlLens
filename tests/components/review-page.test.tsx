@@ -39,7 +39,7 @@ const v2 = {
 
 function setup(reviewResponse: () => Response | Promise<Response>, extra?: { status?: boolean }) {
   const fetchMock = vi.fn().mockImplementation(async (url: string) => {
-    if (url === "/api/review/models") return json(200, { models: [{ id: "m1", name: "Model One", compatible: true }] });
+    if (url === "/api/review/models") return json(200, { models: [{ id: "m1", name: "Model One", compatible: true, parameterEstimate: 500000000, small: true }] });
     if (url === "/api/models/status")
       return extra?.status === false
         ? json(404, { error: "nope" })
@@ -73,7 +73,7 @@ describe("groupRecommendations", () => {
 });
 
 describe("ReviewPage", () => {
-  it("renders v2 by default, sends schemaVersion, shows status and grouping", async () => {
+  it("defaults to Auto (omits schemaVersion), shows size, renders response version, shows status and grouping", async () => {
     const fetchMock = setup(() => json(200, { id: "i", model: "m1", schemaVersion: "v2", promptPath: "p", result: v2 }));
     const user = userEvent.setup();
     render(<ReviewPage />);
@@ -89,7 +89,9 @@ describe("ReviewPage", () => {
 
     const call = fetchMock.mock.calls.find(([u]) => u === "/api/review")!;
     const body = JSON.parse(call[1].body);
-    expect(body).toEqual({ modelId: "m1", sql: "select 1", schemaVersion: "v2" });
+    expect(body).toEqual({ modelId: "m1", sql: "select 1" });
+    expect(screen.getByTestId("model-size")).toHaveTextContent("~0.5B parameters — small model; Auto uses v1");
+    expect(screen.queryByTestId("low-confidence")).toBeNull();
   });
 
   it("sends v1 when selected and renders v1 result", async () => {
@@ -97,7 +99,8 @@ describe("ReviewPage", () => {
     const user = userEvent.setup();
     render(<ReviewPage />);
     const select = (await screen.findByLabelText("Result schema")) as HTMLSelectElement;
-    expect(select.value).toBe("v2");
+    expect(select.value).toBe("auto");
+    expect(within(select).getByRole("option", { name: "Auto (recommended)" })).toBeInTheDocument();
     const { fireEvent } = await import("@testing-library/react");
     fireEvent.change(select, { target: { value: "v1" } });
     await run(user);
@@ -105,10 +108,21 @@ describe("ReviewPage", () => {
     expect(await screen.findByLabelText("Review result v1")).toBeInTheDocument();
     const heads = screen.getAllByTestId("severity-heading").map((h) => h.textContent);
     expect(heads).toEqual(["CRITICAL", "LOW"]);
-    expect(screen.getAllByTestId("category-heading").every((h) => h.textContent === "uncategorized")).toBe(true);
+    expect(screen.queryAllByTestId("category-heading")).toHaveLength(0);
     const body = JSON.parse(fetchMock.mock.calls.find(([u]) => u === "/api/review")![1].body);
     expect(body.schemaVersion).toBe("v1");
     expect(body).not.toHaveProperty("executionAuditId");
+  });
+
+  it("shows low-confidence label and renders the response schemaVersion", async () => {
+    setup(() => json(200, { schemaVersion: "v1", lowConfidence: true, result: v1 }));
+    const user = userEvent.setup();
+    render(<ReviewPage />);
+    await run(user);
+    expect(await screen.findByLabelText("Review result v1")).toBeInTheDocument();
+    expect(screen.getByTestId("low-confidence")).toHaveTextContent(
+      "Small model — low-confidence results; verify every finding"
+    );
   });
 
   it("sends executionAuditId only when selected", async () => {
@@ -143,5 +157,72 @@ describe("ReviewPage", () => {
     await run(user);
     expect(await screen.findByRole("alert")).toHaveTextContent(pattern as RegExp);
     if (status === 502) expect(screen.getByLabelText("Response preview")).toHaveTextContent("garbage{");
+  });
+
+  it("renders verified index recommendations with their DDL", async () => {
+    const withIndexes = {
+      ...v1,
+      indexRecommendations: [
+        {
+          table: "dbo.Orders",
+          keyColumns: ["CustomerId"],
+          includeColumns: ["Total"],
+          reason: "Supports the CustomerId filter",
+          evidence: "WHERE o.CustomerId = @CustomerId",
+          createStatement: "CREATE NONCLUSTERED INDEX [IX_Orders_CustomerId] ON [dbo].[Orders] ([CustomerId]) INCLUDE ([Total]);",
+        },
+      ],
+    };
+    setup(() => json(200, { schemaVersion: "v1", result: withIndexes }));
+    const user = userEvent.setup();
+    render(<ReviewPage />);
+    await run(user);
+    expect(await screen.findByText("Index recommendations")).toBeInTheDocument();
+    expect(screen.getByText("Supports the CustomerId filter")).toBeInTheDocument();
+    expect(screen.getByText(/CREATE NONCLUSTERED INDEX \[IX_Orders_CustomerId\]/)).toBeInTheDocument();
+  });
+
+  it.each([
+    ["provided", { rewriteStatus: "provided", rewriteNotes: ["Removed NOLOCK"], rewrittenProcedure: "CREATE PROCEDURE dbo.p AS SELECT 1" }, /Removed NOLOCK/],
+    ["truncated", { rewriteStatus: "truncated", rewriteNotes: [], rewrittenProcedure: "" }, /cut off at the new-token limit/],
+    ["none", { rewriteStatus: "none", rewriteNotes: [], rewrittenProcedure: "" }, /did not recommend restructuring/],
+  ])("shows the Recommended restructure section (%s)", async (_status, fields, pattern) => {
+    setup(() => json(200, { schemaVersion: "v1", result: { ...v1, ...fields } }));
+    const user = userEvent.setup();
+    render(<ReviewPage />);
+    await run(user);
+    expect(await screen.findByText("Recommended restructure")).toBeInTheDocument();
+    expect(screen.getByText(pattern as RegExp)).toBeInTheDocument();
+  });
+
+  it("blocks non-SQL input before calling the API", async () => {
+    const fetchMock = setup(() => json(200, { schemaVersion: "v2", result: v2 }));
+    const user = userEvent.setup();
+    render(<ReviewPage />);
+    await user.type(await screen.findByPlaceholderText(/CREATE PROCEDURE/), "please check my essay");
+    await user.click(screen.getByRole("button", { name: "Analyze SP" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/does not look like SQL/);
+    expect(fetchMock.mock.calls.some(([u]) => u === "/api/review")).toBe(false);
+  });
+
+  it("shows unparsed model output in the Analysis results panel", async () => {
+    setup(() =>
+      json(502, {
+        error: "Unable to parse model response",
+        details: {
+          responsePreview: "{ partial",
+          responseText: '```json\n{"summary":"partial","extra":1}\n```',
+          message: "summary: must be a string; response ended with: x",
+        },
+      }),
+    );
+    const user = userEvent.setup();
+    render(<ReviewPage />);
+    await run(user);
+    const preview = await screen.findByLabelText("Response preview");
+    expect(preview.textContent).toBe('{\n  "summary": "partial",\n  "extra": 1\n}');
+    expect(preview.closest(".review-results-panel")).not.toBeNull();
+    expect(screen.getByTestId("raw-output-note")).toBeInTheDocument();
+    expect(screen.getByText("Validation: summary: must be a string")).toBeInTheDocument();
   });
 });

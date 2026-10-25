@@ -8,14 +8,17 @@ Rules:
 - Base performance claims only on the numbers in <metrics>. If a metric is missing or null, say it was not captured.
 - Do not claim the optimized version is faster unless the metrics show it.
 - Point out any behavioral difference you can see between the two procedures.
+- Use winner "inconclusive" when the metrics are missing, null, simulated, or too close to call.
+- differences and risks are arrays of short strings; use [] when there are none.
+- Every string is ONE JSON string: use \n for line breaks and \" for double quotes. Never put a raw line break inside a JSON string.
 
-Return exactly one valid JSON object, with no Markdown or code fences, in this shape. The values below are examples only; replace them with your own analysis.
+Return exactly one valid JSON object, with no Markdown or code fences, in this shape (the angle-bracket text describes what to write; never copy it literally):
 
 {
-  "winner": "optimized",
-  "summary": "Optimized version reads fewer pages according to the metrics.",
-  "differences": ["Replaced SELECT * with an explicit column list"],
-  "risks": ["Result columns changed order"],
+  "winner": "inconclusive",
+  "summary": "<one or two sentences comparing the two procedures, citing metric values>",
+  "differences": ["<a code or behavior difference you can see>"],
+  "risks": ["<a risk the optimized version introduces>"],
   "confidence": 0.5
 }
 

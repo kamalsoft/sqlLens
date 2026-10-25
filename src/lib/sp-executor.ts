@@ -64,11 +64,18 @@ function nextRecordNumber(): string {
 const fmt = (v: number | null): string => (v === null ? 'n/a' : `${v}ms`);
 
 /** Remove any connection detail that a driver error message may echo back. */
-function scrubConnection(message: string, config: Partial<ExecConnection>): string {
+export function scrubConnection(message: string, config: Partial<ExecConnection>): string {
   let out = String(message);
-  for (const v of [config.password, config.username, config.host, config.database]) {
-    if (v && v.length >= 3) out = out.split(v).join('[redacted]');
+  const escape = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const secrets = [config.password, config.username].filter((v): v is string => !!v);
+  const others = [config.host, config.database].filter((v): v is string => !!v && v.length >= 3);
+  for (const v of secrets) {
+    // Short secrets match whole tokens only, so messages are not shredded; longer ones match anywhere.
+    out = v.length >= 3
+      ? out.split(v).join('[redacted]')
+      : out.replace(new RegExp(`(?<![A-Za-z0-9_])${escape(v)}(?![A-Za-z0-9_])`, 'g'), '[redacted]');
   }
+  for (const v of others) out = out.split(v).join('[redacted]');
   return out;
 }
 

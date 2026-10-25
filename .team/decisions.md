@@ -220,3 +220,19 @@ Options: A remove `@prisma/client`, `prisma`, `prisma.config.ts` and the postins
 Recommendation: A — nothing uses it; it reduces dependencies and audit findings and stops postinstall writing into `.claude/skills`. Do it as a new hygiene task, P7-10, which needs approval for the package changes.
 Impact if delayed: none blocking
 User decision: A, as recommended. Executed via task P7-10. (2026-10-24, reply "1, 2, 3")
+
+### D-034 MSSQL batch COMMIT bypass via dynamic SQL
+Status: APPROVED
+Context (evidence): security part 2 (2026-10-25), Medium. `src/lib/execution/sql-scan.ts:86` masks string literals before the COMMIT/ROLLBACK check, so `EXEC('COMMIT')`, `sp_executesql N'COMMIT'` or calling a committing procedure inside an MSSQL batch commits the outer transaction (breaks D-005 "a batch never commits"). PostgreSQL is not affected.
+Options: A reject `EXEC`/`EXECUTE`/`sp_executesql` in MSSQL batches (procedure mode still runs procedures) / B open the batch with nested `BEGIN TRAN` ×2 and check `@@TRANCOUNT` after; report an error if it dropped (one stray COMMIT stays rolled back; repeated COMMITs are detected but not undone) / C A + B
+Recommendation: C — A blocks the known paths; B is defense in depth for anything the scanner misses
+Impact if delayed: D-005 guarantee for SQL Server batches; security sign-off on SQL execution
+User decision: C (A + B), as recommended (2026-10-25)
+
+### D-035 Review quality with Qwen2.5-0.5B
+Status: APPROVED
+Context (evidence): lead experiments 2026-10-25 on the user's 4 KB procedure (scratchpad, not committed). v2, 1536 tokens: the model loops on one row until the limit (129 s, truncated JSON) and copies the prompt example rows. v2 + repetition_penalty 1.15 + "max 5 rows" rule: closes the JSON early, but every evidence string is invented and values fall outside the enums. v1: 7–10 s, short, generic, and invents a "SQL injection" issue the procedure doesn't have.
+Options: A use a larger ONNX instruct model as the default (e.g. a 1.5B–3B Qwen2.5 ONNX build; download size and CPU time grow about 3–6×; the repo ID must pass the P5-01 preflight) / B keep 0.5B, default to schema v1, and label results "low-confidence small model" / C both: v1 for models under 1B, v2 offered for larger ones
+Recommendation: C
+Impact if delayed: DoD review quality; P5-06 catalog and default model (D-026)
+User decision: C (both), as recommended (2026-10-25)

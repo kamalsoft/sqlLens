@@ -15,6 +15,9 @@ export type GenerateOptions = {
 
 export type Dtype = "q4" | "q8" | "fp16" | "fp32";
 
+/** `hitTokenLimit`: generation used (nearly) its whole new-token budget. */
+export type GenerateResult = { text: string; hitTokenLimit: boolean };
+
 export type TextGenerator = {
   tokenizer?: {
     apply_chat_template?: (
@@ -222,7 +225,7 @@ async function runGeneration(
   messages: ChatMessage[],
   opts: GenerateOptions,
   stopper: { interrupt?: () => void },
-): Promise<string> {
+): Promise<GenerateResult> {
   const dtype = await detectDtype(modelDir);
   const generator = await getPipeline(modelDir, dtype);
 
@@ -259,15 +262,19 @@ async function runGeneration(
   }
 
   const sample = opts.temperature > 0;
+  const budget = Math.min(opts.maxNewTokens, remaining);
   const output = await generator(promptText, {
-    max_new_tokens: Math.min(opts.maxNewTokens, remaining),
+    max_new_tokens: budget,
     ...(sample ? { temperature: opts.temperature } : {}),
     do_sample: sample,
     return_full_text: false,
     ...(criteria ? { stopping_criteria: criteria } : {}),
   });
 
-  return output[0]?.generated_text?.trim() ?? "";
+  const text = output[0]?.generated_text?.trim() ?? "";
+  // Re-encoding can differ by a few tokens from what was generated.
+  const outputTokens = generator.tokenizer?.encode?.(text)?.length ?? Math.ceil(text.length / 3);
+  return { text, hitTokenLimit: outputTokens >= budget - 8 };
 }
 
 /**
@@ -280,10 +287,18 @@ export async function generateText(
   messages: ChatMessage[],
   opts: GenerateOptions,
 ): Promise<string> {
+  return (await generateTextDetailed(modelDir, messages, opts)).text;
+}
+
+export async function generateTextDetailed(
+  modelDir: string,
+  messages: ChatMessage[],
+  opts: GenerateOptions,
+): Promise<GenerateResult> {
   if (busy) throw new InferenceBusyError();
 
   if (isFakeInferenceEnabled()) {
-    return fakeReview(messages);
+    return { text: fakeReview(messages), hitTokenLimit: false };
   }
 
   busy = true;

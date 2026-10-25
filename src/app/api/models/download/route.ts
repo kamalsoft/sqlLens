@@ -41,12 +41,33 @@ function resolveDirectory(value?: string) {
   );
 }
 
+class UnsafePathError extends Error {}
+
+/** True only when target is strictly inside root (never root itself). */
+function isInside(root: string, target: string) {
+  const relative = path.relative(path.resolve(root), path.resolve(target));
+  return (
+    relative !== "" &&
+    relative !== ".." &&
+    !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative)
+  );
+}
+
+/** Removes a directory tree only if it resolves inside the download root. */
+async function safeRemove(root: string, target: string) {
+  if (!isInside(root, target)) {
+    throw new UnsafePathError("Refusing to remove a path outside the download root");
+  }
+  await rm(target, { recursive: true, force: true });
+}
+
 function modelDirectory(root: string, modelId: string) {
   const safeName = modelId.replace(/[^a-zA-Z0-9._-]/g, "_");
   const directory = path.resolve(root, safeName);
 
-  if (!directory.startsWith(`${root}${path.sep}`)) {
-    throw new Error("Invalid model directory");
+  if (!isInside(root, directory)) {
+    throw new UnsafePathError("Invalid model directory");
   }
 
   return directory;
@@ -109,6 +130,7 @@ export async function POST(request: Request) {
   }
 
   let temporaryDestination: string | undefined;
+  let downloadRoot: string | undefined;
 
   try {
     const parsed = await readJson(request);
@@ -143,11 +165,23 @@ export async function POST(request: Request) {
       );
     }
     const root = resolveDirectory(config.downloadDirectory);
-    const destination = modelDirectory(root, body.modelId);
+    downloadRoot = root;
+    let destination: string;
+    try {
+      destination = modelDirectory(root, body.modelId);
+    } catch (pathError) {
+      if (pathError instanceof UnsafePathError) {
+        return NextResponse.json(
+          { error: "Invalid modelId", field: "modelId" },
+          { status: 400 },
+        );
+      }
+      throw pathError;
+    }
 
     temporaryDestination = `${destination}.download-${Date.now()}`;
 
-    await rm(temporaryDestination, { recursive: true, force: true });
+    await safeRemove(root, temporaryDestination);
     await mkdir(temporaryDestination, { recursive: true });
 
     await downloadRepository(
@@ -175,7 +209,7 @@ export async function POST(request: Request) {
     const validation = await validateDownloadedModel(temporaryDestination);
 
     if (!validation.valid) {
-      await rm(temporaryDestination, { recursive: true, force: true });
+      await safeRemove(root, temporaryDestination);
 
       return NextResponse.json(
         {
@@ -188,7 +222,7 @@ export async function POST(request: Request) {
       );
     }
 
-    await rm(destination, { recursive: true, force: true });
+    await safeRemove(root, destination);
     await rename(temporaryDestination, destination);
 
     return NextResponse.json({
@@ -199,11 +233,12 @@ export async function POST(request: Request) {
       validation: await validateDownloadedModel(destination),
     });
   } catch (error) {
-    if (temporaryDestination) {
-      await rm(temporaryDestination, {
-        recursive: true,
-        force: true,
-      });
+    if (temporaryDestination && downloadRoot) {
+      try {
+        await safeRemove(downloadRoot, temporaryDestination);
+      } catch (cleanupError) {
+        logError("Model download cleanup failed:", cleanupError);
+      }
     }
 
     if (error instanceof ModelDownloadError) {

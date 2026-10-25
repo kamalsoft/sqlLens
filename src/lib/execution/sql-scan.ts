@@ -87,3 +87,16 @@ export function assertNoTransactionControl(sql: string, dialect: Dialect): void 
     throw new ExecRejectedError('Transaction control statements are not allowed in a batch');
   }
 }
+
+/**
+ * D-034: in MSSQL batch mode, EXEC/EXECUTE/sp_executesql can run text this scan cannot see
+ * (e.g. dynamic COMMIT). Procedures must go through procedure mode.
+ */
+export function assertNoDynamicExec(sql: string, dialect: Dialect): void {
+  if (dialect !== 'mssql') return;
+  const masked = maskSql(sql, dialect);
+  // Bracketed [sp_executesql] is blanked by maskSql, so also check the raw text (conservative).
+  if (/\b(EXEC|EXECUTE|sp_executesql)\b/i.test(masked) || /\[\s*sp_executesql\s*\]/i.test(sql)) {
+    throw new ExecRejectedError('EXEC, EXECUTE and sp_executesql are not allowed in a batch; use procedure mode to run procedures');
+  }
+}

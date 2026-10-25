@@ -21,6 +21,7 @@ type AppSettings = {
   defaultEngine: Engine;
   maxSqlLength: number;
   inferenceTimeoutMs: number;
+  maxNewTokens: number;
   logSqlText: boolean;
   shareTtlHours: number;
 };
@@ -41,6 +42,7 @@ const defaultSettings: AppSettings = {
   defaultEngine: "simulation",
   maxSqlLength: 100000,
   inferenceTimeoutMs: 120000,
+  maxNewTokens: 1536,
   logSqlText: true,
   shareTtlHours: 24,
 };
@@ -224,6 +226,16 @@ export default function SettingsPage() {
               type="number"
               value={settings.inferenceTimeoutMs}
               onChange={num("inferenceTimeoutMs")}
+              disabled={disabled}
+            />
+          </Field>
+
+          <Field label="Max New Tokens (model output)" name="maxNewTokens" error={error}>
+            <input
+              id="setting-maxNewTokens"
+              type="number"
+              value={settings.maxNewTokens}
+              onChange={num("maxNewTokens")}
               disabled={disabled}
             />
           </Field>

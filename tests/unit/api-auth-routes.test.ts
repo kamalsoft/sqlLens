@@ -1,11 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
-vi.mock("@/lib/ai-transformer", () => ({
-  compareStoredProcedures: vi.fn(async () => ({ winner: "optimized" })),
-}));
 
 const cfgPath = path.join(mkdtempSync(path.join(os.tmpdir(), "sqllens-cfg-")), "appconfig.json");
 process.env.SQLLENS_CONFIG_PATH = cfgPath;
@@ -130,11 +126,11 @@ describe("protected routes require a session", () => {
     const s = await share(get("/api/share/abc"), { params: Promise.resolve({ token: "abc" }) });
     expect(s.status).toBe(401);
   });
-  it("compare works with a session and validates input", async () => {
+  it("compare validates input with a session (model run covered in compare-route.test.ts)", async () => {
     const cookie = createTestSession();
-    const ok = await compare(post("/api/compare", { original: "SELECT 1", optimized: "SELECT 2" }, cookie));
-    expect(ok.status).toBe(200);
-    const bad = await compare(post("/api/compare", { original: "", optimized: "x" }, cookie));
+    const noModel = await compare(post("/api/compare", { original: "SELECT 1", optimized: "SELECT 2" }, cookie));
+    expect(noModel.status).toBe(400);
+    const bad = await compare(post("/api/compare", { modelId: "m", original: "", optimized: "x" }, cookie));
     expect(bad.status).toBe(400);
     expect((await audit(get("/api/audit", cookie))).status).toBe(200);
   });

@@ -18,3 +18,9 @@ Append-only learnings (date, task ID, fact, evidence path:line). Scribe promotes
 - Batch guard: COMMIT/ROLLBACK (mssql) and tx-control leading keywords (pg) are rejected, since a batch that commits defeats the rollback. `maskSql` handles E'..\'..' escapes so a backslash cannot hide a COMMIT. Non-transactional side effects (DDL that autocommits in mssql, sequences, xp_cmdshell, linked servers) are NOT undone by rollback.
 - pg procedure mode is CALL only (timing only, other metrics null); the C12 target has no function flag.
 - Gotcha: the legacy UI sends trustServerCertificate=true, so legacy requests get the TLS warning by design.
+
+## D-034 (option C) - MSSQL batch hardening
+- sql-scan `assertNoDynamicExec`: rejects EXEC/EXECUTE/sp_executesql after maskSql. maskSql blanks `[...]`, so bracketed `[sp_executesql]` is also checked on raw text (conservative).
+- mssql.ts batch mode: BEGIN TRAN folded into the SET STATISTICS batch (tx.begin = 1, BEGIN TRAN = 2); `SELECT @@TRANCOUNT` probe on a separate request after the user batch; <2 => error, finally-block rollback still runs. Procedure mode untouched.
+- Tests are mocked-driver only (tests/unit/execution-mssql.test.ts); no live DB run. Needs Security sign-off.
+- scrubConnection (sp-executor) now scrubs short secrets as whole tokens.

@@ -19,6 +19,8 @@ export async function GET(request: Request) {
         id: model.id,
         name: model.name,
         compatible: model.compatible,
+        parameterEstimate: model.parameterEstimate,
+        small: model.small,
         loaded: state?.loaded ?? false,
         loading: state?.loading ?? false,
         lastError: state?.lastError ?? null,

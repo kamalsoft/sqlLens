@@ -73,6 +73,11 @@ describe("share links", () => {
     expect(hours).toBeGreaterThan(1.99);
     expect(hours).toBeLessThanOrEqual(2);
     expect(listAudits(a.sessionId)[0].hasShare).toBe(true);
+    const detail = await (await auditById(call("GET", undefined, a.cookie), ctx(id))).json();
+    expect(detail).toMatchObject({ shared: true, shareExpiresAt: created.expiresAt });
+    const listed = listAudits(a.sessionId)[0];
+    expect(listed).toMatchObject({ shared: true, shareExpiresAt: created.expiresAt });
+    expect(JSON.stringify(listed) + JSON.stringify(detail)).not.toContain(created.url.split("/")[2]);
 
     const token = created.url.split("/")[2];
     expect((await view(token)).status).toBe(401);
@@ -88,7 +93,7 @@ describe("share links", () => {
     expect((await unshare(call("DELETE", undefined, b.cookie), ctx(id))).status).toBe(404);
     expect((await unshare(call("DELETE", undefined, a.cookie), ctx(id))).status).toBe(200);
     expect((await view(def.url.split("/")[2], a.cookie)).status).toBe(404);
-    expect(listAudits(a.sessionId)[0].hasShare).toBe(false);
+    expect(listAudits(a.sessionId)[0]).toMatchObject({ hasShare: false, shared: false, shareExpiresAt: null });
 
     const again = await (await mk({}, a.cookie)).json();
     db.prepare("UPDATE audit_requests SET share_expires_at = ? WHERE id = ?").run(new Date(Date.now() - 1000).toISOString(), id);

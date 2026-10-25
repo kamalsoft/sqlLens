@@ -1,6 +1,6 @@
 import sql from 'mssql';
 import { parseMssqlStatistics } from '../telemetry/mssql';
-import { assertNoTransactionControl } from './sql-scan';
+import { assertNoDynamicExec, assertNoTransactionControl } from './sql-scan';
 import {
   coerceParam, ExecAbortError, ExecTimeoutError, onAbort, TLS_WARNING,
   type DriverOutcome, type ExecConnection, type ExecOptions, type ExecTarget, type ParamType,
@@ -74,7 +74,10 @@ function extractPlans(recordsets: unknown[] | undefined): string | null {
 export async function executeMssql(
   conn: ExecConnection, target: ExecTarget, opts: ExecOptions,
 ): Promise<DriverOutcome> {
-  if (target.kind === 'batch') assertNoTransactionControl(target.sql, 'mssql');
+  if (target.kind === 'batch') {
+    assertNoTransactionControl(target.sql, 'mssql');
+    assertNoDynamicExec(target.sql, 'mssql');
+  }
   const { config, warnings } = buildMssqlConfig(conn, opts.timeoutMs);
   const pool = new sql.ConnectionPool(config);
   let current: MssqlRequestLike | null = null;
@@ -105,7 +108,8 @@ export async function executeMssql(
 
     const setup = mk();
     current = setup;
-    await setup.batch(SET_STATS);
+    // D-034: batch mode nests a second transaction so @@TRANCOUNT is 2 before user SQL.
+    await setup.batch(target.kind === 'batch' ? `${SET_STATS} BEGIN TRAN;` : SET_STATS);
     checkFlags();
 
     const infos: string[] = [];
@@ -125,6 +129,21 @@ export async function executeMssql(
     }
     const wallMs = performance.now() - started;
     checkFlags();
+
+    if (target.kind === 'batch') {
+      const probe = mk();
+      current = probe;
+      const pr = await probe.batch('SELECT @@TRANCOUNT AS tc');
+      checkFlags();
+      let tc: number | null = null;
+      for (const rs of pr.recordsets ?? []) {
+        const v = Array.isArray(rs) ? (rs[0] as Record<string, unknown> | undefined)?.tc : undefined;
+        if (typeof v === 'number') { tc = v; break; }
+      }
+      if (tc === null || tc < 2) {
+        throw new Error('A COMMIT/ROLLBACK escaped the batch (transaction count dropped below 2); the batch was rolled back and its results discarded');
+      }
+    }
 
     const stats = parseMssqlStatistics(infos.join('\n'));
     stats.plan = extractPlans(result.recordsets);

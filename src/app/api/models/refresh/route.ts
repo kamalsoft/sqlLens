@@ -30,6 +30,16 @@ const defaultModels: ModelRecord[] = [
     sourceUrl: "https://huggingface.co/onnx-community/Qwen2.5-0.5B-Instruct-ONNX",
     lastUsed: "Never",
   },
+  {
+    id: "onnx-community/Qwen2.5-1.5B-Instruct",
+    name: "Qwen2.5 1.5B Instruct (ONNX)",
+    provider: "Hugging Face",
+    version: "latest",
+    size: "Repository",
+    status: "available",
+    sourceUrl: "https://huggingface.co/onnx-community/Qwen2.5-1.5B-Instruct",
+    lastUsed: "Never",
+  },
 ];
 
 function resolveDirectory(value?: string) {

@@ -8,7 +8,11 @@ export interface DatadogLog {
   status?: string;
   service?: string;
   message?: string;
-  attributes?: Record<string, any>;
+  attributes?: {
+    error?: { code?: string };
+    db?: { error_code?: string };
+    [key: string]: unknown;
+  };
   tags?: string[];
   host?: string;
   error?: {

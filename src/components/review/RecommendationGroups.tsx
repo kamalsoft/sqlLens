@@ -10,6 +10,8 @@ export type Recommendation = {
   severity: (typeof SEVERITY_ORDER)[number];
   category: string;
   title: string;
+  /** Why it matters (v1 `explanation`); optional. */
+  detail?: string;
   recommendation: string;
 };
 
@@ -24,6 +26,7 @@ export function recommendationsFromV1(result: ReviewV1): Recommendation[] {
     severity: issue.severity,
     category: UNCATEGORIZED,
     title: issue.title,
+    detail: issue.explanation,
     recommendation: issue.recommendation,
   }));
 }
@@ -74,15 +77,20 @@ export function RecommendationGroups({
     <div data-testid="recommendation-groups">
       {groups.map((group) => (
         <section key={group.severity} aria-label={`${group.severity} recommendations`}>
-          <h4 data-testid="severity-heading">{group.severity.toUpperCase()}</h4>
+          <h4 className={`review-severity review-severity-${group.severity}`} data-testid="severity-heading">
+            {group.severity.toUpperCase()}
+          </h4>
           {group.categories.map(({ category, items: rows }) => (
             <div key={category}>
-              <h5 data-testid="category-heading">{category.replace(/_/g, " ")}</h5>
-              <ul>
+              {category !== UNCATEGORIZED && (
+                <h5 data-testid="category-heading">{category.replace(/_/g, " ")}</h5>
+              )}
+              <ul className="review-recommendations">
                 {rows.map((row, index) => (
                   <li key={`${row.title}-${index}`}>
                     <strong>{row.title}</strong>
-                    <p>{row.recommendation}</p>
+                    {row.detail && <p>{row.detail}</p>}
+                    {row.recommendation && <p>{row.recommendation}</p>}
                     {renderActions?.(row)}
                   </li>
                 ))}

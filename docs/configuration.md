@@ -14,6 +14,8 @@ Hugging Face token (current behavior): the app reads the token from the `apiKey`
 
 Planned: P1-03 moves the app to `HF_TOKEN` (D-007), and P1-02 removes the `apiKey` field. Never commit a token or print its value (see `AGENTS.md`, "Secrets and Generated Files").
 
+`downloadDirectory` is validated on write: it must resolve (symlinks followed via the nearest existing ancestor) to a path strictly inside the real home directory, and its first segment under home must not start with `.` (rejects `~/.ssh`, `~/.aws`). `shareTtlHours` accepts integers 1-720, matching the share route cap. `maxNewTokens` (default 1536, integers 64-8192) caps the tokens the model generates for review and compare. A v2 review with a rewritten procedure usually needs over 1000. Higher values take longer, so keep `inferenceTimeoutMs` in step.
+
 ## Environment variables
 
 | Name | Purpose |
