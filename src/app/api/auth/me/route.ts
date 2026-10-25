@@ -1,35 +1,17 @@
-import { NextResponse } from 'next/server';
-import db from '@/db';
-import { cookies } from 'next/headers';
+import { NextResponse } from "next/server";
+import { getSessionFromRequest } from "@/lib/auth";
+import { logError } from "@/lib/redact";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get('session_token')?.value;
-
-    if (!token) {
-      return NextResponse.json({ authenticated: false });
-    }
-
-    const session = db.prepare(`
-      SELECT s.*, u.username 
-      FROM sessions s 
-      JOIN users u ON s.user_id = u.id 
-      WHERE s.token = ? AND s.is_active = 1
-    `).get(token) as any;
-
-    if (!session) {
-      return NextResponse.json({ authenticated: false });
-    }
-
-    // Update last_accessed_at
-    db.prepare('UPDATE sessions SET last_accessed_at = CURRENT_TIMESTAMP WHERE token = ?').run(token);
-
-    return NextResponse.json({ 
-      authenticated: true, 
-      user: { id: session.user_id, username: session.username } 
+    const session = getSessionFromRequest(request);
+    if (!session) return NextResponse.json({ authenticated: false });
+    return NextResponse.json({
+      authenticated: true,
+      user: { id: session.userId, username: session.username },
     });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error) {
+    logError("[auth/me]", error);
+    return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
 }

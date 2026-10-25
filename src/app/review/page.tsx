@@ -1,6 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useApi } from "@/components/api-client";
+import { ReviewResultView } from "@/components/review/ReviewResultView";
+import {
+  DEFAULT_SCHEMA_VERSION,
+  type ReviewV1,
+  type ReviewV2,
+  type SchemaVersion,
+} from "@/lib/review-schema";
 
 type Model = {
   id: string;
@@ -9,65 +17,84 @@ type Model = {
   compatible: boolean;
 };
 
-type AnalysisResult = {
-  summary: string;
-  issues: Array<{
-    severity: "critical" | "high" | "medium" | "low";
-    title: string;
-    explanation: string;
-    recommendation: string;
-  }>;
-  rewrittenProcedure: string;
-  confidence: number;
+type ModelStatus = {
+  id: string;
+  loaded: boolean;
+  loading: boolean;
+  lastError: string | null;
 };
+
+type AuditItem = { id: string; type: string; createdAt: string };
 
 type ReviewResponse = {
+  id?: string;
   model?: string;
-  result?: AnalysisResult;
-  error?: string;
+  schemaVersion?: SchemaVersion;
+  promptPath?: string;
+  result?: ReviewV1 | ReviewV2;
 };
 
+type ReviewOutput = { schemaVersion: SchemaVersion; result: ReviewV1 | ReviewV2 };
+
+function failureMessage(status: number, error: string | null): string {
+  if (status === 429) return `The reviewer is busy. ${error ?? "Wait for the current review to finish, then retry."}`;
+  if (status === 504) return "The model timed out. Try a smaller input or a smaller model.";
+  if (status === 502) return "The model's output could not be parsed as a valid review.";
+  return error ?? "Stored procedure analysis failed";
+}
+
 export default function ReviewPage() {
+  const api = useApi();
   const [models, setModels] = useState<Model[]>([]);
   const [modelId, setModelId] = useState("");
   const [sql, setSql] = useState("");
-  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [result, setResult] = useState<ReviewOutput | null>(null);
+  const [schemaVersion, setSchemaVersion] = useState<SchemaVersion>(DEFAULT_SCHEMA_VERSION);
+  const [statuses, setStatuses] = useState<ModelStatus[]>([]);
+  const [audits, setAudits] = useState<AuditItem[]>([]);
+  const [executionAuditId, setExecutionAuditId] = useState("");
+  const [details, setDetails] = useState("");
   const [error, setError] = useState("");
   const [loadingModels, setLoadingModels] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
 
   useEffect(() => {
-    async function loadModels() {
-      try {
-        const response = await fetch("/api/review/models", {
-          cache: "no-store",
-        });
-
-        const payload = (await response.json()) as {
-          models?: Model[];
-          error?: string;
-        };
-
-        if (!response.ok) {
-          throw new Error(payload.error || "Unable to load installed models");
-        }
-
-        const installedModels = payload.models ?? [];
+    let cancelled = false;
+    void api<{ models?: Model[] }>(
+      "/api/review/models",
+      { cache: "no-store" },
+      "Unable to load installed models"
+    ).then((res) => {
+      if (cancelled) return;
+      if (res.ok) {
+        const installedModels = res.data?.models ?? [];
         setModels(installedModels);
         setModelId(installedModels[0]?.id ?? "");
-      } catch (cause) {
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : "Unable to load installed models"
-        );
-      } finally {
-        setLoadingModels(false);
+      } else if (res.status !== 401) {
+        setError(res.error ?? "Unable to load installed models");
       }
-    }
+      setLoadingModels(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
 
-    void loadModels();
-  }, []);
+  // Optional extras: degrade silently if the endpoints are unavailable.
+  useEffect(() => {
+    let cancelled = false;
+    void api<{ models?: ModelStatus[] }>("/api/models/status", { cache: "no-store" }).then((res) => {
+      if (!cancelled && res.ok) setStatuses(res.data?.models ?? []);
+    });
+    void api<{ audits?: AuditItem[] }>("/api/audit", { cache: "no-store" }).then((res) => {
+      if (!cancelled && res.ok) {
+        setAudits((res.data?.audits ?? []).filter((audit) => audit.type === "EXECUTE"));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
 
   async function analyzeProcedure() {
     const procedure = sql.trim();
@@ -85,44 +112,44 @@ export default function ReviewPage() {
     setAnalyzing(true);
     setError("");
     setResult(null);
+    setDetails("");
 
-    try {
-      const response = await fetch("/api/review", {
+    const res = await api<ReviewResponse>(
+      "/api/review",
+      {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           modelId,
           sql: procedure,
-          max_new_tokens: 1200,
-          temperature: 0.2,
-          do_sample: false,
-          return_full_text: false,
+          schemaVersion,
+          ...(executionAuditId ? { executionAuditId } : {}),
         }),
-      });
+      },
+      "Stored procedure analysis failed"
+    );
 
-      const payload = (await response.json()) as ReviewResponse;
-
-      if (!response.ok) {
-        throw new Error(payload.error || "Stored procedure analysis failed");
+    if (res.ok) {
+      if (res.data?.result) {
+        setResult({
+          schemaVersion: res.data.schemaVersion ?? schemaVersion,
+          result: res.data.result,
+        });
+      } else {
+        setError("The selected model returned an empty result.");
       }
-
-      if (!payload.result) {
-        throw new Error("The selected model returned an empty result.");
+    } else if (res.status !== 401) {
+      setError(failureMessage(res.status, res.error));
+      const d = res.details as { responsePreview?: unknown } | null;
+      if (res.status === 502 && d && typeof d.responsePreview === "string") {
+        setDetails(d.responsePreview);
       }
-
-      setResult(payload.result);
-    } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "Stored procedure analysis failed"
-      );
-    } finally {
-      setAnalyzing(false);
     }
+    setAnalyzing(false);
   }
 
   const selectedModel = models.find((model) => model.id === modelId);
+  const selectedStatus = statuses.find((status) => status.id === modelId);
   const canAnalyze = Boolean(
     selectedModel?.compatible && sql.trim() && !analyzing
   );
@@ -145,6 +172,7 @@ export default function ReviewPage() {
       {error && (
         <div className="review-alert" role="alert">
           {error}
+          {details && <pre aria-label="Response preview">{details}</pre>}
         </div>
       )}
 
@@ -190,6 +218,48 @@ export default function ReviewPage() {
             )}
           </label>
 
+          {selectedStatus && (
+            <small className="review-field-help" data-testid="model-status">
+              {selectedStatus.lastError
+                ? `Model error: ${selectedStatus.lastError}`
+                : selectedStatus.loading
+                  ? "Model status: loading"
+                  : selectedStatus.loaded
+                    ? "Model status: loaded"
+                    : "Model status: not loaded (loads on first review)"}
+            </small>
+          )}
+
+          <label className="review-field">
+            <span>Result schema</span>
+            <select
+              value={schemaVersion}
+              onChange={(event) => setSchemaVersion(event.target.value as SchemaVersion)}
+              disabled={analyzing}
+            >
+              <option value="v2">v2 (tables: findings, performance, security, testing)</option>
+              <option value="v1">v1 (summary and issues)</option>
+            </select>
+          </label>
+
+          {audits.length > 0 && (
+            <label className="review-field">
+              <span>Include telemetry from execution</span>
+              <select
+                value={executionAuditId}
+                onChange={(event) => setExecutionAuditId(event.target.value)}
+                disabled={analyzing}
+              >
+                <option value="">None</option>
+                {audits.map((audit) => (
+                  <option key={audit.id} value={audit.id}>
+                    {new Date(audit.createdAt).toLocaleString()} ({audit.id.slice(0, 8)})
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
           <label className="review-field">
             <span>Stored procedure</span>
             <textarea
@@ -234,32 +304,13 @@ END`}
           </div>
 
           {analyzing ? (
-            <div className="review-state">
+            <div className="review-state" role="status">
               <div className="review-spinner" />
               <strong>Running local analysis</strong>
               <p>The selected model is processing your procedure.</p>
             </div>
           ) : result ? (
-            <section>
-              <h3>Summary</h3>
-              <p>{result.summary}</p>
-
-              <h3>Issues</h3>
-              {result.issues.map((issue, index) => (
-                <article key={`${issue.title}-${index}`}>
-                  <strong>
-                    {issue.severity.toUpperCase()}: {issue.title}
-                  </strong>
-                  <p>{issue.explanation}</p>
-                  <p>{issue.recommendation}</p>
-                </article>
-              ))}
-
-              <h3>Rewritten Procedure</h3>
-              <pre>{result.rewrittenProcedure}</pre>
-
-              <p>Confidence: {result.confidence}</p>
-            </section>
+            <ReviewResultView schemaVersion={result.schemaVersion} result={result.result} />
           ) : (
             <div className="review-state">
               <div className="review-state-icon">✦</div>

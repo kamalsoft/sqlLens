@@ -1,22 +1,20 @@
 import os from "node:os";
 import path from "node:path";
-import { createWriteStream } from "node:fs";
-import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
 import {
-  access,
   mkdir,
-  readFile,
   readdir,
   rename,
   rm,
   stat,
-  unlink,
   writeFile,
 } from "node:fs/promises";
 import { NextResponse } from "next/server";
 
 import { readAppConfig } from "@/lib/app-config";
+import { requireSession } from "@/lib/auth";
+import { rateLimit } from "@/lib/request-guard";
+import { logError } from "@/lib/redact";
+import { readJson } from "@/lib/validation/body";
 import { validateDownloadedModel } from "@/lib/validate-model";
 import {
   ModelDownloadError,
@@ -29,22 +27,8 @@ type DownloadRequest = {
   sourceUrl?: string;
   settings?: {
     downloadDirectory?: string;
-    huggingFaceToken?: string;
-    apiKey?: string;
     maxConcurrentDownloads?: number;
   };
-};
-
-type HuggingFaceFile = {
-  rfilename?: string;
-  size?: number;
-};
-
-type ModelMetadata = {
-  id: string;
-  name: string;
-  sourceUrl: string;
-  downloadedAt: string;
 };
 
 function resolveDirectory(value?: string) {
@@ -89,90 +73,6 @@ function validateModelUrl(value: string) {
   };
 }
 
-function authHeaders(token?: string): HeadersInit {
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
-async function getRepositoryFiles(
-  owner: string,
-  repository: string,
-  token?: string,
-) {
-  const response = await fetch(
-    `https://huggingface.co/api/models/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`,
-    {
-      headers: authHeaders(token),
-      cache: "no-store",
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(
-      `Unable to read Hugging Face metadata: HTTP ${response.status}`,
-    );
-  }
-
-  const metadata = (await response.json()) as {
-    siblings?: HuggingFaceFile[];
-  };
-
-  const files = (metadata.siblings ?? [])
-    .map((file) => file.rfilename)
-    .filter((file): file is string => {
-      if (!file || file.startsWith(".git/") || file.includes("..")) {
-        return false;
-      }
-
-      return !file.startsWith(".") || file === ".gitattributes";
-    });
-
-  if (files.length === 0) {
-    throw new Error("The Hugging Face repository contains no files");
-  }
-
-  return files;
-}
-
-async function downloadFile(
-  owner: string,
-  repository: string,
-  filename: string,
-  destination: string,
-  token?: string,
-) {
-  const url =
-    `https://huggingface.co/${encodeURIComponent(owner)}/` +
-    `${encodeURIComponent(repository)}/resolve/main/` +
-    filename.split("/").map(encodeURIComponent).join("/");
-
-  const response = await fetch(url, {
-    headers: authHeaders(token),
-    redirect: "follow",
-  });
-
-  if (!response.ok || !response.body) {
-    throw new Error(`Failed to download ${filename}: HTTP ${response.status}`);
-  }
-
-  await mkdir(path.dirname(destination), { recursive: true });
-
-  const temporaryFile = `${destination}.part`;
-
-  await pipeline(
-    Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]),
-    createWriteStream(temporaryFile),
-  );
-
-  const fileStats = await stat(temporaryFile);
-
-  if (fileStats.size === 0) {
-    throw new Error(`Downloaded file is empty: ${filename}`);
-  }
-
-  await writeFile(destination, await readFile(temporaryFile));
-  await unlink(temporaryFile);
-}
-
 async function calculateSize(directory: string): Promise<number> {
   let total = 0;
 
@@ -197,30 +97,51 @@ function formatSize(bytes: number) {
   return `${Math.max(1, Math.round(bytes / 1024 / 1024))} MB`;
 }
 
-async function modelAlreadyInstalled(directory: string) {
-  try {
-    await access(path.join(directory, "sqlens-model.json"));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export async function POST(request: Request) {
+  const auth = requireSession(request);
+  if (!auth.ok) return auth.response;
+
+  if (!rateLimit(`download:${auth.session.sessionId}`, 5, 60_000)) {
+    return NextResponse.json(
+      { error: "Too many download requests. Try again in a minute." },
+      { status: 429 },
+    );
+  }
+
   let temporaryDestination: string | undefined;
 
   try {
-    const body = (await request.json()) as DownloadRequest;
+    const parsed = await readJson(request);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.body as DownloadRequest;
     const config = await readAppConfig();
 
-    if (!body.modelId || !body.sourceUrl) {
+    if (
+      typeof body.modelId !== "string" ||
+      typeof body.sourceUrl !== "string" ||
+      !body.modelId ||
+      !body.sourceUrl
+    ) {
       return NextResponse.json(
         { error: "modelId and sourceUrl are required" },
         { status: 400 },
       );
     }
 
-    const { owner, repository } = validateModelUrl(body.sourceUrl);
+    let owner: string;
+    let repository: string;
+    try {
+      ({ owner, repository } = validateModelUrl(body.sourceUrl));
+    } catch (urlError) {
+      return NextResponse.json(
+        {
+          error:
+            urlError instanceof Error ? urlError.message : "Invalid model URL",
+          field: "sourceUrl",
+        },
+        { status: 400 },
+      );
+    }
     const root = resolveDirectory(config.downloadDirectory);
     const destination = modelDirectory(root, body.modelId);
 
@@ -233,7 +154,7 @@ export async function POST(request: Request) {
       owner,
       repository,
       temporaryDestination,
-      config.apiKey?.trim() || undefined,
+      process.env.HF_TOKEN?.trim() || undefined,
     );
 
     await writeFile(
@@ -295,14 +216,8 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Model download failed",
-      },
-      { status: 500 },
-    );
+    logError("Model download failed:", error);
+
+    return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
 }

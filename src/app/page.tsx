@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useApi } from "@/components/api-client";
 
 type Analysis = {
   id: string;
@@ -20,39 +21,23 @@ type OverviewData = {
 };
 
 export default function OverviewPage() {
+  const api = useApi();
   const [data, setData] = useState<OverviewData | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    async function loadOverview() {
-      try {
-        const response = await fetch("/api/analysis", {
-          cache: "no-store",
-        });
-
-        const contentType = response.headers.get("content-type") || "";
-        const payload = contentType.includes("application/json")
-          ? await response.json()
-          : null;
-
-        if (!response.ok) {
-          throw new Error(
-            payload?.error || `Unable to load overview (${response.status})`
-          );
-        }
-
-        setData(payload);
-      } catch (cause) {
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : "Unable to load overview"
-        );
+    let cancelled = false;
+    void api<OverviewData>("/api/analysis", { cache: "no-store" }, "Unable to load overview").then(
+      (result) => {
+        if (cancelled) return;
+        if (result.ok && result.data) setData(result.data);
+        else if (result.status !== 401) setError(result.error ?? "Unable to load overview");
       }
-    }
-
-    void loadOverview();
-  }, []);
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
 
   return (
     <main className="overview-page">
@@ -65,9 +50,9 @@ export default function OverviewPage() {
       </header>
 
       {error ? (
-        <div className="overview-alert">{error}</div>
+        <div className="overview-alert" role="alert">{error}</div>
       ) : !data ? (
-        <div className="overview-empty">Loading overview...</div>
+        <div className="overview-empty" role="status">Loading overview...</div>
       ) : (
         <>
           <section className="overview-metrics" aria-label="Analysis metrics">

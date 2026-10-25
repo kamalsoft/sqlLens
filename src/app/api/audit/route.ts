@@ -1,27 +1,15 @@
-import { NextResponse } from 'next/server';
-import db from '@/db';
-import { cookies } from 'next/headers';
+import { NextResponse } from "next/server";
+import { listAudits } from "@/db/audit-repo";
+import { requireSession } from "@/lib/auth";
+import { logError } from "@/lib/redact";
 
-export async function GET(req: Request) {
+export async function GET(request: Request) {
+  const auth = requireSession(request);
+  if (!auth.ok) return auth.response;
   try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get('session_token')?.value;
-
-    if (!token) return NextResponse.json({ audits: [] });
-
-    const session = db.prepare('SELECT id FROM sessions WHERE token = ? AND is_active = 1').get(token) as any;
-    if (!session) return NextResponse.json({ audits: [] });
-
-    const audits = db.prepare(`
-      SELECT id, type, created_at, shared_token
-      FROM audit_requests
-      WHERE session_id = ?
-      ORDER BY created_at DESC
-      LIMIT 100
-    `).all(session.id);
-
-    return NextResponse.json({ audits });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ audits: listAudits(auth.session.sessionId) });
+  } catch (error) {
+    logError("[audit/route]", error);
+    return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
 }

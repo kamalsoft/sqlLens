@@ -105,7 +105,7 @@ export function ReviewPanel({ result, title = 'Analysis Results' }: Props) {
 
         {/* 5 Whys */}
         <Box>
-          <Text fontSize="sm" fontWeight="semibold" color="purple.400" mb={3} textTransform="uppercase" letterSpacing="wider">🔍 5 Why's Analysis</Text>
+          <Text fontSize="sm" fontWeight="semibold" color="purple.400" mb={3} textTransform="uppercase" letterSpacing="wider">🔍 5 Why&apos;s Analysis</Text>
           <Box display="flex" flexDirection="column" gap={3}>
             {result.fiveWhys.map((w, i) => (
               <Box key={i} p={4} bg="gray.800" borderRadius="lg" borderLeftWidth="3px" borderColor="purple.500">

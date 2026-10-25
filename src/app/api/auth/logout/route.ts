@@ -1,19 +1,16 @@
-import { NextResponse } from 'next/server';
-import db from '@/db';
-import { cookies } from 'next/headers';
+import { NextResponse } from "next/server";
+import { clearSessionCookie, getSessionToken, invalidateSession } from "@/lib/auth";
+import { logError } from "@/lib/redact";
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get('session_token')?.value;
-
-    if (token) {
-      db.prepare('UPDATE sessions SET is_active = 0 WHERE token = ?').run(token);
-      cookieStore.delete('session_token');
-    }
-
-    return NextResponse.json({ success: true });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const token = getSessionToken(request);
+    if (token) invalidateSession(token);
+    const response = NextResponse.json({ success: true });
+    clearSessionCookie(response);
+    return response;
+  } catch (error) {
+    logError("[auth/logout]", error);
+    return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
 }

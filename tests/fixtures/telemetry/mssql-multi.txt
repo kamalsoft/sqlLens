@@ -1,0 +1,13 @@
+SQL Server parse and compile time: 
+   CPU time = 5 ms, elapsed time = 6 ms.
+Table 'Orders'. Scan count 1, logical reads 100, physical reads 1, read-ahead reads 2, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+Table 'Customers'. Scan count 2, logical reads 10, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.
+
+ SQL Server Execution Times:
+   CPU time = 10 ms,  elapsed time = 12 ms.
+SQL Server parse and compile time: 
+   CPU time = 1 ms, elapsed time = 1 ms.
+Table 'Orders'. Scan count 3, logical reads 50, physical reads 2, read-ahead reads 1, lob logical reads 4, lob physical reads 0, lob read-ahead reads 0.
+
+ SQL Server Execution Times:
+   CPU time = 20 ms,  elapsed time = 25 ms.

@@ -3,6 +3,7 @@ import { access, readFile, readdir, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { readAppConfig } from "@/lib/app-config";
+import { requireSession } from "@/lib/auth";
 
 type ModelStatus = "installed" | "downloading" | "available" | "failed";
 
@@ -20,57 +21,15 @@ type ModelRecord = {
 
 const defaultModels: ModelRecord[] = [
   {
-    id: "microsoft/Phi-3-mini-4k-instruct",
-    name: "Phi-3 Mini 4K Instruct",
+    id: "onnx-community/Qwen2.5-0.5B-Instruct-ONNX",
+    name: "Qwen2.5 0.5B Instruct (ONNX)",
     provider: "Hugging Face",
     version: "latest",
     size: "Repository",
     status: "available",
-    sourceUrl: "https://huggingface.co/microsoft/Phi-3-mini-4k-instruct",
+    sourceUrl: "https://huggingface.co/onnx-community/Qwen2.5-0.5B-Instruct-ONNX",
     lastUsed: "Never",
   },
-  {
-    id: "mistralai/Mistral-7B-Instruct-v0.3",
-    name: "Mistral 7B Instruct",
-    provider: "Hugging Face",
-    version: "latest",
-    size: "Repository",
-    status: "available",
-    sourceUrl: "https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.3",
-    lastUsed: "Never",
-  },
-  {
-    id: "Qwen/Qwen3.8-27B4",
-    name: "Qwen3.8-27B4",
-    provider: "Hugging Face",
-    version: "latest",
-    size: "Repository",
-    status: "available",
-    sourceUrl: "https://huggingface.co/Qwen/Qwen3.8-27B",
-    lastUsed: "Never",
-  },
-  {
-    id: "Sana2030/sqlmind-lora6",
-    name: "sqlmind-lora6",
-    provider: "Hugging Face",
-    version: "latest",
-    size: "Repository",
-    status: "available",
-    sourceUrl: "https://huggingface.co/Sana2030/sqlmind-lora",
-    lastUsed: "Never",
-  },
-{
-    id: "defog/sqlcoder-7b-26",
-    name: "sqlcoder-7b-26",
-    provider: "Hugging Face",
-    version: "latest",
-    size: "Repository",
-    status: "available",
-    sourceUrl: "https://huggingface.co/defog/sqlcoder-7b-2",
-    lastUsed: "Never",
-  },
-
-  
 ];
 
 function resolveDirectory(value?: string) {
@@ -107,7 +66,10 @@ async function directorySize(directory: string): Promise<number> {
   return total;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = requireSession(request);
+  if (!auth.ok) return auth.response;
+
   const config = await readAppConfig();
   const modelsDirectory = resolveDirectory(config.downloadDirectory);
 

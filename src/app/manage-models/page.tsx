@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useApi } from "@/components/api-client";
 
 type ModelStatus = "installed" | "available" | "downloading" | "failed";
 
@@ -40,6 +41,7 @@ const filters: Array<{ value: "all" | ModelStatus; label: string }> = [
 ];
 
 export default function ManageModelsPage() {
+  const api = useApi();
   const [models, setModels] = useState<ModelRecord[]>([]);
   const [filter, setFilter] = useState<"all" | ModelStatus>("all");
   const [loading, setLoading] = useState(true);
@@ -58,36 +60,43 @@ export default function ManageModelsPage() {
     []
   );
 
+  const loadModels = useCallback(async () => {
+    const res = await api<ModelsResponse>(
+      "/api/models/refresh",
+      { method: "GET", cache: "no-store" },
+      "Unable to load models"
+    );
+    if (res.ok) {
+      setModels(res.data?.models ?? []);
+      setError("");
+    } else if (res.status !== 401) {
+      setError(res.error ?? "Unable to load models");
+    }
+    setLoading(false);
+  }, [api]);
+
   const refreshModels = useCallback(async () => {
     setRefreshing(true);
-
-    try {
-      const response = await fetch("/api/models/refresh", {
-        method: "GET",
-        cache: "no-store",
-      });
-
-      const payload = (await response.json()) as ModelsResponse;
-
-      if (!response.ok) {
-        throw new Error(payload.error || "Unable to load models");
-      }
-
-      setModels(payload.models ?? []);
-      setError("");
-    } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : "Unable to load models"
-      );
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
+    await loadModels();
+    setRefreshing(false);
+  }, [loadModels]);
 
   useEffect(() => {
-    void refreshModels();
-  }, [refreshModels]);
+    let cancelled = false;
+    void api<ModelsResponse>(
+      "/api/models/refresh",
+      { method: "GET", cache: "no-store" },
+      "Unable to load models"
+    ).then((res) => {
+      if (cancelled) return;
+      if (res.ok) setModels(res.data?.models ?? []);
+      else if (res.status !== 401) setError(res.error ?? "Unable to load models");
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
 
   const downloadModel = useCallback(
     async (model: ModelRecord) => {
@@ -109,57 +118,48 @@ export default function ManageModelsPage() {
         lastUsed: "Downloading...",
       });
 
-      try {
-        const response = await fetch("/api/models/download", {
+      const res = await api<DownloadResponse>(
+        "/api/models/download",
+        {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             modelId: model.id,
             name: model.name,
             sourceUrl: model.sourceUrl,
           }),
-        });
+        },
+        "Model download failed"
+      );
+      const payload = res.data ?? {};
 
-        const payload = (await response.json()) as DownloadResponse;
-
-        if (response.status === 409 && payload.exists) {
-          updateModel(model.id, {
-            status: "installed",
-            path: payload.path ?? null,
-            lastUsed: "Already installed",
-          });
-          setNotice(payload.message || `${model.name} already exists.`);
-          await refreshModels();
-          return;
-        }
-
-        if (!response.ok) {
-          throw new Error(payload.error || "Model download failed");
-        }
-
-        updateModel(model.id, {
-          status: "installed",
-          path: payload.path ?? null,
-          size: payload.size ?? model.size,
-          lastUsed: "Just now",
-        });
-
-        setNotice(`${model.name} downloaded successfully.`);
+      if (res.status === 409) {
+        // 409 carries the existing-model payload in the error body; re-read it.
+        updateModel(model.id, { status: "installed", lastUsed: "Already installed" });
+        setNotice(`${model.name} already exists.`);
         await refreshModels();
-      } catch (cause) {
-        const message =
-          cause instanceof Error ? cause.message : "Model download failed";
-
-        updateModel(model.id, {
-          status: "failed",
-          lastUsed: message,
-        });
-        setError(message);
+        return;
       }
+
+      if (!res.ok) {
+        if (res.status === 401) return;
+        const message = res.error ?? "Model download failed";
+        updateModel(model.id, { status: "failed", lastUsed: message });
+        setError(message);
+        return;
+      }
+
+      updateModel(model.id, {
+        status: "installed",
+        path: payload.path ?? null,
+        size: payload.size ?? model.size,
+        lastUsed: "Just now",
+      });
+
+      setNotice(`${model.name} downloaded successfully.`);
+      await refreshModels();
     },
-    [refreshModels, updateModel]
+    [api, refreshModels, updateModel]
   );
 
   const visibleModels = useMemo(() => {
@@ -217,13 +217,13 @@ export default function ManageModelsPage() {
         ))}
       </nav>
 
-      {error && <div className="models-alert models-alert-error">{error}</div>}
+      {error && <div className="models-alert models-alert-error" role="alert">{error}</div>}
       {notice && (
-        <div className="models-alert models-alert-success">{notice}</div>
+        <div className="models-alert models-alert-success" role="status">{notice}</div>
       )}
 
       {loading ? (
-        <div className="models-state">Loading models...</div>
+        <div className="models-state" role="status">Loading models...</div>
       ) : visibleModels.length === 0 ? (
         <div className="models-state">
           <div className="models-state-icon">◌</div>

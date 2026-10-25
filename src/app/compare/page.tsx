@@ -1,21 +1,23 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import {
   Box, Container, Heading, Text, Textarea, Button, Flex,
-  Spinner, Badge, Grid, GridItem, Input, Separator,
+  Spinner, Badge, Grid, GridItem,
 } from '@chakra-ui/react';
 import { ReviewPanel } from '@/components/review/ReviewPanel';
+import { useApi } from '@/components/api-client';
 import { CompareResult } from '@/lib/ai-transformer';
 
 export default function ComparePage() {
+  const api = useApi();
   const [original, setOriginal] = useState('');
   const [optimized, setOptimized] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<CompareResult | null>(null);
-  const [sharedToken, setSharedToken] = useState<string | null>(null);
+  const [auditId, setAuditId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<'summary' | 'original' | 'optimized'>('summary');
 
   async function handleCompare() {
@@ -23,29 +25,23 @@ export default function ComparePage() {
     setLoading(true);
     setError(null);
     setResult(null);
-    setSharedToken(null);
-    try {
-      const res = await fetch('/api/compare', {
+    setAuditId(null);
+    const res = await api<{ result: CompareResult; id?: string }>(
+      '/api/compare',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ original, optimized }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Comparison failed');
-      setResult(data.result);
-      setSharedToken(data.sharedToken);
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
+      },
+      'Comparison failed'
+    );
+    if (res.ok && res.data) {
+      setResult(res.data.result);
+      setAuditId(res.data.id ?? null);
+    } else if (res.status !== 401) {
+      setError(res.error ?? 'Comparison failed');
     }
-  }
-
-  function copyShareLink() {
-    if (!sharedToken) return;
-    navigator.clipboard.writeText(`${window.location.origin}/share/${sharedToken}`);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setLoading(false);
   }
 
   return (
@@ -61,7 +57,7 @@ export default function ComparePage() {
             </Heading>
           </Flex>
           <Text color="gray.400" fontSize="lg">
-            Compare the original vs optimized SP side by side. Get bottleneck analysis, 5 Why's, and a production-readiness verdict.
+            Compare the original vs optimized SP side by side. Get bottleneck analysis, 5 Why&apos;s, and a production-readiness verdict.
           </Text>
         </Box>
 
@@ -158,7 +154,7 @@ END`}
 
         {/* Loading */}
         {loading && (
-          <Flex justify="center" align="center" py={16} gap={4} direction="column">
+          <Flex justify="center" align="center" py={16} gap={4} direction="column" role="status">
             <Spinner size="xl" color="purple.400" borderWidth="3px" />
             <Text color="gray.400">Running comparative deep analysis on both Stored Procedures...</Text>
           </Flex>
@@ -166,7 +162,7 @@ END`}
 
         {/* Error */}
         {error && (
-          <Box bg="red.950" borderWidth="1px" borderColor="red.700" borderRadius="xl" p={5} mb={6}>
+          <Box bg="red.950" borderWidth="1px" borderColor="red.700" borderRadius="xl" p={5} mb={6} role="alert">
             <Text color="red.300" fontWeight="semibold">⚠️ Comparison Failed</Text>
             <Text color="red.400" fontSize="sm" mt={1}>{error}</Text>
           </Box>
@@ -175,27 +171,15 @@ END`}
         {/* Results */}
         {result && !loading && (
           <Box>
-            {/* Share bar */}
-            {sharedToken && (
+            {auditId && (
               <Box bg="gray.900" borderWidth="1px" borderColor="gray.700" borderRadius="xl" p={4} mb={6}>
-                <Flex align="center" gap={3}>
-                  <Text color="gray.400" fontSize="sm" flexShrink={0}>🔗 Shareable link:</Text>
-                  <Input
-                    readOnly
-                    value={`${typeof window !== 'undefined' ? window.location.origin : ''}/share/${sharedToken}`}
-                    size="sm"
-                    bg="gray.950"
-                    borderColor="gray.600"
-                    color="purple.300"
-                    fontFamily="mono"
-                    fontSize="xs"
-                  />
-                  <Button size="sm" colorPalette={copied ? 'green' : 'purple'} variant="outline" onClick={copyShareLink} flexShrink={0}>
-                    {copied ? '✓ Copied' : 'Copy'}
-                  </Button>
-                </Flex>
+                <Text color="gray.400" fontSize="sm">
+                  To share this result, open it from the{' '}
+                  <Link href={`/audit/${auditId}`} style={{ textDecoration: 'underline' }}>audit record</Link>.
+                </Text>
               </Box>
             )}
+
 
             {/* Tabs */}
             <Flex gap={2} mb={6}>

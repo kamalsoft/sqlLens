@@ -62,6 +62,15 @@ The model location is controlled by:
 
 Do not hard-code the model directory in application code.
 
+## Database migrations
+
+- Location: `src/db/migrations/NNN_name.sql` (name must match `^\d{3}_[a-z0-9_]+\.sql$`; each number used once).
+- Applied at startup by `runMigrations` (`src/db/migrate.ts`, called from `src/db/index.ts`), in numeric order, each in its own `IMMEDIATE` transaction; a failure rolls back that file and throws with its name.
+- Applied file names are recorded in `schema_migrations(id, applied_at)`; applied files are skipped, so parallel Next.js workers starting together apply each file once.
+- `001_baseline.sql` uses `CREATE TABLE IF NOT EXISTS`, so it is a no-op on existing databases.
+- Never edit an applied migration; add a new numbered file.
+- Database directory: `SQLLENS_DB_DIR`, default `../../sqllens_db` (see [Configuration](configuration.md)).
+
 ## API response
 
 The review API returns:

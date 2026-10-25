@@ -1,14 +1,20 @@
 {
-  "provider": "Hugging Face",
-  "defaultModel": "microsoft/Phi-3-mini-4k-instruct",
+  "provider": "local",
+  "defaultModel": "onnx-community/Qwen2.5-0.5B-Instruct-ONNX",
   "downloadDirectory": "~/dev/dbPro/sqlens/downloads/models",
   "autoDownload": true,
   "autoUpdateModels": true,
   "maxConcurrentDownloads": 2,
   "temperature": 0.2,
   "contextWindow": 128000,
-  "apiKey": "",
   "allowTelemetry": false,
+  "allowLiveExecution": false,
+  "queryTimeoutMs": 30000,
+  "defaultEngine": "simulation",
+  "maxSqlLength": 100000,
+  "inferenceTimeoutMs": 120000,
+  "logSqlText": true,
+  "shareTtlHours": 24,
   "prompt": {
     "analysisSP": "~/dev/dbPro/sqlens/data/prompts/analysisSP.md",
     "explainStatistic": "~/dev/dbPro/sqlens/data/prompts/explainStatistic.md"

@@ -1,98 +1,108 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { executeSP, DbConnectionConfig } from '@/lib/sp-executor';
+import { insertAudit } from '@/db/audit-repo';
+import { requireSession } from '@/lib/auth';
+import { readAppConfig } from '@/lib/app-config';
+import { executeSP, type ExecutionResult } from '@/lib/sp-executor';
 import { analyzeExecution, compareExecutions } from '@/lib/audit-analyzer';
-import { v4 as uuidv4 } from 'uuid';
-import { cookies } from 'next/headers';
+import { parseExecuteRequest } from '@/lib/execution/request';
+import { ExecAbortError, ExecTimeoutError, type ExecTarget } from '@/lib/execution/types';
+import { rateLimit } from '@/lib/request-guard';
+import { logError } from '@/lib/redact';
+import { badRequest, readJson } from '@/lib/validation/body';
 
-export async function POST(req: Request) {
+/** Audit copy of a target: parameter values and connection credentials are never stored (C10). */
+function auditTarget(t: ExecTarget | undefined) {
+  if (!t) return undefined;
+  return t.kind === 'batch'
+    ? { kind: t.kind, sql: t.sql }
+    : { kind: t.kind, name: t.name, params: t.params.map((p) => ({ name: p.name, type: p.type })) };
+}
+
+const sumReads = (r: ExecutionResult): number | null =>
+  r.stats.io.length ? r.stats.io.reduce((a, row) => a + row.logicalReads, 0) : null;
+
+export async function POST(request: Request) {
+  const auth = requireSession(request);
+  if (!auth.ok) return auth.response;
+  const { session } = auth;
+
+  if (!rateLimit(`execute:${session.sessionId}`, 10, 60_000)) {
+    return NextResponse.json({ error: 'Too many execution requests. Try again in a minute.' }, { status: 429 });
+  }
+
+  const body = await readJson(request);
+  if (!body.ok) return body.response;
+
   try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get('session_token')?.value;
+    const cfg = await readAppConfig();
+    const parsed = parseExecuteRequest(body.body, cfg.maxSqlLength);
+    if (!parsed.ok) return badRequest(parsed.error, parsed.field);
+    const req = parsed.value;
 
-    const body = await req.json();
-    const {
-      mode,          // 'single' | 'compare'
-      originalSP,
-      optimizedSP,
-      connection,
-    } = body as {
-      mode: 'single' | 'compare';
-      originalSP: string;
-      optimizedSP?: string;
-      connection: DbConnectionConfig;
-    };
-
-    if (!originalSP?.trim()) {
-      return NextResponse.json({ error: 'originalSP is required' }, { status: 400 });
-    }
-    if (mode === 'compare' && !optimizedSP?.trim()) {
-      return NextResponse.json({ error: 'optimizedSP is required for compare mode' }, { status: 400 });
+    if (req.engine !== 'simulation' && !cfg.allowLiveExecution) {
+      return NextResponse.json({ error: 'Live execution is disabled' }, { status: 403 });
     }
 
-    let sessionId = 'anonymous';
-    if (token) {
-      const session = db.prepare('SELECT id FROM sessions WHERE token = ? AND is_active = 1').get(token) as any;
-      if (session) sessionId = session.id;
-    }
+    const opts = { timeoutMs: cfg.queryTimeoutMs, signal: request.signal, logSqlText: cfg.logSqlText };
+    const originalResult = await executeSP(req.original, 'Original_SP', req.engine, req.connection, opts);
 
-    // Ensure anonymous user/session
-    if (sessionId === 'anonymous') {
-      const anonExists = db.prepare("SELECT id FROM sessions WHERE id = 'anonymous'").get();
-      if (!anonExists) {
-        const anonUserId = 'anonymous-user';
-        const anonUserExists = db.prepare("SELECT id FROM users WHERE id = ?").get(anonUserId);
-        if (!anonUserExists) {
-          db.prepare("INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?)").run(anonUserId, 'anonymous', 'n/a');
-        }
-        db.prepare("INSERT INTO sessions (id, user_id, token, is_active) VALUES ('anonymous', ?, 'anonymous', 1)").run(anonUserId);
-      }
-    }
+    let result: Record<string, unknown>;
+    let auditType: 'EXECUTE' | 'EXECUTE_COMPARE' = 'EXECUTE';
+    let allOk = originalResult.success;
+    let warnings = originalResult.warnings ?? [];
 
-    // Execute SPs
-    const originalResult = await executeSP(originalSP, 'Original_SP', connection);
-
-    let result: any;
-    let auditType = 'EXECUTE';
-
-    if (mode === 'compare' && optimizedSP) {
-      const optimizedResult = await executeSP(optimizedSP, 'Optimized_SP', connection);
+    if (req.mode === 'compare' && req.optimized) {
+      const optimizedResult = await executeSP(req.optimized, 'Optimized_SP', req.engine, req.connection, opts);
+      allOk = allOk && optimizedResult.success;
+      warnings = [...new Set([...warnings, ...(optimizedResult.warnings ?? [])])];
       const { original, optimized, comparison } = compareExecutions(originalResult, optimizedResult);
-
       result = {
         mode: 'compare',
+        simulated: req.engine === 'simulation',
+        warnings,
         original: { execution: originalResult, analysis: original },
         optimized: { execution: optimizedResult, analysis: optimized },
         comparison,
       };
       auditType = 'EXECUTE_COMPARE';
     } else {
-      const analysis = analyzeExecution(originalResult);
       result = {
         mode: 'single',
+        simulated: req.engine === 'simulation',
+        warnings,
         execution: originalResult,
-        analysis,
+        analysis: analyzeExecution(originalResult),
       };
     }
 
-    const auditId = uuidv4();
-    const sharedToken = uuidv4();
+    // C10: engine, host and database only. No username, password or parameter values.
+    const saved = insertAudit({
+      sessionId: session.sessionId,
+      type: auditType,
+      request: {
+        mode: req.mode,
+        engine: req.engine,
+        ...(req.connection ? { host: req.connection.host, database: req.connection.database } : {}),
+        original: auditTarget(req.original),
+        optimized: auditTarget(req.optimized),
+      },
+      response: result,
+      engine: req.engine,
+      simulated: req.engine === 'simulation',
+      status: allOk ? 'ok' : 'error',
+      elapsedMs: originalResult.stats.totalElapsedMs,
+      logicalReads: sumReads(originalResult),
+    });
 
-    db.prepare(`
-      INSERT INTO audit_requests (id, session_id, type, request_payload, response_payload, shared_token)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(
-      auditId,
-      sessionId,
-      auditType,
-      JSON.stringify({ mode, originalSP, optimizedSP, engine: connection.engine }),
-      JSON.stringify(result),
-      sharedToken,
-    );
-
-    return NextResponse.json({ id: auditId, sharedToken, result });
-  } catch (error: any) {
-    console.error('[execute/route]', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ id: saved.id, recordNumber: saved.recordNumber, result });
+  } catch (error) {
+    if (error instanceof ExecTimeoutError) {
+      return NextResponse.json({ error: 'Query timed out' }, { status: 504 });
+    }
+    if (error instanceof ExecAbortError) {
+      return NextResponse.json({ error: 'Request aborted' }, { status: 499 });
+    }
+    logError('[execute/route]', error);
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 });
   }
 }

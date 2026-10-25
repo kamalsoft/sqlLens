@@ -1,40 +1,45 @@
-import { NextResponse } from 'next/server';
-import db from '@/db';
-import { v4 as uuidv4 } from 'uuid';
-import { cookies } from 'next/headers';
+import { NextResponse } from "next/server";
+import db from "@/db";
+import { createSession, setSessionCookie } from "@/lib/auth";
+import { hashPassword, verifyPassword } from "@/lib/password";
+import { loginAllowed } from "@/lib/request-guard";
+import { isString, readJson } from "@/lib/validation/body";
+import { logError } from "@/lib/redact";
 
-export async function POST(req: Request) {
+// Used to keep timing similar when the user does not exist.
+const DUMMY_HASH = hashPassword("sqllens-dummy-password");
+const INVALID = { error: "Invalid username or password" };
+
+export async function POST(request: Request) {
   try {
-    const body = await req.json();
-    const { username, password } = body;
-
-    // Simulate login - in real app, hash password and verify
-    let user = db.prepare('SELECT * FROM users WHERE username = ?').get(username) as any;
-
-    if (!user) {
-      // Create user if they don't exist for simulation
-      const userId = uuidv4();
-      db.prepare('INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?)').run(userId, username, 'simulated_hash');
-      user = { id: userId, username };
+    const parsed = await readJson(request);
+    if (!parsed.ok) return parsed.response;
+    const { username, password } = parsed.body;
+    if (!loginAllowed(request, username)) {
+      return NextResponse.json(
+        { error: "Too many login attempts. Try again later." },
+        { status: 429, headers: { "Retry-After": "60" } }
+      );
+    }
+    if (!isString(username) || !isString(password) || username.length > 256 || password.length > 1024) {
+      return NextResponse.json(INVALID, { status: 401 });
     }
 
-    // Create session
-    const sessionId = uuidv4();
-    const token = uuidv4();
-    
-    db.prepare('INSERT INTO sessions (id, user_id, token, is_active) VALUES (?, ?, ?, 1)').run(sessionId, user.id, token);
+    const user = db
+      .prepare("SELECT id, username, password_hash FROM users WHERE username = ?")
+      .get(username) as { id: string; username: string; password_hash: string } | undefined;
 
-    // Set cookie
-    const cookieStore = await cookies();
-    cookieStore.set('session_token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: 60 * 60 * 24 * 7, // 1 week
-      path: '/',
-    });
+    // Legacy/disabled hashes are verified against the dummy hash to keep timing uniform.
+    const usable = user !== undefined && user.password_hash.startsWith("scrypt$");
+    const valid = verifyPassword(password, usable ? user.password_hash : DUMMY_HASH);
+    if (!user || !usable || !valid) return NextResponse.json(INVALID, { status: 401 });
 
-    return NextResponse.json({ success: true, user: { id: user.id, username: user.username } });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const { token, expiresAt } = createSession(user.id);
+    const response = NextResponse.json({ success: true, user: { id: user.id, username: user.username } });
+    setSessionCookie(response, token, expiresAt);
+    return response;
+  } catch (error) {
+    logError("[auth/login]", error);
+    return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
 }

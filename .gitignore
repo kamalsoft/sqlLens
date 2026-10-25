@@ -42,3 +42,14 @@ yarn-error.log*
 next-env.d.ts
 downloads/models/
 keys.md
+# python bytecode
+__pycache__/
+*.pyc
+
+# local execution logs (contain stored procedure source)
+audit_logs/
+
+# test output
+/test-results/
+/playwright-report/
+/blob-report/

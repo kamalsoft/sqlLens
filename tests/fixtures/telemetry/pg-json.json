@@ -1,0 +1,1 @@
+[{"Plan":{"Node Type":"Seq Scan","Relation Name":"orders","Shared Hit Blocks":128,"Shared Read Blocks":7,"Plans":[]},"Planning Time":0.21,"Execution Time":3.402}]

@@ -8,7 +8,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "postinstall": "prisma skills sync || exit 0"
+    "postinstall": "prisma skills sync || exit 0",
+    "test": "vitest run",
+    "test:e2e": "playwright test --pass-with-no-tests",
+    "typecheck": "tsc --noEmit",
+    "admin:set-password": "node --experimental-strip-types scripts/set-admin-password.ts"
   },
   "dependencies": {
     "@chakra-ui/react": "^3.37.0",
@@ -28,7 +32,11 @@
     "uuid": "^14.0.2"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.0",
     "@tailwindcss/postcss": "^4.3.3",
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.3",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -36,8 +44,11 @@
     "@types/uuid": "^10.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.3.3",
+    "jsdom": "30.1.2",
     "prisma": "^8.0.0-rc.12",
     "tailwindcss": "^4.3.3",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vite": "8.3.4",
+    "vitest": "4.1.11"
   }
 }

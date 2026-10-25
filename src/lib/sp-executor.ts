@@ -4,8 +4,8 @@
  * Architecture:
  *  - Supports SQL Server (mssql), PostgreSQL (pg), and a SIMULATION mode
  *    that generates realistic statistical output without a real connection.
- *  - Real driver packages (mssql / pg) are optional — the engine detects
- *    availability at runtime and falls back to simulation if missing.
+ *  - executeSP is a dispatcher: real engines live in execution/{mssql,postgres}.ts
+ *    (D-005), the labeled simulator stays here (D-004).
  *
  * Text-file storage:
  *  - Every run is written to audit_logs/<record-number>_<type>_<timestamp>.txt
@@ -14,42 +14,18 @@
 
 import fs from 'fs';
 import path from 'path';
+import { createHash } from 'node:crypto';
+import { executeMssql } from './execution/mssql';
+import { executePostgres } from './execution/postgres';
+import { ExecAbortError, ExecTimeoutError } from './execution/types';
+import type { EngineName, ExecConnection, ExecOptions, ExecTarget } from './execution/types';
+import type { ExecutionStats, StatisticsIORow } from './telemetry/types';
+
+export type { ExecutionStats, StatisticsIORow };
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export interface DbConnectionConfig {
-  engine: 'mssql' | 'postgres' | 'simulation';
-  host?: string;
-  port?: number;
-  database?: string;
-  username?: string;
-  password?: string;
-  trustServerCertificate?: boolean;
-}
-
-export interface StatisticsIORow {
-  table: string;
-  scanCount: number;
-  logicalReads: number;
-  physicalReads: number;
-  readAheadReads: number;
-  lobLogicalReads: number;
-  lobPhysicalReads: number;
-  lobReadAheadReads: number;
-}
-
-export interface ExecutionStats {
-  parseAndCompileTime: number;   // ms
-  parseAndCompileCpu: number;    // ms
-  executionTime: number;          // ms
-  executionCpu: number;           // ms
-  totalElapsedMs: number;
-  io: StatisticsIORow[];
-  messages: string[];
-  rawOutput: string;
-}
 
 export interface ExecutionResult {
   recordNumber: string;
@@ -58,6 +34,8 @@ export interface ExecutionResult {
   executedAt: string;
   stats: ExecutionStats;
   textFilePath: string;
+  /** TLS or policy warnings (P6-08). */
+  warnings?: string[];
   success: boolean;
   error?: string;
 }
@@ -66,13 +44,14 @@ export interface ExecutionResult {
 // Audit log directory (relative to project root)
 // ---------------------------------------------------------------------------
 
-const AUDIT_LOG_DIR = path.resolve(process.cwd(), 'audit_logs');
-if (!fs.existsSync(AUDIT_LOG_DIR)) {
-  fs.mkdirSync(AUDIT_LOG_DIR, { recursive: true });
+function auditLogDir(): string {
+  const dir = path.resolve(process.env.SQLLENS_AUDIT_LOG_DIR || path.join(process.cwd(), 'audit_logs'));
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
 }
 
 function nextRecordNumber(): string {
-  const existing = fs.readdirSync(AUDIT_LOG_DIR).filter(f => f.endsWith('.txt'));
+  const existing = fs.readdirSync(auditLogDir()).filter(f => f.endsWith('.txt'));
   const nums = existing.map(f => parseInt(f.split('_')[0], 10)).filter(n => !isNaN(n));
   const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
   return String(next).padStart(6, '0');
@@ -82,16 +61,28 @@ function nextRecordNumber(): string {
 // Text file writer
 // ---------------------------------------------------------------------------
 
+const fmt = (v: number | null): string => (v === null ? 'n/a' : `${v}ms`);
+
+/** Remove any connection detail that a driver error message may echo back. */
+function scrubConnection(message: string, config: Partial<ExecConnection>): string {
+  let out = String(message);
+  for (const v of [config.password, config.username, config.host, config.database]) {
+    if (v && v.length >= 3) out = out.split(v).join('[redacted]');
+  }
+  return out;
+}
+
 function writeAuditLog(
   recordNumber: string,
   spLabel: string,
   sp: string,
   stats: ExecutionStats,
   engine: string,
+  logSqlText: boolean,
 ): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const filename = `${recordNumber}_${spLabel.replace(/\s+/g, '_')}_${timestamp}.txt`;
-  const filePath = path.join(AUDIT_LOG_DIR, filename);
+  const filePath = path.join(auditLogDir(), filename);
 
   const content = [
     '='.repeat(80),
@@ -99,16 +90,17 @@ function writeAuditLog(
     `Record Number : ${recordNumber}`,
     `SP Label      : ${spLabel}`,
     `Engine        : ${engine}`,
+    `Simulated     : ${stats.simulated}`,
     `Executed At   : ${new Date().toISOString()}`,
     '='.repeat(80),
     '',
-    '--- STORED PROCEDURE ---',
-    sp,
+    logSqlText ? '--- STORED PROCEDURE ---' : '--- STORED PROCEDURE (text omitted: logSqlText=false) ---',
+    logSqlText ? sp : `sha256=${createHash('sha256').update(sp).digest('hex')} length=${sp.length}`,
     '',
     '--- STATISTICS TIME ---',
-    ` SQL Server parse and compile time: ${stats.parseAndCompileTime}ms (CPU: ${stats.parseAndCompileCpu}ms)`,
-    ` SQL Server execution time        : ${stats.executionTime}ms (CPU: ${stats.executionCpu}ms)`,
-    ` Total elapsed time               : ${stats.totalElapsedMs}ms`,
+    ` SQL Server parse and compile time: ${fmt(stats.parseAndCompileTime)} (CPU: ${fmt(stats.parseAndCompileCpu)})`,
+    ` SQL Server execution time        : ${fmt(stats.executionTime)} (CPU: ${fmt(stats.executionCpu)})`,
+    ` Total elapsed time               : ${fmt(stats.totalElapsedMs)}`,
     '',
     '--- STATISTICS IO ---',
     stats.io.map(row =>
@@ -175,7 +167,6 @@ function simulateExecution(sp: string, spLabel: string): ExecutionStats {
     lobReadAheadReads: 0,
   }));
 
-  const totalLogical = io.reduce((s, r) => s + r.logicalReads, 0);
   const messages = [
     `(${Math.floor(Math.random() * 5000) + 100} rows affected)`,
     hasCursor ? `[WARN] CURSOR detected — ${io[0]?.scanCount || 0} scan iterations executed` : '',
@@ -211,127 +202,8 @@ function simulateExecution(sp: string, spLabel: string): ExecutionStats {
     io,
     messages,
     rawOutput,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Real DB execution (SQL Server via mssql — optional)
-// ---------------------------------------------------------------------------
-
-async function executeViaMssql(config: DbConnectionConfig, sp: string): Promise<ExecutionStats> {
-  let mssql: any;
-  try {
-    mssql = require('mssql');
-  } catch {
-    throw new Error('mssql package not installed. Run: npm install mssql. Or use simulation mode.');
-  }
-
-  const pool = await mssql.connect({
-    server: config.host || 'localhost',
-    port: config.port || 1433,
-    database: config.database,
-    user: config.username,
-    password: config.password,
-    options: { trustServerCertificate: config.trustServerCertificate ?? true },
-  });
-
-  const wrappedSp = `
-    SET STATISTICS IO ON
-    SET STATISTICS TIME ON
-    ${sp}
-    SET STATISTICS IO OFF
-    SET STATISTICS TIME OFF
-  `;
-
-  const result = await pool.request().query(wrappedSp);
-  await pool.close();
-
-  // Parse messages from result.recordsets or pool.messages if available
-  const rawMessages: string[] = (result as any).recordsets?.flat()?.map(String) || [];
-
-  return parseRawStatisticsOutput(rawMessages.join('\n'));
-}
-
-async function executeViaPostgres(config: DbConnectionConfig, sp: string): Promise<ExecutionStats> {
-  let pg: any;
-  try {
-    pg = require('pg');
-  } catch {
-    throw new Error('pg package not installed. Run: npm install pg. Or use simulation mode.');
-  }
-
-  const client = new pg.Client({
-    host: config.host || 'localhost',
-    port: config.port || 5432,
-    database: config.database,
-    user: config.username,
-    password: config.password,
-  });
-
-  await client.connect();
-  const wrappedSp = `EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) ${sp}`;
-  const result = await client.query(wrappedSp);
-  await client.end();
-
-  const planLines: string[] = result.rows.map((r: any) => r['QUERY PLAN'] || Object.values(r)[0]);
-  return parsePostgresPlan(planLines.join('\n'));
-}
-
-// ---------------------------------------------------------------------------
-// Output parsers
-// ---------------------------------------------------------------------------
-
-function parseRawStatisticsOutput(raw: string): ExecutionStats {
-  const io: StatisticsIORow[] = [];
-  const ioRegex = /Table '([^']+)'\.\s+Scan count (\d+),\s+logical reads (\d+),\s+physical reads (\d+),\s+read-ahead reads (\d+)/gi;
-  let m: RegExpExecArray | null;
-  while ((m = ioRegex.exec(raw)) !== null) {
-    io.push({
-      table: m[1], scanCount: +m[2], logicalReads: +m[3],
-      physicalReads: +m[4], readAheadReads: +m[5],
-      lobLogicalReads: 0, lobPhysicalReads: 0, lobReadAheadReads: 0,
-    });
-  }
-
-  const cpuMatch = raw.match(/CPU time = (\d+) ms,\s+elapsed time = (\d+) ms/i);
-  const execMatch = raw.match(
-    /SQL Server Execution Times[\s\S]*?CPU time = (\d+) ms[\s\S]*?elapsed time = (\d+) ms/i
-  );
-
-  return {
-    parseAndCompileTime: cpuMatch ? +cpuMatch[2] : 0,
-    parseAndCompileCpu: cpuMatch ? +cpuMatch[1] : 0,
-    executionTime: execMatch ? +execMatch[2] : 0,
-    executionCpu: execMatch ? +execMatch[1] : 0,
-    totalElapsedMs: (cpuMatch ? +cpuMatch[2] : 0) + (execMatch ? +execMatch[2] : 0),
-    io,
-    messages: [],
-    rawOutput: raw,
-  };
-}
-
-function parsePostgresPlan(planText: string): ExecutionStats {
-  const execTimeMatch = planText.match(/Execution Time:\s*([\d.]+) ms/i);
-  const planTimeMatch = planText.match(/Planning Time:\s*([\d.]+) ms/i);
-  const bufferMatch = planText.match(/Buffers: shared hit=(\d+)/i);
-
-  const execMs = execTimeMatch ? parseFloat(execTimeMatch[1]) : 0;
-  const planMs = planTimeMatch ? parseFloat(planTimeMatch[1]) : 0;
-  const sharedHit = bufferMatch ? +bufferMatch[1] : 0;
-
-  return {
-    parseAndCompileTime: Math.ceil(planMs),
-    parseAndCompileCpu: Math.ceil(planMs),
-    executionTime: Math.ceil(execMs),
-    executionCpu: Math.ceil(execMs * 0.8),
-    totalElapsedMs: Math.ceil(planMs + execMs),
-    io: [{
-      table: 'postgres_query', scanCount: 1,
-      logicalReads: sharedHit, physicalReads: 0, readAheadReads: 0,
-      lobLogicalReads: 0, lobPhysicalReads: 0, lobReadAheadReads: 0,
-    }],
-    messages: [planText],
-    rawOutput: planText,
+    plan: null,
+    simulated: true,
   };
 }
 
@@ -339,36 +211,68 @@ function parsePostgresPlan(planText: string): ExecutionStats {
 // Public API
 // ---------------------------------------------------------------------------
 
+/** Text used for the simulator and the text log. Parameter values are never included. */
+export function targetText(target: ExecTarget): string {
+  return target.kind === 'batch'
+    ? target.sql
+    : `EXEC ${target.name}${target.params.length ? ' ' + target.params.map((p) => p.name.replace(/^@?/, '@')).join(', ') : ''}`;
+}
+
+export interface ExecuteOptions extends ExecOptions {
+  logSqlText: boolean;
+}
+
+/**
+ * Dispatch one target to the simulator or a real engine. Timeouts and aborts are rethrown
+ * (after the text log is written) so the route can answer 504 / abort; other failures are
+ * returned as `success: false` with connection details scrubbed.
+ */
 export async function executeSP(
-  sp: string,
+  target: ExecTarget,
   spLabel: string,
-  config: DbConnectionConfig,
+  engine: EngineName,
+  connection: ExecConnection | undefined,
+  opts: ExecuteOptions,
 ): Promise<ExecutionResult> {
   const recordNumber = nextRecordNumber();
   const executedAt = new Date().toISOString();
+  const text = targetText(target);
+
+  const failed = (message: string, warnings: string[] = []) => {
+    const failStats: ExecutionStats = {
+      parseAndCompileTime: null, parseAndCompileCpu: null,
+      executionTime: null, executionCpu: null, totalElapsedMs: null,
+      io: [], messages: [message], rawOutput: message,
+      plan: null, simulated: engine === 'simulation',
+    };
+    const textFilePath = writeAuditLog(recordNumber, spLabel, text, failStats, engine, opts.logSqlText);
+    return { failStats, textFilePath, warnings };
+  };
 
   try {
     let stats: ExecutionStats;
+    let warnings: string[] = [];
 
-    if (config.engine === 'mssql') {
-      stats = await executeViaMssql(config, sp);
-    } else if (config.engine === 'postgres') {
-      stats = await executeViaPostgres(config, sp);
+    if (engine === 'mssql' || engine === 'postgres') {
+      if (!connection) throw new Error('connection is required');
+      const out = engine === 'mssql'
+        ? await executeMssql(connection, target, opts)
+        : await executePostgres(connection, target, opts);
+      stats = out.stats;
+      warnings = out.warnings;
     } else {
-      // simulation mode
-      stats = simulateExecution(sp, spLabel);
+      stats = simulateExecution(text, spLabel);
     }
 
-    const textFilePath = writeAuditLog(recordNumber, spLabel, sp, stats, config.engine);
-
-    return { recordNumber, spLabel, connectionEngine: config.engine, executedAt, stats, textFilePath, success: true };
-  } catch (err: any) {
-    const failStats: ExecutionStats = {
-      parseAndCompileTime: 0, parseAndCompileCpu: 0,
-      executionTime: 0, executionCpu: 0, totalElapsedMs: 0,
-      io: [], messages: [err.message], rawOutput: err.message,
-    };
-    const textFilePath = writeAuditLog(recordNumber, spLabel, sp, failStats, config.engine);
-    return { recordNumber, spLabel, connectionEngine: config.engine, executedAt, stats: failStats, textFilePath, success: false, error: err.message };
+    const textFilePath = writeAuditLog(recordNumber, spLabel, text, stats, engine, opts.logSqlText);
+    return { recordNumber, spLabel, connectionEngine: engine, executedAt, stats, textFilePath, warnings, success: true };
+  } catch (err) {
+    if (err instanceof ExecTimeoutError || err instanceof ExecAbortError) {
+      failed(err.message);
+      throw err;
+    }
+    const safeMessage = scrubConnection(err instanceof Error ? err.message : 'Execution failed', connection ?? {});
+    const { failStats, textFilePath } = failed(safeMessage);
+    return { recordNumber, spLabel, connectionEngine: engine, executedAt, stats: failStats, textFilePath, success: false, error: safeMessage };
   }
 }

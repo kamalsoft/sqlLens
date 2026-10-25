@@ -1,10 +1,7 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-
-type AppConfig = {
-  downloadDirectory?: string;
-};
+import { readAppConfig } from "@/lib/app-config";
 
 type ModelMetadata = {
   modelId?: string;
@@ -22,6 +19,7 @@ const ONNX_MODEL_NAMES = new Set([
   "model.onnx",
   "model_quantized.onnx",
   "model_q4.onnx",
+  "model_fp16.onnx",
 ]);
 
 function expandHome(value: string): string {
@@ -62,17 +60,12 @@ async function readModelId(directory: string, directoryName: string) {
 }
 
 export async function getInstalledModels(): Promise<InstalledModel[]> {
-  const configPath = path.join(process.cwd(), "data", "appconfig.json");
-  const config = JSON.parse(
-    await readFile(configPath, "utf8"),
-  ) as AppConfig;
-
-  if (!config.downloadDirectory) {
-    throw new Error("downloadDirectory is missing from appconfig.json");
-  }
+  const config = await readAppConfig();
 
   const downloadDirectory = expandHome(config.downloadDirectory);
-  const entries = await readdir(downloadDirectory, { withFileTypes: true });
+  const entries = await readdir(downloadDirectory, {
+    withFileTypes: true,
+  }).catch(() => []);
   const models: InstalledModel[] = [];
 
   for (const entry of entries) {
@@ -90,6 +83,10 @@ export async function getInstalledModels(): Promise<InstalledModel[]> {
       }
 
       const id = await readModelId(directory, entry.name);
+
+      if (!id) {
+        continue;
+      }
 
       models.push({
         id,

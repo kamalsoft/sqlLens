@@ -1,0 +1,6 @@
+Seq Scan on orders  (cost=0.00..35.50 rows=2550 width=4) (actual time=0.010..0.500 rows=2550 loops=1)
+  Buffers: shared hit=128 read=7
+Planning:
+  Buffers: shared hit=3
+Planning Time: 0.210 ms
+Execution Time: 3.402 ms

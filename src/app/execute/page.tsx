@@ -4,15 +4,34 @@ import { useState } from 'react';
 import {
   Box, Container, Heading, Text, Textarea, Button, Flex,
   Spinner, Badge, Grid, Input, Separator,
-  Tabs,
 } from '@chakra-ui/react';
-import { AuditAnalysis } from '@/lib/audit-analyzer';
+import type { AuditAnalysis } from '@/lib/audit-analyzer';
+import type { ExecutionResult } from '@/lib/sp-executor';
+import { useApi } from '@/components/api-client';
+
+// Tolerant of extra fields (e.g. schemaVersion, id) added by later API changes.
+type WithExecution = AuditAnalysis & { execution: ExecutionResult };
+type ComparisonAnalysis = AuditAnalysis & {
+  improvementPercent?: number;
+  comparisonSummary?: string;
+};
+type ExecuteResult =
+  | { mode: 'single'; execution: ExecutionResult; analysis: AuditAnalysis }
+  | {
+      mode: 'compare';
+      original: WithExecution;
+      optimized: WithExecution;
+      comparison: ComparisonAnalysis;
+    };
 
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function GradeBadge({ grade }: { grade: string }) {
+function GradeBadge({ grade }: { grade: string | null }) {
+  if (grade === null) {
+    return <Badge colorPalette="gray" variant="subtle" px={3} py={2}>Not captured</Badge>;
+  }
   const colors: Record<string, string> = { A: 'green', B: 'blue', C: 'yellow', D: 'orange', F: 'red' };
   return (
     <Box
@@ -27,12 +46,12 @@ function GradeBadge({ grade }: { grade: string }) {
   );
 }
 
-function StatCard({ label, value, unit = '', color = 'blue' }: { label: string; value: string | number; unit?: string; color?: string }) {
+function StatCard({ label, value, unit = '', color = 'blue' }: { label: string; value: string | number | null; unit?: string; color?: string }) {
   return (
     <Box bg="gray.900" borderWidth="1px" borderColor="gray.700" borderRadius="xl" p={4} textAlign="center">
       <Text fontSize="xs" color="gray.500" textTransform="uppercase" letterSpacing="wider" mb={1}>{label}</Text>
-      <Text fontSize="2xl" fontWeight="bold" color={`${color}.300`}>{value.toLocaleString()}</Text>
-      {unit && <Text fontSize="xs" color="gray.500">{unit}</Text>}
+      <Text fontSize="2xl" fontWeight="bold" color={`${color}.300`}>{value === null ? 'Not captured' : value.toLocaleString()}</Text>
+      {unit && value !== null && <Text fontSize="xs" color="gray.500">{unit}</Text>}
     </Box>
   );
 }
@@ -59,9 +78,9 @@ function AnalysisPanel({ analysis, title }: { analysis: AuditAnalysis; title: st
         {/* Stats */}
         <Grid templateColumns="repeat(4, 1fr)" gap={4}>
           <StatCard label="Total Logical Reads" value={analysis.ioAnalysis.totalLogicalReads} color="blue" />
-          <StatCard label="Physical Reads" value={analysis.ioAnalysis.totalPhysicalReads} color={analysis.ioAnalysis.totalPhysicalReads > 0 ? 'orange' : 'green'} />
-          <StatCard label="Scan Count" value={analysis.ioAnalysis.totalScanCount} color={analysis.ioAnalysis.totalScanCount > 3 ? 'red' : 'green'} />
-          <StatCard label="Total Time" value={analysis.timeAnalysis.totalMs} unit="ms" color={analysis.timeAnalysis.totalMs > 1000 ? 'red' : 'green'} />
+          <StatCard label="Physical Reads" value={analysis.ioAnalysis.totalPhysicalReads} color={analysis.ioAnalysis.totalPhysicalReads === null ? 'gray' : analysis.ioAnalysis.totalPhysicalReads > 0 ? 'orange' : 'green'} />
+          <StatCard label="Scan Count" value={analysis.ioAnalysis.totalScanCount} color={analysis.ioAnalysis.totalScanCount === null ? 'gray' : analysis.ioAnalysis.totalScanCount > 3 ? 'red' : 'green'} />
+          <StatCard label="Total Time" value={analysis.timeAnalysis.totalMs} unit="ms" color={analysis.timeAnalysis.totalMs === null ? 'gray' : analysis.timeAnalysis.totalMs > 1000 ? 'red' : 'green'} />
         </Grid>
 
         <Separator borderColor="gray.700" />
@@ -158,7 +177,7 @@ function AnalysisPanel({ analysis, title }: { analysis: AuditAnalysis; title: st
   );
 }
 
-function RawStatsPanel({ execution }: { execution: any }) {
+function RawStatsPanel({ execution }: { execution: ExecutionResult }) {
   const [show, setShow] = useState(false);
   return (
     <Box bg="gray.900" borderWidth="1px" borderColor="gray.700" borderRadius="xl" overflow="hidden">
@@ -171,6 +190,7 @@ function RawStatsPanel({ execution }: { execution: any }) {
       {show && (
         <Box p={5}>
           <Flex gap={4} mb={4} flexWrap="wrap">
+            {execution.stats.simulated && <Badge colorPalette="yellow">Simulated</Badge>}
             <Badge colorPalette="blue">Record #{execution.recordNumber}</Badge>
             <Badge colorPalette="gray">Engine: {execution.connectionEngine}</Badge>
             <Badge colorPalette="gray">{execution.executedAt}</Badge>
@@ -194,6 +214,7 @@ function RawStatsPanel({ execution }: { execution: any }) {
 // ---------------------------------------------------------------------------
 
 export default function ExecutePage() {
+  const api = useApi();
   const [mode, setMode] = useState<'single' | 'compare'>('single');
   const [originalSP, setOriginalSP] = useState('');
   const [optimizedSP, setOptimizedSP] = useState('');
@@ -206,7 +227,7 @@ export default function ExecutePage() {
   const [trustCert, setTrustCert] = useState(true);
 
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<ExecuteResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'compare' | 'original' | 'optimized'>('compare');
 
@@ -216,8 +237,9 @@ export default function ExecutePage() {
     setError(null);
     setResult(null);
 
-    try {
-      const res = await fetch('/api/execute', {
+    const res = await api<{ result: ExecuteResult }>(
+      '/api/execute',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -230,15 +252,15 @@ export default function ExecutePage() {
             trustServerCertificate: trustCert,
           },
         }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Execution failed');
-      setResult(data.result);
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
+      },
+      'Execution failed'
+    );
+    if (res.ok && res.data) {
+      setResult(res.data.result);
+    } else if (res.status !== 401) {
+      setError(res.error ?? 'Execution failed');
     }
+    setLoading(false);
   }
 
   return (
@@ -408,7 +430,7 @@ export default function ExecutePage() {
 
         {/* Loading */}
         {loading && (
-          <Flex justify="center" align="center" py={16} gap={4} direction="column">
+          <Flex justify="center" align="center" py={16} gap={4} direction="column" role="status">
             <Spinner size="xl" color="orange.400" borderWidth="3px" />
             <Text color="gray.400">
               Executing SP{mode === 'compare' ? 's' : ''} and collecting STATISTICS IO / TIME data...
@@ -418,7 +440,7 @@ export default function ExecutePage() {
 
         {/* Error */}
         {error && (
-          <Box bg="red.950" borderWidth="1px" borderColor="red.700" borderRadius="xl" p={5} mb={6}>
+          <Box bg="red.950" borderWidth="1px" borderColor="red.700" borderRadius="xl" p={5} mb={6} role="alert">
             <Text color="red.300" fontWeight="semibold">⚠️ Execution Failed</Text>
             <Text color="red.400" fontSize="sm" mt={1}>{error}</Text>
           </Box>

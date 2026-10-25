@@ -407,13 +407,26 @@ Inspect available scripts:
 npm run
 ```
 
-If a test script exists in `package.json`, run it with:
+Run unit and component tests (Vitest; no network, database, or model weights):
 
 ```bash
 npm test
 ```
 
-SQLens currently does not define a database migration or schema-sync workflow. SQL schema changes must be reviewed and tested in the target SQL Server environment separately.
+Type-check without emitting:
+
+```bash
+npm run typecheck
+```
+
+Run end-to-end tests (Playwright; starts `npm run dev` automatically). Browsers are
+not installed by `npm install`; install them once with `npx playwright install chromium`:
+
+```bash
+npm run test:e2e
+```
+
+SQLLens's own SQLite schema is managed by numbered SQL migrations in `src/db/migrations/`, applied automatically at startup (see `docs/architecture.md`, "Database migrations"). Schema changes to the SQL Server or PostgreSQL databases you analyze are outside SQLLens and must be reviewed and tested in those environments separately.
 
 ---
 
@@ -502,9 +515,19 @@ Before submitting changes:
 ```bash
 python3 -m py_compile scripts/validate_and_download_model.py
 npm run lint
+npm run typecheck
+npm test
 rm -rf .next
 npm run build
 ```
+
+Test layout:
+
+- `tests/unit/**/*.test.ts` — pure functions and server modules (Node environment).
+- `tests/components/**/*.test.tsx` — React components; start the file with `// @vitest-environment jsdom`.
+- `tests/e2e/**` — Playwright specs (excluded from `npm test`).
+- Config: `vitest.config.mts` (alias `@/` → `src/`), `playwright.config.ts`, setup `tests/setup.ts`.
+- Tests must not use the network, a real database, or downloaded model weights.
 
 For model changes:
 

@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
+import { useEffect, useState, type ReactNode } from "react";
+import { useApi } from "@/components/api-client";
+
+type Engine = "simulation" | "mssql" | "postgres";
 
 type AppSettings = {
-  provider: string;
+  provider: "local";
   defaultModel: string;
   downloadDirectory: string;
   autoDownload: boolean;
@@ -12,79 +14,140 @@ type AppSettings = {
   maxConcurrentDownloads: number;
   temperature: number;
   contextWindow: number;
-  apiKey: string;
   allowTelemetry: boolean;
+  prompt?: Record<string, string>;
+  allowLiveExecution: boolean;
+  queryTimeoutMs: number;
+  defaultEngine: Engine;
+  maxSqlLength: number;
+  inferenceTimeoutMs: number;
+  logSqlText: boolean;
+  shareTtlHours: number;
 };
 
+// Mirrors C6 defaults in docs/team/contracts.md.
 const defaultSettings: AppSettings = {
-  provider: "OpenAI",
-  defaultModel: "gpt-4o-mini",
-  downloadDirectory: "~/models",
-  autoDownload: true,
-  autoUpdateModels: true,
+  provider: "local",
+  defaultModel: "onnx-community/Qwen2.5-0.5B-Instruct-ONNX",
+  downloadDirectory: "downloads/models",
+  autoDownload: false,
+  autoUpdateModels: false,
   maxConcurrentDownloads: 2,
   temperature: 0.2,
-  contextWindow: 128000,
-  apiKey: "",
+  contextWindow: 4096,
   allowTelemetry: false,
+  allowLiveExecution: false,
+  queryTimeoutMs: 30000,
+  defaultEngine: "simulation",
+  maxSqlLength: 100000,
+  inferenceTimeoutMs: 120000,
+  logSqlText: true,
+  shareTtlHours: 24,
 };
 
-import { AppShell } from "../../components/AppShell";
+const knownKeys = Object.keys(defaultSettings).concat("prompt") as Array<keyof AppSettings>;
+
+/** Keep only known C6 fields so nothing unexpected (e.g. a legacy apiKey) is held or re-sent. */
+function normalize(payload: Partial<AppSettings> | null): AppSettings {
+  const next: Record<string, unknown> = { ...defaultSettings };
+  if (payload) {
+    for (const key of knownKeys) {
+      if (payload[key] !== undefined) next[key] = payload[key];
+    }
+  }
+  return next as AppSettings;
+}
+
+function Field({
+  label,
+  name,
+  error,
+  full,
+  children,
+}: {
+  label: string;
+  name: string;
+  error: { field: string | null; message: string } | null;
+  full?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div className={`field${full ? " full" : ""}`}>
+      <label className="label" htmlFor={`setting-${name}`}>
+        {label}
+      </label>
+      {children}
+      {error?.field === name && (
+        <small role="alert" id={`setting-${name}-error`}>
+          {error.message}
+        </small>
+      )}
+    </div>
+  );
+}
 
 export default function SettingsPage() {
+  const api = useApi();
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [error, setError] = useState<{ field: string | null; message: string } | null>(null);
 
   useEffect(() => {
-    void fetch("/api/appconfig", { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Unable to load settings");
-        return response.json() as Promise<AppSettings>;
-      })
-      .then((config) => setSettings(config))
-      .catch((error) => {
-        setMessage(error instanceof Error ? error.message : "Unable to load settings");
-      })
-      .finally(() => setLoading(false));
-  }, []);
+    let cancelled = false;
+    void api<Partial<AppSettings>>("/api/appconfig", { cache: "no-store" }, "Unable to load settings").then(
+      (result) => {
+        if (cancelled) return;
+        if (result.ok) setSettings(normalize(result.data));
+        else if (result.status !== 401) {
+          setError({ field: null, message: result.error ?? "Unable to load settings" });
+        }
+        setLoading(false);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
 
-  const updateField = <K extends keyof AppSettings>(
-    key: K,
-    value: AppSettings[K]
-  ) => {
+  const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     setSettings((current) => ({ ...current, [key]: value }));
+    setMessage("");
+    setError(null);
   };
+
+  const num = (key: keyof AppSettings) => (event: React.ChangeEvent<HTMLInputElement>) =>
+    update(key, Number(event.target.value) as never);
 
   async function handleSave() {
     setSaving(true);
     setMessage("");
+    setError(null);
 
-    try {
-      const response = await fetch("/api/appconfig", {
+    const result = await api<Partial<AppSettings>>(
+      "/api/appconfig",
+      {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settings),
-      });
+      },
+      "Unable to save settings"
+    );
 
-      const payload = await response.json();
-
-      if (!response.ok) {
-        throw new Error(payload.error || "Unable to save settings");
-      }
-
-      setSettings(payload);
+    if (result.ok) {
+      setSettings(normalize(result.data));
       setMessage("Settings saved.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to save settings");
-    } finally {
-      setSaving(false);
+    } else if (result.status !== 401) {
+      setError({ field: result.field, message: result.error ?? "Unable to save settings" });
     }
+    setSaving(false);
   }
 
+  const disabled = loading || saving;
+
   return (
-    <AppShell>
+    <>
       <header className="page-header">
         <div>
           <p className="page-kicker">Configuration</p>
@@ -95,106 +158,201 @@ export default function SettingsPage() {
           <a href="/manage-models" className="button button-secondary">
             Manage Models
           </a>
-          <button type="button" className="button button-primary">
-            Save Settings
-          </button>
         </div>
       </header>
 
+      {loading && <p role="status">Loading settings...</p>}
+
       <section className="panel panel-card">
         <div className="form-grid">
-          <div className="field">
-            <label className="label">Model Provider</label>
-            <select
-              value={settings.provider}
-              onChange={(event) =>
-                setSettings((current) => ({
-                  ...current,
-                  provider: event.target.value,
-                }))
-              }
-            >
-              <option value="Hugging Face">Hugging Face</option>
-            </select>
-          </div>
+          <Field label="Model Provider" name="provider" error={error}>
+            <input id="setting-provider" value={settings.provider} readOnly />
+          </Field>
 
-          <div className="field">
-            <label className="label">Default Model</label>
+          <Field label="Default Model" name="defaultModel" error={error}>
             <input
+              id="setting-defaultModel"
               value={settings.defaultModel}
-              onChange={(event) =>
-                setSettings((current) => ({
-                  ...current,
-                  defaultModel: event.target.value,
-                }))
-              }
+              onChange={(event) => update("defaultModel", event.target.value)}
+              disabled={disabled}
             />
-          </div>
+          </Field>
 
-          <div className="field full">
-            <label className="label">Download Directory</label>
+          <Field label="Download Directory" name="downloadDirectory" error={error} full>
             <input
+              id="setting-downloadDirectory"
               value={settings.downloadDirectory}
-              onChange={(event) =>
-                setSettings((current) => ({
-                  ...current,
-                  downloadDirectory: event.target.value,
-                }))
-              }
+              onChange={(event) => update("downloadDirectory", event.target.value)}
+              disabled={disabled}
             />
-          </div>
+          </Field>
 
-          <div className="field">
-            <label className="label">API Key</label>
-            <input className="input" type="password" placeholder="••••••••••" />
-          </div>
+          <Field label="Temperature" name="temperature" error={error}>
+            <input
+              id="setting-temperature"
+              type="number"
+              step={0.1}
+              value={settings.temperature}
+              onChange={num("temperature")}
+              disabled={disabled}
+            />
+          </Field>
 
-          <div className="field">
-            <label className="label">Temperature</label>
-            <input className="input" type="number" defaultValue={0.2} step={0.1} />
-          </div>
+          <Field label="Context Window" name="contextWindow" error={error}>
+            <input
+              id="setting-contextWindow"
+              type="number"
+              value={settings.contextWindow}
+              onChange={num("contextWindow")}
+              disabled={disabled}
+            />
+          </Field>
 
-          <div className="field">
-            <label className="label">Context Window</label>
-            <input className="input" type="number" defaultValue={128000} />
-          </div>
+          <Field label="Max Concurrent Downloads" name="maxConcurrentDownloads" error={error}>
+            <input
+              id="setting-maxConcurrentDownloads"
+              type="number"
+              value={settings.maxConcurrentDownloads}
+              onChange={num("maxConcurrentDownloads")}
+              disabled={disabled}
+            />
+          </Field>
 
-          <div className="field">
-            <label className="label">Max Concurrent Downloads</label>
-            <input className="input" type="number" defaultValue={2} />
-          </div>
+          <Field label="Inference Timeout (ms)" name="inferenceTimeoutMs" error={error}>
+            <input
+              id="setting-inferenceTimeoutMs"
+              type="number"
+              value={settings.inferenceTimeoutMs}
+              onChange={num("inferenceTimeoutMs")}
+              disabled={disabled}
+            />
+          </Field>
 
-          <div className="field">
-            <label className="label">Download Behavior</label>
+          <Field label="Max SQL Length (characters)" name="maxSqlLength" error={error}>
+            <input
+              id="setting-maxSqlLength"
+              type="number"
+              value={settings.maxSqlLength}
+              onChange={num("maxSqlLength")}
+              disabled={disabled}
+            />
+          </Field>
+
+          <Field label="Query Timeout (ms)" name="queryTimeoutMs" error={error}>
+            <input
+              id="setting-queryTimeoutMs"
+              type="number"
+              value={settings.queryTimeoutMs}
+              onChange={num("queryTimeoutMs")}
+              disabled={disabled}
+            />
+          </Field>
+
+          <Field label="Default Engine" name="defaultEngine" error={error}>
+            <select
+              id="setting-defaultEngine"
+              value={settings.defaultEngine}
+              onChange={(event) => update("defaultEngine", event.target.value as Engine)}
+              disabled={disabled}
+            >
+              <option value="simulation">Simulation</option>
+              <option value="mssql">SQL Server</option>
+              <option value="postgres">PostgreSQL</option>
+            </select>
+          </Field>
+
+          <Field label="Share Link Lifetime (hours)" name="shareTtlHours" error={error}>
+            <input
+              id="setting-shareTtlHours"
+              type="number"
+              value={settings.shareTtlHours}
+              onChange={num("shareTtlHours")}
+              disabled={disabled}
+            />
+          </Field>
+
+          <Field label="Download Behavior" name="autoDownload" error={error}>
             <div className="checkbox-row">
               <span>Auto-download recommended models</span>
-              <input className="checkbox" type="checkbox" defaultChecked />
+              <input
+                id="setting-autoDownload"
+                className="checkbox"
+                type="checkbox"
+                checked={settings.autoDownload}
+                onChange={(event) => update("autoDownload", event.target.checked)}
+                disabled={disabled}
+              />
             </div>
-          </div>
+          </Field>
 
-          <div className="field">
-            <label className="label">Model Updates</label>
+          <Field label="Model Updates" name="autoUpdateModels" error={error}>
             <div className="checkbox-row">
               <span>Auto-update installed models</span>
-              <input className="checkbox" type="checkbox" defaultChecked />
+              <input
+                id="setting-autoUpdateModels"
+                className="checkbox"
+                type="checkbox"
+                checked={settings.autoUpdateModels}
+                onChange={(event) => update("autoUpdateModels", event.target.checked)}
+                disabled={disabled}
+              />
             </div>
-          </div>
+          </Field>
 
-          <div className="field">
-            <label className="label">Privacy</label>
+          <Field label="Privacy" name="allowTelemetry" error={error}>
             <div className="checkbox-row">
               <span>Allow telemetry</span>
-              <input className="checkbox" type="checkbox" />
+              <input
+                id="setting-allowTelemetry"
+                className="checkbox"
+                type="checkbox"
+                checked={settings.allowTelemetry}
+                onChange={(event) => update("allowTelemetry", event.target.checked)}
+                disabled={disabled}
+              />
             </div>
-          </div>
+          </Field>
+
+          <Field label="SQL Logging" name="logSqlText" error={error}>
+            <div className="checkbox-row">
+              <span>Write SQL text to audit logs (off stores a hash and length only)</span>
+              <input
+                id="setting-logSqlText"
+                className="checkbox"
+                type="checkbox"
+                checked={settings.logSqlText}
+                onChange={(event) => update("logSqlText", event.target.checked)}
+                disabled={disabled}
+              />
+            </div>
+          </Field>
+
+          <Field label="Live Execution" name="allowLiveExecution" error={error} full>
+            <div className="checkbox-row">
+              <span>Allow live execution against a real database</span>
+              <input
+                id="setting-allowLiveExecution"
+                className="checkbox"
+                type="checkbox"
+                checked={settings.allowLiveExecution}
+                onChange={(event) => update("allowLiveExecution", event.target.checked)}
+                disabled={disabled}
+              />
+            </div>
+            <small>
+              Warning: when enabled, stored procedures run against the connected database and can
+              change data. Leave off to use simulation only.
+            </small>
+          </Field>
         </div>
       </section>
 
-      <button type="button" onClick={handleSave} disabled={loading || saving}>
+      <button type="button" onClick={() => void handleSave()} disabled={disabled}>
         {saving ? "Saving..." : "Save Settings"}
       </button>
 
-      {message && <p>{message}</p>}
-    </AppShell>
+      {message && <p role="status">{message}</p>}
+      {error && error.field === null && <p role="alert">{error.message}</p>}
+    </>
   );
 }

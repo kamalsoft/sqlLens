@@ -44,7 +44,7 @@ Rules:
 - Use evidence from the SQL only.
 - Do not invent execution plans, indexes, schemas, data volumes, vulnerabilities, or runtime behavior.
 - Distinguish confirmed findings from recommendations requiring runtime validation.
-- Use lowercase enum values exactly as specified.
+- Every enum field must contain exactly ONE value copied from its "Allowed values" list below. Never write a "|" character in an enum field.
 - If no issue is supported, use an empty array.
 - Preserve the original procedure when no rewrite is justified.
 - The rewrittenProcedure must be valid SQL Server T-SQL.
@@ -54,54 +54,68 @@ Rules:
 - Keep findings concise.
 - Include limitations when execution plans, schema, indexes, parameters, or runtime metrics are unavailable.
 
-Return exactly this structure:
+Allowed values (choose exactly one per field):
+- overallRisk: low, medium, high, critical
+- findingsTable[].category: correctness, performance, security, concurrency, maintainability, standards, error_handling, transactional_integrity
+- findingsTable[].severity: critical, high, medium, low
+- performanceTable[].area: query_shape, joins, filters, aggregation, indexing, parameter_sniffing, tempdb, cursor_loop, io
+- performanceTable[].impact: low, medium, high, unknown
+- securityTable[].area: dynamic_sql, injection, permissions, data_exposure, input_validation
+- securityTable[].risk: low, medium, high, unknown
+
+Field rules:
+- confidence is a number between 0 and 1.
+- findingsTable, performanceTable, securityTable, testingTable and limitations are arrays; use [] when empty.
+- evidence quotes the SQL, or is "not observed".
+- rewrittenProcedure is ONE JSON string with the complete procedure. Write it on a single line and use \n for line breaks; never put a raw line break or an unescaped double quote inside any JSON string.
+- Every object in an array must contain all of its keys, including testingTable[].test, testingTable[].purpose and testingTable[].expectedResult.
+
+Example of the required shape. It describes a DIFFERENT, unrelated procedure. Use it only as a format guide; never copy its content.
 
 {
-  "summary": "brief evidence-based summary",
-  "overallRisk": "low|medium|high|critical",
-  "confidence": 0.0,
+  "summary": "The procedure builds a query by concatenating a parameter and lacks error handling.",
+  "overallRisk": "high",
+  "confidence": 0.6,
   "findingsTable": [
     {
-      "category": "correctness|performance|security|concurrency|maintainability|standards|error_handling|transactional_integrity",
-      "finding": "short finding",
-      "evidence": "exact SQL evidence or not observed",
-      "severity": "critical|high|medium|low",
-      "recommendation": "specific actionable recommendation"
+      "category": "security",
+      "finding": "Dynamic SQL built by string concatenation",
+      "evidence": "EXEC(@sql)",
+      "severity": "high",
+      "recommendation": "Use sp_executesql with a typed parameter."
     }
   ],
   "performanceTable": [
     {
-      "area": "query_shape|joins|filters|aggregation|indexing|parameter_sniffing|tempdb|cursor_loop|io",
-      "observation": "observation",
-      "evidence": "SQL evidence or not observed",
-      "impact": "low|medium|high|unknown",
-      "recommendation": "recommendation"
+      "area": "query_shape",
+      "observation": "SELECT * returns every column",
+      "evidence": "SELECT * FROM Orders",
+      "impact": "medium",
+      "recommendation": "List only the required columns."
     }
   ],
   "securityTable": [
     {
-      "area": "dynamic_sql|injection|permissions|data_exposure|input_validation",
-      "observation": "observation",
-      "evidence": "SQL evidence or not observed",
-      "risk": "low|medium|high|unknown",
-      "recommendation": "recommendation"
+      "area": "dynamic_sql",
+      "observation": "User input is concatenated into executable SQL",
+      "evidence": "EXEC(@sql)",
+      "risk": "high",
+      "recommendation": "Parameterize with sp_executesql."
     }
   ],
   "testingTable": [
     {
-      "test": "test to perform",
-      "purpose": "what it validates",
-      "expectedResult": "expected result"
+      "test": "Call the procedure with a value containing a single quote",
+      "purpose": "Confirms the injection fix",
+      "expectedResult": "No error and no extra rows returned"
     }
   ],
-  "rewrittenProcedure": "complete SQL Server procedure",
-  "limitations": [
-    "missing information that prevents reliable analysis"
-  ]
+  "rewrittenProcedure": "CREATE PROCEDURE dbo.Example @Name nvarchar(100) AS BEGIN SET NOCOUNT ON; SELECT Id FROM dbo.Orders WHERE Name = @Name; END",
+  "limitations": ["Execution plan and index definitions were not provided."]
 }
 
-<stored_procedure>
+Now review the procedure below and return one JSON object in the same shape.
+
 {{STORED_PROCEDURE}}
-</stored_procedure>
 
 Return the JSON object now.

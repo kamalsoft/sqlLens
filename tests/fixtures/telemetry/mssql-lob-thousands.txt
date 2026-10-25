@@ -1,0 +1,4 @@
+Table 'Docs'. Scan count 1, logical reads 1,234, physical reads 12, read-ahead reads 1,000, lob logical reads 2,345, lob physical reads 3, lob read-ahead reads 4.
+
+ SQL Server Execution Times:
+   CPU time = 1,031 ms,  elapsed time = 1,240 ms.

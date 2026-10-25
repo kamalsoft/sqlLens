@@ -1,25 +1,32 @@
-import { NextResponse } from 'next/server';
-import db from '@/db';
+import { NextResponse } from "next/server";
+import { lookupShare } from "@/db/audit-repo";
+import { requireSession } from "@/lib/auth";
+import { logError } from "@/lib/redact";
 
 export async function GET(
-  _req: Request,
+  request: Request,
   { params }: { params: Promise<{ token: string }> }
 ) {
+  const auth = requireSession(request);
+  if (!auth.ok) return auth.response;
   try {
     const { token } = await params;
-    const audit = db.prepare('SELECT * FROM audit_requests WHERE shared_token = ?').get(token) as any;
-
-    if (!audit) {
-      return NextResponse.json({ error: 'Shared result not found' }, { status: 404 });
+    const found = lookupShare(token);
+    if (found.state === "not_found") {
+      return NextResponse.json({ error: "Shared result not found" }, { status: 404 });
     }
-
+    if (found.state === "expired") {
+      return NextResponse.json({ error: "Share link has expired" }, { status: 410 });
+    }
     return NextResponse.json({
-      id: audit.id,
-      type: audit.type,
-      createdAt: audit.created_at,
-      result: JSON.parse(audit.response_payload),
+      id: found.id,
+      type: found.type,
+      createdAt: found.createdAt,
+      result: found.result,
+      expiresAt: found.expiresAt,
     });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error) {
+    logError("[share/route]", error);
+    return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
 }
