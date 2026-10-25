@@ -7,7 +7,7 @@
   "maxConcurrentDownloads": 2,
   "temperature": 0.2,
   "contextWindow": 128000,
-  "allowTelemetry": false,
+  "allowTelemetry": true,
   "allowLiveExecution": false,
   "queryTimeoutMs": 30000,
   "defaultEngine": "simulation",
