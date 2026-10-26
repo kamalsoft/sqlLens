@@ -1342,6 +1342,59 @@ body {
   overflow-wrap: anywhere;
 }
 
+.review-code-tall {
+  max-height: 640px;
+}
+
+.review-code-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 10px 0 6px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.review-copy-button {
+  padding: 4px 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: var(--panel-strong);
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.review-copy-button:hover,
+.review-copy-button:focus-visible {
+  border-color: var(--primary);
+}
+
+.review-checks {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+  font-size: 0.82rem;
+}
+
+.review-checks li {
+  margin: 0;
+}
+
+.review-check-pass span {
+  color: var(--success);
+}
+
+.review-check-fail span,
+.review-check-fail small {
+  color: var(--danger);
+}
+
 .review-report .review-empty {
   color: var(--muted);
   font-style: italic;

@@ -24,6 +24,7 @@ const smallDir = path.join(modelsDir, "acme_small");
 process.env.SQLLENS_CONFIG_PATH = path.join(tmp, "appconfig.json");
 
 import { POST as review } from "@/app/api/review/route";
+import { POST as refactor } from "@/app/api/refactor/route";
 import { GET as status } from "@/app/api/models/status/route";
 import { POST as download } from "@/app/api/models/download/route";
 import { GET as refresh } from "@/app/api/models/refresh/route";
@@ -312,6 +313,76 @@ describe("POST /api/review", () => {
     setPipelineFactoryForTests(async () => generatorReturning(open, { hitTokenLimit: true }));
     const cut = await (await review(post("/api/review", { ...valid, schemaVersion: "v1" }, cookie))).json();
     expect(cut.result).toMatchObject({ rewriteStatus: "truncated", rewrittenProcedure: "" });
+  });
+
+  describe("POST /api/refactor", () => {
+    const sql = "CREATE PROCEDURE dbo.p @Id INT AS BEGIN SELECT o.Id, o.Total FROM dbo.Orders AS o WITH (NOLOCK) WHERE o.CustomerId = @Id; END";
+    const answer = (extra: Record<string, unknown> = {}) =>
+      JSON.stringify({
+        summary: "Removed NOLOCK.",
+        changes: ["Removed the NOLOCK hint"],
+        indexRecommendations: [{ table: "dbo.Orders", keyColumns: ["CustomerId"], includeColumns: ["Total"] }],
+        viewRecommendations: [
+          { name: "dbo.vOrderTotals", reason: "reused", definition: "SELECT o.Id, o.Total FROM dbo.Orders AS o" },
+          { name: "dbo.vBad", reason: "writes", definition: "SELECT 1; DELETE FROM dbo.Orders" },
+        ],
+        otherRecommendations: ["Update statistics on dbo.Orders"],
+        limitations: [],
+        ...extra,
+      });
+    const refactored = "CREATE PROCEDURE dbo.p @Id INT AS BEGIN SET NOCOUNT ON; SELECT o.Id, o.Total FROM dbo.Orders AS o WHERE o.CustomerId = @Id; END";
+
+    it("validates input", async () => {
+      expect((await refactor(post("/api/refactor", { sql }, cookie))).status).toBe(400);
+      expect((await refactor(post("/api/refactor", { modelId: "acme/tiny", sql: "please optimise" }, cookie))).status).toBe(400);
+      expect(
+        (await refactor(post("/api/refactor", { modelId: "acme/tiny", sql, instructions: "x".repeat(2001) }, cookie))).status,
+      ).toBe(400);
+      expect((await refactor(post("/api/refactor", { modelId: "acme/tiny", sql }))).status).toBe(401);
+    });
+
+    it("returns formatted SQL, checks, and verified index and view recommendations", async () => {
+      setPipelineFactoryForTests(async () =>
+        generatorReturning(`${answer()}\n<rewritten_procedure>\n\`\`\`sql\n${refactored}\n\`\`\`\n</rewritten_procedure>`),
+      );
+      const res = await refactor(post("/api/refactor", { modelId: "acme/tiny", sql, instructions: "Remove NOLOCK" }, cookie));
+      expect(res.status).toBe(200);
+      const { id, result } = await res.json();
+      expect(id).toBeTruthy();
+      expect(result.status).toBe("provided");
+      expect(result.formatted).toBe(true);
+      expect(result.refactoredSql).toContain("CREATE PROCEDURE dbo.p\n    @Id INT\nAS\nBEGIN\n    SET NOCOUNT ON;");
+      expect(result.checks.every((c: { passed: boolean }) => c.passed)).toBe(true);
+      expect(result.indexRecommendations[0].createStatement).toBe(
+        "CREATE NONCLUSTERED INDEX [IX_Orders_CustomerId] ON [dbo].[Orders] ([CustomerId]) INCLUDE ([Total]);",
+      );
+      expect(result.viewRecommendations.map((v: { name: string }) => v.name)).toEqual(["dbo.vOrderTotals"]);
+      expect(result.viewRecommendations[0].createStatement).toMatch(/^CREATE VIEW \[dbo\]\.\[vOrderTotals\]\nAS\nSELECT/);
+      expect(result.limitations).toContain("1 view recommendation(s) removed: not a read-only SELECT over tables in the SQL.");
+    });
+
+    it("removes refactored SQL that adds writes", async () => {
+      const unsafe = refactored.replace("END", "DELETE FROM dbo.Orders WHERE 1 = 0; END");
+      setPipelineFactoryForTests(async () => generatorReturning(`${answer()}\n<rewritten_procedure>\n${unsafe}\n</rewritten_procedure>`));
+      const { result } = await (await refactor(post("/api/refactor", { modelId: "acme/tiny", sql }, cookie))).json();
+      expect(result).toMatchObject({ status: "unsafe", statusDetail: "Writes to orders", refactoredSql: "" });
+    });
+
+    it("flags failed checks but still returns the SQL", async () => {
+      const broken = "CREATE PROCEDURE dbo.p @CustomerId INT AS BEGIN SELECT o.Id FROM dbo.Orders AS o WHERE o.CustomerId = @Id; END";
+      setPipelineFactoryForTests(async () => generatorReturning(`${answer()}\n<rewritten_procedure>\n${broken}\n</rewritten_procedure>`));
+      const { result } = await (await refactor(post("/api/refactor", { modelId: "acme/tiny", sql }, cookie))).json();
+      expect(result.status).toBe("provided");
+      const failed = result.checks.filter((c: { passed: boolean }) => !c.passed).map((c: { id: string }) => c.id);
+      expect(failed).toEqual(["declarations", "parameters"]);
+    });
+
+    it("502 with the raw output when the JSON cannot be read", async () => {
+      setPipelineFactoryForTests(async () => generatorReturning("I cannot help with that."));
+      const res = await refactor(post("/api/refactor", { modelId: "acme/tiny", sql }, cookie));
+      expect(res.status).toBe(502);
+      expect((await res.json()).details.responseText).toBe("I cannot help with that.");
+    });
   });
 
   it("removes a rewrite that writes to tables the original does not", async () => {

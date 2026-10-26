@@ -7,7 +7,7 @@ import {
   recommendationsFromV2,
 } from "./RecommendationGroups";
 
-function Section({
+export function Section({
   title,
   count,
   children,
@@ -71,7 +71,7 @@ function Meta({ risk, confidence }: { risk?: string; confidence: number }) {
   );
 }
 
-function IndexRecommendations({ items }: { items?: IndexRecommendation[] }) {
+export function IndexRecommendations({ items }: { items?: IndexRecommendation[] }) {
   // Older audit records have no indexRecommendations field.
   if (!items || items.length === 0) return null;
   return (

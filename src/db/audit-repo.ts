@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import db from "./index";
 
-export type AuditType = "EXECUTE" | "EXECUTE_COMPARE" | "COMPARE" | "REVIEW";
+export type AuditType = "EXECUTE" | "EXECUTE_COMPARE" | "COMPARE" | "REVIEW" | "REFACTOR";
 
 export type InsertAuditInput = {
   sessionId: string;

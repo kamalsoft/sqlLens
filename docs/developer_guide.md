@@ -42,6 +42,7 @@ sqlens/
 │       ├── analysisSP-verylarge.md    # detailed v2 variant (set prompt.analysisSP to use it)
 │       ├── review-with-telemetry.md   # v2 review with execution telemetry
 │       ├── compare.md                 # original vs optimized comparison
+│       ├── refactor.md                # refactor page: optimized SQL + index/view advice
 │       └── explainStatistic.md        # not loaded by any route yet
 ├── docs/
 │   ├── architecture.md

@@ -71,3 +71,9 @@ export function missingDeclarations(original: string, rewrite: string): string[]
   }
   return [...missing];
 }
+
+/** Lower-cased parameter names of a CREATE PROCEDURE header, in order. */
+export function procedureParameters(sql: string): string[] {
+  const header = stripCommentsAndStrings(sql).match(/\bcreate\s+(?:or\s+alter\s+)?proc(?:edure)?\s+[^\s(]+([\s\S]*?)\bas\b/i);
+  return [...(header?.[1] ?? "").matchAll(/(@\w+)\s+(?:as\s+)?[A-Za-z]/g)].map((m) => m[1].toLowerCase());
+}

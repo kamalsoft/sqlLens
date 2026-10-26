@@ -42,7 +42,7 @@ export async function runModel(
   model: RunnableModel,
   prompt: string,
   userMessage: string,
-  options: { maxNewTokens: number; temperature: number; timeoutMs: number },
+  options: { maxNewTokens: number; temperature: number; timeoutMs: number; signal?: AbortSignal },
   sqlField = "sql",
 ): Promise<{ ok: true; text: string; hitTokenLimit: boolean } | { ok: false; response: NextResponse }> {
   try {
@@ -81,7 +81,7 @@ export async function runModel(
       return {
         ok: false,
         response: NextResponse.json(
-          { error: "Another review is still running. Wait for it to finish, then retry." },
+          { error: "Another model run (review, compare or refactor) is still running. Wait for it to finish, then retry." },
           { status: 429 },
         ),
       };

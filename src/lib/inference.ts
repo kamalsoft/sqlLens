@@ -11,6 +11,8 @@ export type GenerateOptions = {
   timeoutMs: number;
   /** Overrides config.contextWindow (tests). */
   contextWindow?: number;
+  /** Aborted when the client goes away: generation stops and frees the slot. */
+  signal?: AbortSignal;
 };
 
 export type Dtype = "q4" | "q8" | "fp16" | "fp32";
@@ -258,6 +260,7 @@ async function runGeneration(
     );
     const instance = new InterruptableStoppingCriteria();
     stopper.interrupt = () => instance.interrupt();
+    if (opts.signal?.aborted) instance.interrupt();
     criteria = instance;
   }
 
@@ -303,6 +306,8 @@ export async function generateTextDetailed(
 
   busy = true;
   const stopper: { interrupt?: () => void } = {};
+  const onAbort = () => stopper.interrupt?.();
+  opts.signal?.addEventListener("abort", onAbort, { once: true });
   const work = runGeneration(modelDir, messages, opts, stopper);
   work.then(
     () => {
@@ -331,5 +336,6 @@ export async function generateTextDetailed(
     return await Promise.race([work, timeout]);
   } finally {
     clearTimeout(timer);
+    opts.signal?.removeEventListener("abort", onAbort);
   }
 }

@@ -104,6 +104,21 @@ AS EXEC sp_executesql '
     expect(splitRewriteBlock('{"summary": "s"}').rewrite).toBeNull();
   });
 
+  it("recovers a finished answer that stopped inside a list of strings", () => {
+    const text = '```json\n{"summary": "s", "issues": [], "rewriteNotes": ["complete note", "The original procedure relied on a temp table. While this i';
+    // Only when the model finished on its own: the unfinished item is dropped.
+    expect(extractJson(text, validateReviewV1, { finished: true }).rewriteNotes).toEqual(["complete note"]);
+    expect(() => extractJson(text, validateReviewV1)).toThrow();
+    // Never inside a list of objects: a half-written issue must not look complete.
+    const objects = '{"summary": "s", "issues": [{"severity": "low", "title": "t", "explanation": "e"}, {"severity": "lo';
+    expect(() => extractJson(objects, validateReviewV1, { finished: true })).toThrow();
+    // Nor a list cut before its first item.
+    expect(() => extractJson('{"summary": "s", "issues": [', validateReviewV1, { finished: true })).toThrow();
+    expect(() => extractJson('{"summary": "s", "issues": [], "rewriteNotes": ["only partial', validateReviewV1, { finished: true })).toThrow();
+    // An advisory list may end up empty.
+    expect(extractJson('{"summary": "s", "issues": [], "limitations": ["only partial', validateReviewV1, { finished: true }).issues).toEqual([]);
+  });
+
   it("drops only a cut-off final rewrite", () => {
     expect(dropTruncatedRewrite('{"summary": "s", "issues": [], "rewrittenProcedure": "CREATE PROC p\nAS SEL')).toBe(
       '{"summary": "s", "issues": [], "rewrittenProcedure": ""}',

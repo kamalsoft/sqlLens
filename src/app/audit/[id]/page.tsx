@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { useApi } from "@/components/api-client";
 import { ReviewResultView } from "@/components/review/ReviewResultView";
 import type { ReviewV1, ReviewV2, SchemaVersion } from "@/lib/review-schema";
+import type { RefactorResult } from "@/lib/refactor-shared";
 import {
   FeedbackControls,
   type FeedbackEntry,
@@ -184,6 +185,18 @@ export default function AuditDetailPage() {
           <ul>
             {((response as CompareResponse | null)?.recommendations ?? []).map((r, i) => (
               <li key={i}>{r}</li>
+            ))}
+          </ul>
+        </section>
+      ) : record.type === "REFACTOR" && response ? (
+        <section aria-label="Refactor result">
+          <h3>Summary</h3>
+          <p>{(response as RefactorResult).summary}</p>
+          <p>Status: {(response as RefactorResult).status}</p>
+          {(response as RefactorResult).refactoredSql && <pre className="review-code">{(response as RefactorResult).refactoredSql}</pre>}
+          <ul>
+            {((response as RefactorResult).changes ?? []).map((c, i) => (
+              <li key={i}>{c}</li>
             ))}
           </ul>
         </section>

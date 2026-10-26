@@ -168,13 +168,13 @@ function asStringList(value: unknown, path: string): string[] {
   return asArray(value, path).map((v, i) => asString(v, `${path}[${i}]`));
 }
 
-function asRewriteNotes(value: unknown): string[] {
-  return orDefault<unknown[]>(value, [], (v) => asArray(v, "rewriteNotes")).filter(
+export function asStringItems(value: unknown, path = "rewriteNotes"): string[] {
+  return orDefault<unknown[]>(value, [], (v) => asArray(v, path)).filter(
     (note): note is string => typeof note === "string" && note.trim().length > 0,
   );
 }
 
-function asIndexRecommendations(value: unknown): IndexRecommendation[] {
+export function asIndexRecommendations(value: unknown): IndexRecommendation[] {
   return orDefault<unknown[]>(value, [], (v) => asArray(v, "indexRecommendations")).map((raw, i) => {
     const p = `indexRecommendations[${i}]`;
     const r = asObject(raw, p);
@@ -211,7 +211,7 @@ export function validateReviewV1(value: unknown): ReviewV1 {
     ),
     confidence: orDefault(c.confidence, 0, (v) => asConfidence(v, "confidence")),
     indexRecommendations: asIndexRecommendations(c.indexRecommendations),
-    rewriteNotes: asRewriteNotes(c.rewriteNotes),
+    rewriteNotes: asStringItems(c.rewriteNotes),
   };
 }
 
@@ -286,7 +286,7 @@ export function validateReviewV2(value: unknown): ReviewV2 {
     ),
     limitations,
     indexRecommendations: asIndexRecommendations(c.indexRecommendations),
-    rewriteNotes: asRewriteNotes(c.rewriteNotes),
+    rewriteNotes: asStringItems(c.rewriteNotes),
   };
 }
 

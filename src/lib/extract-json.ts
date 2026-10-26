@@ -85,8 +85,47 @@ function autoClosed(text: string, finished: boolean): string | null {
   if (trimmed.endsWith("}")) body = trimmed.slice(start, -1);
   else if (finished) body = trimmed.slice(start);
   else return null;
-  // Every list and nested object must already be complete.
-  return openDepth(body) === 1 ? closeOpenStructures(body) : null;
+  // Every list and nested object must already be complete...
+  if (openDepth(body) === 1) return closeOpenStructures(body);
+  // ...except a top-level list of plain strings the model stopped inside:
+  // drop its unfinished last item and close it.
+  return finished ? closeStringList(body) : null;
+}
+
+const EMPTY_OK_LISTS = new Set(["limitations", "otherRecommendations"]);
+
+/**
+ * For a body whose only open structures are the outer object and one array
+ * of strings directly inside it, removes the unfinished last string (and any
+ * trailing comma) and closes both. Otherwise null.
+ */
+function closeStringList(body: string): string | null {
+  const stack: Array<{ char: string; at: number }> = [];
+  let quoted = false;
+  let escaped = false;
+  let stringStart = -1;
+  for (let index = 0; index < body.length; index += 1) {
+    const character = body[index];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') quoted = false;
+    } else if (character === '"') {
+      quoted = true;
+      stringStart = index;
+    } else if (character === "{" || character === "[") stack.push({ char: character, at: index });
+    else if (character === "}" || character === "]") stack.pop();
+  }
+  if (stack.length !== 2 || stack[0].char !== "{" || stack[1].char !== "[") return null;
+  const list = body.slice(stack[1].at);
+  if (openDepth(list) !== 1) return null;
+  const kept = (quoted ? body.slice(0, stringStart) : body).replace(/,\s*$/, "");
+  // At least one complete string must remain, so a list cut before its first
+  // item (for example "issues": [) never becomes an empty one, unless the list
+  // is advisory and an empty value cannot hide anything.
+  const key = body.slice(0, stack[1].at).match(/"(\w+)"\s*:\s*$/)?.[1] ?? "";
+  if (!/"\s*$/.test(kept.slice(stack[1].at + 1)) && !EMPTY_OK_LISTS.has(key)) return null;
+  return `${kept}]}`;
 }
 
 function openDepth(body: string): number {

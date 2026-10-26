@@ -124,6 +124,7 @@ export async function POST(request: Request) {
       maxNewTokens: config.maxNewTokens,
       temperature: config.temperature,
       timeoutMs: config.inferenceTimeoutMs,
+      signal: request.signal,
     });
     if (!run.ok) return run.response;
     const rawResult = run.text;

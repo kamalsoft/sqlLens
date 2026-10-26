@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { validateCompare } from "@/lib/compare";
+import { buildRefactorPrompt, validateRefactor } from "@/lib/refactor";
 import { buildPrompt } from "@/lib/review-prompt";
 import { validateReviewV1, validateReviewV2 } from "@/lib/review-schema";
 
@@ -72,6 +73,15 @@ describe("prompt contracts", () => {
         expect(() => validateReviewV2(candidate), `${name} ${field}=${value}`).not.toThrow();
       }
     }
+  });
+
+  it("refactor.md has its placeholders, a valid example and the SQL block", () => {
+    const text = read("refactor.md");
+    expect(text).not.toContain("```");
+    expect(() => buildRefactorPrompt(text, "SELECT 1", "")).not.toThrow();
+    expect(() => validateRefactor(example(text))).not.toThrow();
+    expect(text).toMatch(/\n\}\n<rewritten_procedure>\n[^\n]+\n<\/rewritten_procedure>/);
+    expect(text).toContain("Do not write CREATE INDEX statements");
   });
 
   it("compare.md has its placeholders and a neutral, valid example", () => {
