@@ -10,13 +10,13 @@ Rules:
 - differences and risks are arrays of short strings. Use [] when there are none.
 - Every string is one JSON string: \n for line breaks, \" for quotes, no raw line breaks.
 
-Return exactly one valid JSON object with no Markdown or code fences, in this shape (the angle-bracket text describes what to write; never copy it literally):
+Return exactly one valid JSON object with no Markdown or code fences, in this format. The values show the format only: replace every value with your own result, and never copy them.
 
 {
   "winner": "inconclusive",
-  "summary": "<one or two sentences comparing the procedures, citing metric values>",
-  "differences": ["<a code or behavior difference you can see>"],
-  "risks": ["<a risk the optimized version introduces>"],
+  "summary": "Metrics were not captured, so the verdict is based on the code only.",
+  "differences": [],
+  "risks": [],
   "confidence": 0.5
 }
 

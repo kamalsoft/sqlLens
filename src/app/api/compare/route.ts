@@ -9,6 +9,7 @@ import {
   COMPARE_SCHEMA_VERSION,
   CompareTooLargeError,
   buildComparePrompt,
+  enforceMetricsRules,
   validateCompare,
 } from "@/lib/compare";
 import { extractJson } from "@/lib/extract-json";
@@ -169,7 +170,7 @@ export async function POST(request: Request) {
 
     let result;
     try {
-      result = extractJson(run.text, validateCompare);
+      result = extractJson(run.text, (value) => enforceMetricsRules(validateCompare(value), metrics, simulated));
     } catch (error) {
       return NextResponse.json(
         {

@@ -77,3 +77,30 @@ export function buildComparePrompt(
   }
   return prompt;
 }
+
+// Numbers with a unit, or a speed comparison: claims that need measured values.
+const PERFORMANCE_CLAIM =
+  /\d[\d.,]*\s*(?:%|percent|ms|milliseconds?|seconds?|secs?|minutes?|x\b|times\b)|\b(?:faster|slower|quicker)\b/i;
+
+/** True when at least one metric has a captured value (original or optimized). */
+export function hasCapturedMetrics(metrics: MetricComparison | null): boolean {
+  return metrics !== null && Object.values(metrics).some((m) => m && (m.original !== null || m.optimized !== null));
+}
+
+/**
+ * Applies rules the prompt states but a small model may ignore. Without captured metrics
+ * the verdict is inconclusive, and any performance claim is rejected so the UI shows an
+ * error instead of an invented number.
+ */
+export function enforceMetricsRules(
+  result: CompareModelResult,
+  metrics: MetricComparison | null,
+  simulated: boolean,
+): CompareModelResult {
+  if (hasCapturedMetrics(metrics) && !simulated) return result;
+  const text = [result.summary, ...result.differences, ...result.risks].join(" ");
+  if (PERFORMANCE_CLAIM.test(text)) {
+    throw new Error("performance claim without captured metrics: the verdict must say \"not captured\"");
+  }
+  return { ...result, winner: "inconclusive" };
+}

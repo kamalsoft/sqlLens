@@ -183,7 +183,8 @@ describe("POST /api/compare (P4-02)", () => {
     expect(lastPrompt).toContain("SELECT *");
     const stored = getAudit(body.id, sessionIdOf(cookie));
     expect(stored).toMatchObject({ type: "COMPARE", modelId });
-    expect(stored?.response).toMatchObject({ result: cmpJson, metrics: null });
+    // No metrics were captured, so the stored verdict is forced to inconclusive.
+    expect(stored?.response).toMatchObject({ result: { ...cmpJson, winner: "inconclusive" }, metrics: null });
   });
 
   it("compares by audit ids and stores the metric deltas on the record", async () => {
@@ -213,6 +214,15 @@ describe("POST /api/compare (P4-02)", () => {
     );
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/does not look like SQL/);
+  });
+
+  it("502 when the model claims a speed-up with no metrics captured (no invented numbers)", async () => {
+    setPipelineFactoryForTests(async () =>
+      generatorReturning(JSON.stringify({ ...cmpJson, winner: "optimized", differences: ["approximately 15-20% faster execution time"] })),
+    );
+    const res = await compare(post("/api/compare", { modelId, original: "SELECT *", optimized: "SELECT a" }, cookie));
+    expect(res.status).toBe(502);
+    expect((await res.json()).details.message).toMatch(/without captured metrics/);
   });
 
   it("rejects simulated vs real, foreign ids and invalid model output", async () => {
