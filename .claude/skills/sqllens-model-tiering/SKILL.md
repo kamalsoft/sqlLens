@@ -1,6 +1,6 @@
 ---
 name: sqllens-model-tiering
-description: Use when spawning a SQLLens subagent or picking a Claude model for delegated work — run eligible tasks on the economy tier (haiku) first until its quota/rate limit is reached or quality fails, then normalize back to the agent's standard model.
+description: Use when delegating SQLLens work to a subagent or picking its model: try the economy tier (haiku) first, then the agent standard model.
 ---
 # Model tiering: economy first, then standard
 

@@ -1,6 +1,6 @@
 ---
 name: sqllens-transformers-local-inference
-description: Use when changing SQLLens model inference — /api/review, compare via a local model, prompt templates in data/prompts, generation options, or validating model-generated JSON (Transformers.js 4.2.0, ONNX).
+description: Use when changing model inference: /api/review, compare via a local model, prompt templates in data/prompts, generation options, or model JSON validation.
 ---
 # Local inference (@huggingface/transformers 4.2.0)
 

@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:e2e": "playwright test --pass-with-no-tests",
     "typecheck": "tsc --noEmit",
-    "admin:set-password": "node --experimental-strip-types scripts/set-admin-password.ts"
+    "admin:set-password": "node --experimental-strip-types scripts/set-admin-password.ts",
+    "check:budget": "node scripts/check-token-budget.mjs"
   },
   "dependencies": {
     "@chakra-ui/react": "^3.37.0",
