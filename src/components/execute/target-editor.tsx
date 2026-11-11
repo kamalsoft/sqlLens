@@ -136,13 +136,16 @@ function Field({ caption, error, children }: { caption: string; error?: string |
 }
 
 export function TargetEditor({
-  kind, draft, onChange, placeholder, color,
+  kind, draft, onChange, placeholder, color, onLoadParams, loadNote,
 }: {
   kind: 'procedure' | 'batch';
   draft: TargetDraft;
   onChange: (d: TargetDraft) => void;
   placeholder: string;
   color: string;
+  /** UX-2: read the procedure's parameters from the database into the rows. */
+  onLoadParams?: () => void;
+  loadNote?: string | null;
 }) {
   if (kind === 'batch') {
     return (
@@ -167,7 +170,15 @@ export function TargetEditor({
           placeholder="dbo.MyProcedure" bg="gray.950" borderColor="gray.600" color="white" mb={4}
         />
       </Field>
-      <Text fontSize="xs" color="gray.400" mb={2}>Parameters</Text>
+      <Flex align="center" justify="space-between" gap={3} mb={2} wrap="wrap">
+        <Text fontSize="xs" color="gray.400">Parameters</Text>
+        {onLoadParams && (
+          <Button size="sm" variant="outline" colorPalette="cyan" onClick={onLoadParams} disabled={!draft.name.trim()}>
+            Load parameters from database
+          </Button>
+        )}
+      </Flex>
+      {loadNote && <Text fontSize="xs" color="yellow.300" mb={2}>{loadNote}</Text>}
       <Box display="flex" flexDirection="column" gap={3} mb={3}>
         {draft.params.map((row, i) => {
           const nameError = row.name.trim() && !NAME_RE.test(row.name.trim()) ? 'Use a name such as @StartDate' : null;

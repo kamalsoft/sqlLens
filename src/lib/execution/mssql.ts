@@ -202,6 +202,34 @@ async function countRows(req: MssqlRequestLike, tables: string[]): Promise<Recor
   return out;
 }
 
+/** One parameter of a stored procedure, from the catalog (UX-2). */
+export interface ProcedureParam { name: string; sqlType: string; isOutput: boolean; hasDefault: boolean }
+
+/**
+ * The parameters of a stored procedure, read from the catalog. The procedure name is bound as a
+ * parameter, never spliced into the SQL text. Read-only.
+ */
+export async function listProcedureParams(
+  conn: ExecConnection, procName: string, timeoutMs: number,
+): Promise<ProcedureParam[]> {
+  const { config } = buildMssqlConfig(conn, timeoutMs);
+  const pool = new sql.ConnectionPool(config);
+  try {
+    await pool.connect();
+    const req = pool.request();
+    req.input('procName', sql.NVarChar(256), procName);
+    const r = await req.query(
+      `SELECT p.name AS paramName, TYPE_NAME(p.user_type_id) AS typeName, p.is_output AS isOutput, p.has_default_value AS hasDefault ` +
+      `FROM sys.parameters AS p WHERE p.object_id = OBJECT_ID(@procName, N'P') ORDER BY p.parameter_id`,
+    );
+    return ((r.recordset ?? []) as { paramName: string; typeName: string; isOutput: boolean; hasDefault: boolean }[]).map((row) => ({
+      name: row.paramName, sqlType: row.typeName, isOutput: !!row.isOutput, hasDefault: !!row.hasDefault,
+    }));
+  } finally {
+    try { await pool.close(); } catch { /* already closed */ }
+  }
+}
+
 export async function testMssqlConnection(
   conn: ExecConnection, timeoutMs: number,
 ): Promise<{ serverVersion: string | null; encrypted: boolean; warnings: string[] }> {

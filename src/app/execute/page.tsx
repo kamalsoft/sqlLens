@@ -10,7 +10,7 @@ import type { ExecParam } from '@/components/execute/target-editor';
 import type { ExecutionResult } from '@/lib/sp-executor';
 import { useApi } from '@/components/api-client';
 import {
-  TargetEditor, buildTarget, emptyDraft, isDraftEmpty, targetError,
+  TargetEditor, buildTarget, emptyDraft, isDraftEmpty, targetError, newParamRow, type ParamType,
   type TargetDraft,
 } from '@/components/execute/target-editor';
 
@@ -480,6 +480,36 @@ export default function ExecutePage() {
     return true;
   }
 
+  // UX-2: the parameters of the named procedure, read from the database into the rows.
+  const [loadNote, setLoadNote] = useState<{ original: string | null; optimized: string | null }>({ original: null, optimized: null });
+  const loadParams = async (which: 'original' | 'optimized') => {
+    const draft = which === 'original' ? original : optimized;
+    const set = which === 'original' ? setOriginal : setOptimized;
+    const res = await api<{ parameters: { name: string; type: ParamType | null; isOutput: boolean; supported: boolean }[] }>(
+      '/api/execute/parameters',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ engine, name: draft.name.trim(), connection: connection() }),
+      },
+      'Could not read the parameters',
+    );
+    if (!res.ok || !res.data) {
+      setLoadNote((n) => ({ ...n, [which]: res.error ?? 'Could not read the parameters' }));
+      return;
+    }
+    const found = res.data.parameters;
+    const skipped = found.filter((p) => !p.supported).map((p) => p.name);
+    set({
+      ...draft,
+      params: found.map((p) => ({ ...newParamRow(), name: p.name, type: p.type ?? 'nvarchar', output: p.isOutput })),
+    });
+    setLoadNote((n) => ({
+      ...n,
+      [which]: skipped.length ? `Loaded ${found.length}. These types are not supported in the editor, so set them by hand: ${skipped.join(', ')}` : null,
+    }));
+  };
+
   const connection = () => ({
     host, port: Number(port), database, username, password,
     ...(engine === 'mssql' ? { trustServerCertificate: trustCert } : {}),
@@ -730,6 +760,8 @@ export default function ExecutePage() {
             <TargetEditor
               kind={kind} draft={original} onChange={setOriginal} color={mode === 'compare' ? 'red.200' : 'cyan.100'}
               placeholder="-- Paste your Stored Procedure here..."
+              onLoadParams={engine === 'mssql' ? () => void loadParams('original') : undefined}
+              loadNote={loadNote.original}
             />
           </Box>
 
@@ -742,6 +774,8 @@ export default function ExecutePage() {
               <TargetEditor
                 kind={kind} draft={optimized} onChange={setOptimized} color="green.200"
                 placeholder="-- Paste your Optimized SP here..."
+                onLoadParams={engine === 'mssql' ? () => void loadParams('optimized') : undefined}
+                loadNote={loadNote.optimized}
               />
             </Box>
           )}
