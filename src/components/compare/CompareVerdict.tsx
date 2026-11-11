@@ -4,7 +4,7 @@ import type { CompareModelResult } from '@/lib/compare';
 
 const WINNER_LABEL: Record<CompareModelResult['winner'], { text: string; palette: string }> = {
   original: { text: 'Original SP is better', palette: 'red' },
-  optimized: { text: 'Improved SP is better', palette: 'green' },
+  optimized: { text: 'Optimized SP is better', palette: 'green' },
   inconclusive: { text: 'Inconclusive', palette: 'gray' },
 };
 
@@ -70,7 +70,7 @@ export function CompareVerdict({
               <tr>
                 <th scope="col" style={{ textAlign: 'left' }}>Metric</th>
                 <th scope="col" style={{ textAlign: 'right' }}>Original</th>
-                <th scope="col" style={{ textAlign: 'right' }}>Improved</th>
+                <th scope="col" style={{ textAlign: 'right' }}>Optimized</th>
               </tr>
             </thead>
             <tbody>

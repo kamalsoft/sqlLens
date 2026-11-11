@@ -473,7 +473,7 @@ export default function ExecutePage() {
             <Box bg="gray.900" borderWidth="1px" borderColor="gray.700" borderRadius="xl" p={5}>
               <Flex align="center" gap={2} mb={3}>
                 <Badge colorPalette="green" variant="subtle">OPTIMIZED</Badge>
-                <Text fontSize="sm" fontWeight="semibold" color="gray.300" textTransform="uppercase" letterSpacing="wider">Improved SP</Text>
+                <Text fontSize="sm" fontWeight="semibold" color="gray.300" textTransform="uppercase" letterSpacing="wider">Optimized SP</Text>
               </Flex>
               <TargetEditor
                 kind={kind} draft={optimized} onChange={setOptimized} color="green.200"

@@ -48,7 +48,7 @@ describe("ComparePage", () => {
     await fill("SELECT 1", "SELECT 2");
     await user.click(screen.getByRole("button", { name: /Compare SPs/ }));
 
-    expect(await screen.findByTestId("compare-winner")).toHaveTextContent("Improved SP is better");
+    expect(await screen.findByTestId("compare-winner")).toHaveTextContent("Optimized SP is better");
     expect(screen.getByText("Removed #StagedSales")).toBeInTheDocument();
     expect(screen.getByText("Removed BEGIN TRANSACTION")).toBeInTheDocument();
     expect(screen.getByText(/No execution metrics were captured/)).toBeInTheDocument();
