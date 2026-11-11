@@ -34,16 +34,19 @@ type AuditRecord = {
 type ExecAnalysis = {
   performanceGrade?: string | null;
   summary?: string;
+  prodVerdict?: { verdict: string; reason: string; driver: string | null };
   ioAnalysis?: {
     totalLogicalReads?: number | null;
     totalPhysicalReads?: number | null;
     totalScanCount?: number | null;
+    rowCounts?: Record<string, number> | null;
   };
   timeAnalysis?: { totalMs?: number | null };
   metrics?: MetricsMap;
 };
 type ExecResponse = {
   mode?: "single" | "compare";
+  execution?: { outputs?: Record<string, unknown> };
   analysis?: ExecAnalysis;
   comparison?: ExecAnalysis & { comparisonSummary?: string };
   metrics?: MetricsMap;
@@ -75,7 +78,18 @@ function ExecutionView({ response }: { response: ExecResponse }) {
         <dd>{fmt(a?.ioAnalysis?.totalScanCount)}</dd>
         <dt>Total time</dt>
         <dd>{fmt(a?.timeAnalysis?.totalMs, " ms")}</dd>
+        <dt>Prod readiness</dt>
+        <dd>{a?.prodVerdict ? `${a.prodVerdict.verdict}: ${a.prodVerdict.reason}` : "not stored"}</dd>
+        {a?.ioAnalysis?.rowCounts && Object.entries(a.ioAnalysis.rowCounts).map(([table, rows]) => (
+          <span key={table} style={{ display: "contents" }}>
+            <dt>Rows in {table}</dt>
+            <dd>{Number(rows).toLocaleString()}</dd>
+          </span>
+        ))}
       </dl>
+      {response.execution?.outputs && Object.keys(response.execution.outputs).length > 0 && (
+        <pre aria-label="OUTPUT parameters">{JSON.stringify(response.execution.outputs, null, 2)}</pre>
+      )}
     </section>
   );
 }

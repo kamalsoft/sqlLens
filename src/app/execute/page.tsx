@@ -5,7 +5,8 @@ import {
   Box, Container, Heading, Text, Button, Flex,
   Spinner, Badge, Grid, Input, Separator,
 } from '@chakra-ui/react';
-import type { AuditAnalysis } from '@/lib/audit-analyzer';
+import type { AuditAnalysis, ProdVerdict } from '@/lib/audit-analyzer';
+import type { ExecParam } from '@/components/execute/target-editor';
 import type { ExecutionResult } from '@/lib/sp-executor';
 import { useApi } from '@/components/api-client';
 import {
@@ -38,7 +39,7 @@ type TestInfo = { ok: boolean; message: string };
 
 function GradeBadge({ grade }: { grade: string | null }) {
   if (grade === null) {
-    return <Badge colorPalette="gray" variant="subtle" px={3} py={2}>Not captured</Badge>;
+    return <Badge colorPalette="gray" variant="subtle" px={3} py={2}>Not graded</Badge>;
   }
   const colors: Record<string, string> = { A: 'green', B: 'blue', C: 'yellow', D: 'orange', F: 'red' };
   return (
@@ -54,6 +55,17 @@ function GradeBadge({ grade }: { grade: string | null }) {
   );
 }
 
+function VerdictCard({ verdict }: { verdict: ProdVerdict }) {
+  const color = verdict.verdict === 'READY' ? 'green' : verdict.verdict === 'OPTIMIZE' ? 'orange' : 'yellow';
+  return (
+    <Box p={4} bg="gray.950" borderRadius="lg" borderLeftWidth="4px" borderColor={`${color}.500`} aria-label="Prod-readiness verdict">
+      <Text fontSize="xs" color="gray.500" textTransform="uppercase" letterSpacing="wider">Prod readiness</Text>
+      <Text fontSize="xl" fontWeight="bold" color={`${color}.300`}>{verdict.verdict}</Text>
+      <Text fontSize="sm" color="gray.300">{verdict.reason}{verdict.driver ? ` (${verdict.driver})` : ''}</Text>
+    </Box>
+  );
+}
+
 function StatCard({ label, value, unit = '', color = 'blue' }: { label: string; value: string | number | null; unit?: string; color?: string }) {
   return (
     <Box bg="gray.900" borderWidth="1px" borderColor="gray.700" borderRadius="xl" p={4} textAlign="center">
@@ -64,7 +76,9 @@ function StatCard({ label, value, unit = '', color = 'blue' }: { label: string; 
   );
 }
 
-function AnalysisPanel({ analysis, title }: { analysis: AuditAnalysis; title: string }) {
+function AnalysisPanel({ analysis, title, params, outputs }: {
+  analysis: AuditAnalysis; title: string; params?: ExecParam[]; outputs?: Record<string, unknown>;
+}) {
   return (
     <Box borderWidth="1px" borderColor="gray.700" borderRadius="xl" overflow="hidden">
       <Box bg="gray.800" px={6} py={4} borderBottomWidth="1px" borderColor="gray.700">
@@ -78,13 +92,16 @@ function AnalysisPanel({ analysis, title }: { analysis: AuditAnalysis; title: st
       </Box>
 
       <Box px={6} py={6} display="flex" flexDirection="column" gap={6}>
+        {/* Verdict first (P8-04) */}
+        {analysis.prodVerdict && <VerdictCard verdict={analysis.prodVerdict} />}
+
         {/* Summary */}
         <Text color="gray.200" lineHeight="tall">{analysis.summary}</Text>
 
         <Separator borderColor="gray.700" />
 
         {/* Stats */}
-        <Grid templateColumns="repeat(4, 1fr)" gap={4}>
+        <Grid templateColumns={{ base: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' }} gap={4}>
           <StatCard label="Total Logical Reads" value={analysis.ioAnalysis.totalLogicalReads} color="blue" />
           <StatCard label="Physical Reads" value={analysis.ioAnalysis.totalPhysicalReads} color={analysis.ioAnalysis.totalPhysicalReads === null ? 'gray' : analysis.ioAnalysis.totalPhysicalReads > 0 ? 'orange' : 'green'} />
           <StatCard label="Scan Count" value={analysis.ioAnalysis.totalScanCount} color={analysis.ioAnalysis.totalScanCount === null ? 'gray' : analysis.ioAnalysis.totalScanCount > 3 ? 'red' : 'green'} />
@@ -92,6 +109,44 @@ function AnalysisPanel({ analysis, title }: { analysis: AuditAnalysis; title: st
         </Grid>
 
         <Separator borderColor="gray.700" />
+
+        {/* Row counts for the real tables the run read (D-039) */}
+        {analysis.ioAnalysis.rowCounts && (
+          <Box>
+            <Text fontSize="sm" fontWeight="semibold" color="blue.300" mb={3} textTransform="uppercase" letterSpacing="wider">Row counts (tables read)</Text>
+            <Grid templateColumns={{ base: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' }} gap={3}>
+              {Object.entries(analysis.ioAnalysis.rowCounts).map(([table, rows]) => (
+                <StatCard key={table} label={table} value={rows} color={rows === 0 ? 'red' : 'blue'} />
+              ))}
+            </Grid>
+          </Box>
+        )}
+
+        {/* Parameters used (P8-04) */}
+        {params && params.length > 0 && (
+          <Box>
+            <Text fontSize="sm" fontWeight="semibold" color="gray.300" mb={3} textTransform="uppercase" letterSpacing="wider">Parameters used</Text>
+            <Box as="dl" display="grid" gridTemplateColumns={{ base: '1fr', md: 'auto 1fr' }} gap={2} fontSize="sm">
+              {params.map((p, i) => (
+                <Flex key={i} gap={2} align="baseline" wrap="wrap" gridColumn="1 / -1">
+                  <Text as="dt" color="gray.400" fontFamily="mono">{p.name}</Text>
+                  <Text as="dd" color="white" fontFamily="mono">{p.value === null ? 'NULL' : String(p.value)} <Text as="span" color="gray.500">({p.type})</Text></Text>
+                  {p.output && <Badge colorPalette="purple" size="sm">OUTPUT</Badge>}
+                </Flex>
+              ))}
+            </Box>
+          </Box>
+        )}
+
+        {/* OUTPUT parameter values returned by the run */}
+        {outputs && Object.keys(outputs).length > 0 && (
+          <Box>
+            <Text fontSize="sm" fontWeight="semibold" color="cyan.300" mb={3} textTransform="uppercase" letterSpacing="wider">OUTPUT parameters</Text>
+            <Box as="pre" fontSize="xs" color="cyan.300" bg="gray.950" p={3} borderRadius="lg" overflowX="auto" fontFamily="mono">
+              {JSON.stringify(outputs, null, 2)}
+            </Box>
+          </Box>
+        )}
 
         {/* Time breakdown */}
         <Box>
@@ -207,14 +262,6 @@ function RawStatsPanel({ execution }: { execution: ExecutionResult }) {
             overflowX="auto" fontFamily="mono" whiteSpace="pre-wrap" lineHeight="tall">
             {execution.stats.rawOutput}
           </Box>
-          {execution.outputs && Object.keys(execution.outputs).length > 0 && (
-            <Box mb={4}>
-              <Text fontSize="xs" color="gray.400" mb={1}>OUTPUT parameters</Text>
-              <Box as="pre" fontSize="xs" color="cyan.300" bg="gray.950" p={3} borderRadius="lg" overflowX="auto" fontFamily="mono">
-                {JSON.stringify(execution.outputs, null, 2)}
-              </Box>
-            </Box>
-          )}
           {execution.recordNumber && (
             <Text fontSize="xs" color="gray.500" mt={3}>📁 Audit log saved</Text>
           )}
@@ -247,6 +294,7 @@ export default function ExecutePage() {
   const [testing, setTesting] = useState(false);
   const [testInfo, setTestInfo] = useState<TestInfo | null>(null);
   const [result, setResult] = useState<ExecuteResult | null>(null);
+  const [usedParams, setUsedParams] = useState<ExecParam[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'compare' | 'original' | 'optimized'>('compare');
   const abortRef = useRef<AbortController | null>(null);
@@ -310,6 +358,7 @@ export default function ExecutePage() {
     setLoading(true);
     setError(null);
     setResult(null);
+    setUsedParams(orig.target.kind === 'procedure' ? orig.target.params : []);
 
     const res = await api<{ result: ExecuteResult }>(
       '/api/execute',
@@ -566,7 +615,7 @@ export default function ExecutePage() {
 
             {result.mode === 'single' ? (
               <>
-                <AnalysisPanel analysis={result.analysis} title={`📊 Execution Analysis — ${result.execution.spLabel}`} />
+                <AnalysisPanel analysis={result.analysis} title={`📊 Execution Analysis — ${result.execution.spLabel}`} params={usedParams} outputs={result.execution.outputs} />
                 <RawStatsPanel execution={result.execution} />
               </>
             ) : (
@@ -606,13 +655,13 @@ export default function ExecutePage() {
                 {activeTab === 'compare' && <AnalysisPanel analysis={result.comparison} title="📊 Comparative Audit" />}
                 {activeTab === 'original' && (
                   <>
-                    <AnalysisPanel analysis={result.original.analysis} title="🔴 Original SP Audit" />
+                    <AnalysisPanel analysis={result.original.analysis} title="🔴 Original SP Audit" outputs={result.original.execution.outputs} />
                     <RawStatsPanel execution={result.original.execution} />
                   </>
                 )}
                 {activeTab === 'optimized' && (
                   <>
-                    <AnalysisPanel analysis={result.optimized.analysis} title="🟢 Optimized SP Audit" />
+                    <AnalysisPanel analysis={result.optimized.analysis} title="🟢 Optimized SP Audit" outputs={result.optimized.execution.outputs} />
                     <RawStatsPanel execution={result.optimized.execution} />
                   </>
                 )}

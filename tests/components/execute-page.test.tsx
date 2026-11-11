@@ -115,6 +115,30 @@ describe("ExecutePage null handling and validation", () => {
     expect(screen.getAllByText("Not captured").length).toBe(2);
   });
 
+  it("shows the verdict first, row counts, parameters and outputs for a single run (P8-04)", async () => {
+    const single = {
+      mode: "single", simulated: true, warnings: [],
+      execution: { ...exec, outputs: { ExecutionLogID: 2 } },
+      analysis: analysis({
+        performanceGrade: null, gradeRationale: "Not graded — Customers has 0 rows",
+        prodVerdict: { verdict: "INSUFFICIENT EVIDENCE", reason: "Customers has 0 rows", driver: "Customers" },
+        ioAnalysis: { rowCounts: { Customers: 0 }, totalLogicalReads: 1, totalPhysicalReads: 0, totalScanCount: 1, hotTables: [] },
+      }),
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ result: single })));
+    const user = userEvent.setup();
+    view();
+    await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
+    await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
+    const verdict = await screen.findByLabelText("Prod-readiness verdict");
+    expect(verdict).toHaveTextContent("INSUFFICIENT EVIDENCE");
+    expect(verdict).toHaveTextContent("Customers has 0 rows");
+    expect(screen.getByText("Not graded")).toBeInTheDocument();
+    expect(screen.getByText("Row counts (tables read)")).toBeInTheDocument();
+    expect(screen.getByText("OUTPUT parameters")).toBeInTheDocument();
+    expect(screen.getByText(/ExecutionLogID/)).toBeInTheDocument();
+  });
+
   it("blocks an empty port without fetching", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

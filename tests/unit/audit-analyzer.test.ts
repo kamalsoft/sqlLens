@@ -125,3 +125,19 @@ describe('D-039 empty table from the row count', () => {
     expect(analyzeExecution(r, { maxLogicalReads: 1000, maxElapsedMs: null, maxScanCount: null }).prodVerdict.verdict).toBe('READY');
   });
 });
+
+describe('P8-04 grade and row counts', () => {
+  it('withholds the grade when a read table has 0 rows, and says why', () => {
+    const a = analyzeExecution(result({ tableRows: { Customers: 0 } }, 100));
+    expect(a.performanceGrade).toBeNull();
+    expect(a.gradeRationale).toBe('Not graded — Customers has 0 rows');
+  });
+  it('keeps the grade when every counted table has rows', () => {
+    const a = analyzeExecution(result({ tableRows: { Customers: 5 } }, 100));
+    expect(a.performanceGrade).toBe('A');
+    expect(a.ioAnalysis.rowCounts).toEqual({ Customers: 5 });
+  });
+  it('reports null row counts when none were counted', () => {
+    expect(analyzeExecution(result({}, 100)).ioAnalysis.rowCounts).toBeNull();
+  });
+});

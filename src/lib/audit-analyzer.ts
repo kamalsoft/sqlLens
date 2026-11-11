@@ -26,6 +26,8 @@ export interface AuditAnalysis {
   performanceGrade: Grade | null;
   gradeRationale: string;
   ioAnalysis: {
+    /** P8-04: row count per real table the run read (D-039); null when not counted. */
+    rowCounts: Record<string, number> | null;
     totalLogicalReads: number | null;
     totalPhysicalReads: number | null;
     totalScanCount: number | null;
@@ -89,15 +91,28 @@ function delta(original: number | null, optimized: number | null): MetricDelta {
 // Grade thresholds. Metrics that were not captured are skipped, not treated as 0.
 // ---------------------------------------------------------------------------
 
+/**
+ * What stops a grade or READY: a real table with zero rows (D-039), or missing reads or time.
+ * Returns the reason, or null when the evidence is complete.
+ */
+export interface EvidenceGap { reason: string; table: string | null }
+export function evidenceGap(stats: ExecutionStats): EvidenceGap | null {
+  for (const [table, rows] of Object.entries(stats.tableRows ?? {})) {
+    if (rows === 0) return { reason: `${table} has 0 rows`, table };
+  }
+  const { logicalReads, elapsed } = metricsOf(stats);
+  if (logicalReads === null) return { reason: 'logical reads not captured', table: null };
+  if (elapsed === null) return { reason: 'elapsed time not captured', table: null };
+  return null;
+}
+
 /** P8-02: READY / OPTIMIZE / INSUFFICIENT EVIDENCE. Evidence checks run before targets. */
 export function prodVerdict(stats: ExecutionStats, targets: Targets): ProdVerdict {
+  const gap = evidenceGap(stats);
+  if (gap) return { verdict: 'INSUFFICIENT EVIDENCE', reason: gap.reason, driver: gap.table };
   const { logicalReads: reads, elapsed: ms } = metricsOf(stats);
-  // D-039: a real table the run read with zero rows means the run did not exercise the data.
-  for (const [table, rows] of Object.entries(stats.tableRows ?? {})) {
-    if (rows === 0) return { verdict: 'INSUFFICIENT EVIDENCE', reason: `${table} has 0 rows`, driver: table };
-  }
-  if (reads === null) return { verdict: 'INSUFFICIENT EVIDENCE', reason: 'logical reads not captured', driver: null };
-  if (ms === null) return { verdict: 'INSUFFICIENT EVIDENCE', reason: 'elapsed time not captured', driver: null };
+  // evidenceGap has already ruled out missing reads and time.
+  if (reads === null || ms === null) throw new Error('evidenceGap must report missing reads or time');
   if (targets.maxLogicalReads === null && targets.maxElapsedMs === null && targets.maxScanCount === null) {
     return { verdict: 'INSUFFICIENT EVIDENCE', reason: 'no targets set', driver: null };
   }
@@ -147,7 +162,9 @@ export function analyzeExecution(result: ExecutionResult, targets: Targets = NO_
   const totalScan = m.scanCount;
   const elapsed = m.elapsed;
 
-  const grade = gradeFromStats(stats);
+  const gap = evidenceGap(stats);
+  // P8-04: no grade while the evidence is incomplete; a grade next to INSUFFICIENT EVIDENCE misleads.
+  const grade = gap ? null : gradeFromStats(stats);
 
   const hotTables = [...stats.io]
     .sort((a, b) => b.logicalReads - a.logicalReads)
@@ -230,8 +247,10 @@ export function analyzeExecution(result: ExecutionResult, targets: Targets = NO_
     performanceGrade: grade,
     gradeRationale: grade
       ? rationales[grade]
-      : `Not graded — ${[elapsed === null && 'elapsed time', totalLogical === null && 'logical reads'].filter(Boolean).join(' and ')} not captured`,
-    ioAnalysis: { totalLogicalReads: totalLogical, totalPhysicalReads: totalPhysical, totalScanCount: totalScan, hotTables, recommendation: hotTables[0]?.concern || 'No hot tables identified' },
+      : totalLogical === null || elapsed === null
+        ? `Not graded — ${[elapsed === null && 'elapsed time', totalLogical === null && 'logical reads'].filter(Boolean).join(' and ')} not captured`
+        : `Not graded — ${gap?.reason}`,
+    ioAnalysis: { rowCounts: stats.tableRows ?? null, totalLogicalReads: totalLogical, totalPhysicalReads: totalPhysical, totalScanCount: totalScan, hotTables, recommendation: hotTables[0]?.concern || 'No hot tables identified' },
     timeAnalysis: {
       parseTimeMs: stats.parseAndCompileTime ?? null,
       executeTimeMs: stats.executionTime ?? null,
