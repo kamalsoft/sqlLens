@@ -18,3 +18,11 @@ Rules
 - One owner per file; others request changes through the owner.
 - `package.json` / `package-lock.json`, `.env*`, schema/migration, DB connection, model download, git commit/push need a user-APPROVED decision first.
 - Unused modules (`src/lib/datadog-analyzer.ts`, `model-store.ts`, `model-validation.ts`, `model-path.ts`, `src/components/layout/Navbar.tsx`) are owned by their area but stay untouched until a task needs them (D-010).
+
+## Review and test roles (added 2026-11-11, user request)
+| Role | Agent | When | Output |
+|---|---|---|---|
+| Senior Architect | `senior-architect` | Mandatory code review before every merge | Verdict and findings |
+| Tester | `tester` | At the end of every task or activity | PASS, PASS WITH GAPS, or FAIL |
+
+Both are read-only. Neither edits production code; defects go to the owner.
