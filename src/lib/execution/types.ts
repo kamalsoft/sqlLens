@@ -105,14 +105,17 @@ export function coerceParam(type: ParamType, value: ParamValue): string | number
       const text = value.trim();
       const naive = NAIVE_DATETIME_RE.exec(text);
       if (naive) {
-        const parts = naive.slice(1).map((x) => (x === undefined ? undefined : x));
+        const parts = naive.slice(1);
         const utc = instantFrom(Number(parts[0]), Number(parts[1]), Number(parts[2]), Number(parts[3] ?? 0), Number(parts[4] ?? 0), Number(parts[5] ?? 0), parts[6]);
         return utc ?? bad();
       }
       // Anything else must carry an explicit offset; without one the server's local time zone would decide.
       const offset = OFFSET_DATETIME_RE.exec(text);
       if (!offset) return bad();
-      const zone = offset[8] === 'Z' ? 0 : (offset[8][0] === '-' ? -1 : 1) * (Number(offset[8].slice(1, 3)) * 60 + Number(offset[8].slice(4, 6)));
+      const zoneHours = offset[8] === 'Z' ? 0 : Number(offset[8].slice(1, 3));
+      const zoneMinutes = offset[8] === 'Z' ? 0 : Number(offset[8].slice(4, 6));
+      if (zoneHours > 14 || zoneMinutes > 59) return bad();
+      const zone = (offset[8][0] === '-' ? -1 : 1) * (zoneHours * 60 + zoneMinutes);
       const local = instantFrom(Number(offset[1]), Number(offset[2]), Number(offset[3]), Number(offset[4]), Number(offset[5]), Number(offset[6] ?? 0), offset[7]);
       if (!local) return bad();
       return new Date(local.getTime() - zone * 60_000);

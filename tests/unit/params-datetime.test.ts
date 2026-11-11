@@ -54,4 +54,9 @@ describe('datetime parameters (DT-1)', () => {
   it('gives Postgres the same UTC instant for a naive value (timestamptz)', () => {
     expect((coerceParam('datetime', '2024-01-01 00:00:00') as Date).toISOString()).toBe('2024-01-01T00:00:00.000Z');
   });
+
+  it('keeps fractional seconds with an offset, and rejects an offset that no zone uses', () => {
+    expect((coerceParam('datetime', '2024-01-01T00:00:00.123+02:00') as Date).getTime()).toBe(Date.UTC(2023, 11, 31, 22, 0, 0, 123));
+    expect(() => coerceParam('datetime', '2024-01-01T00:00:00+99:99')).toThrow(RangeError);
+  });
 });
