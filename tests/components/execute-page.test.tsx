@@ -123,6 +123,7 @@ describe("ExecutePage null handling and validation", () => {
         performanceGrade: null, gradeRationale: "Not graded — Customers has 0 rows",
         prodVerdict: { verdict: "INSUFFICIENT EVIDENCE", reason: "Customers has 0 rows", driver: "Customers" },
         ioAnalysis: { rowCounts: { Customers: 0 }, totalLogicalReads: 1, totalPhysicalReads: 0, totalScanCount: 1, hotTables: [] },
+        planOperators: [{ nodeId: 8, physicalOp: "Clustered Index Scan", table: "Customers", actualRows: 1000000, logicalReads: 9185, executions: 1 }],
       }),
     };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ result: single })));
@@ -137,6 +138,8 @@ describe("ExecutePage null handling and validation", () => {
     expect(screen.getByText("Row counts (tables read)")).toBeInTheDocument();
     expect(screen.getByText("OUTPUT parameters")).toBeInTheDocument();
     expect(screen.getByText(/ExecutionLogID/)).toBeInTheDocument();
+    expect(screen.getByText("Costliest plan operators")).toBeInTheDocument();
+    expect(screen.getByText(/Clustered Index Scan on Customers/)).toBeInTheDocument();
   });
 
   it("blocks an empty port without fetching", async () => {

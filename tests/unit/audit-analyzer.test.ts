@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeExecution, compareExecutions } from '@/lib/audit-analyzer';
+import { analyzeExecution, compareExecutions, operatorRecommendations, planOperators, topOperators } from '@/lib/audit-analyzer';
 import type { ExecutionResult, ExecutionStats } from '@/lib/sp-executor';
 
 function result(over: Partial<ExecutionStats> = {}, reads: number | null = 100): ExecutionResult {
@@ -139,5 +139,43 @@ describe('P8-04 grade and row counts', () => {
   });
   it('reports null row counts when none were counted', () => {
     expect(analyzeExecution(result({}, 100)).ioAnalysis.rowCounts).toBeNull();
+  });
+});
+
+describe('P8-06 plan operator summary', () => {
+  const plan = [
+    '<RelOp NodeId="0" PhysicalOp="Clustered Index Insert" LogicalOp="Insert" EstimateRows="1">',
+    '<Update><Object Database="[TestDB]" Schema="[dbo]" Table="[Audit]"></Object></Update>',
+    '<RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="1" ActualLogicalReads="2" ActualExecutions="1"></RunTimeCountersPerThread></RunTimeInformation></RelOp>',
+    '<RelOp NodeId="8" PhysicalOp="Clustered Index Scan" LogicalOp="Clustered Index Scan" EstimateRows="1">',
+    '<RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="1000000" ActualLogicalReads="9185" ActualExecutions="1"></RunTimeCountersPerThread></RunTimeInformation>',
+    '<IndexScan><Object Database="[TestDB]" Schema="[dbo]" Table="[Customers]"></Object></IndexScan></RelOp>',
+    '<RelOp NodeId="7" PhysicalOp="Nested Loops" LogicalOp="Inner Join" EstimateRows="1">',
+    '<RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="12" ActualLogicalReads="0" ActualExecutions="1000000"></RunTimeCountersPerThread></RunTimeInformation></RelOp>',
+  ].join('\n');
+
+  it('parses operators with their runtime counters and table', () => {
+    const ops = planOperators(plan);
+    expect(ops.map((o) => o.physicalOp)).toEqual(['Clustered Index Insert', 'Clustered Index Scan', 'Nested Loops']);
+    expect(ops[1]).toMatchObject({ table: 'Customers', actualRows: 1000000, logicalReads: 9185, executions: 1 });
+    expect(ops[0].table).toBe('Audit');
+  });
+
+  it('ranks the costliest operators first and drops operators with no cost', () => {
+    const top = topOperators(planOperators(plan));
+    expect(top[0].physicalOp).toBe('Clustered Index Scan');
+    expect(top.some((o) => o.physicalOp === 'Nested Loops')).toBe(true);
+  });
+
+  it('names the costly scan and the row-by-row loop in the recommendations, keeping the mandatory three', () => {
+    const r = analyzeExecution(result({ plan }, 9195));
+    expect(r.recommendations.join('\n')).toMatch(/Clustered Index Scan on Customers: 9,185 logical reads/);
+    expect(r.recommendations.join('\n')).toMatch(/Nested Loops ran 1,000,000 times/);
+    expect(r.recommendations).toEqual(expect.arrayContaining([
+      'Run DBCC SHOW_STATISTICS([Table], [Index]) to validate index selectivity',
+      'Consider SET NOCOUNT ON to suppress row count messages and reduce network traffic',
+      'Review parameter sniffing: add OPTION (OPTIMIZE FOR UNKNOWN) if plans vary per parameter',
+    ]));
+    expect(r.planOperators[0].physicalOp).toBe('Clustered Index Scan');
   });
 });

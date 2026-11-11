@@ -169,6 +169,25 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
 
         <Separator borderColor="gray.700" />
 
+        {/* Costliest plan operators (P8-06) */}
+        {analysis.planOperators && analysis.planOperators.length > 0 && (
+          <Box>
+            <Text fontSize="sm" fontWeight="semibold" color="purple.300" mb={3} textTransform="uppercase" letterSpacing="wider">Costliest plan operators</Text>
+            <Box display="flex" flexDirection="column" gap={2}>
+              {analysis.planOperators.map((op) => (
+                <Box key={op.nodeId} p={4} bg="gray.800" borderRadius="lg" borderLeftWidth="3px" borderColor="purple.500">
+                  <Text color="white" fontWeight="semibold" fontSize="sm">{op.physicalOp}{op.table ? ` on ${op.table}` : ''}</Text>
+                  <Text color="gray.400" fontSize="xs" mt={1}>
+                    {op.logicalReads === null ? 'reads not captured' : `${op.logicalReads.toLocaleString()} logical reads`}
+                    {' · '}{op.actualRows === null ? 'rows not captured' : `${op.actualRows.toLocaleString()} rows`}
+                    {op.executions !== null && op.executions > 1 ? ` · ${op.executions.toLocaleString()} executions` : ''}
+                  </Text>
+                </Box>
+              ))}
+            </Box>
+          </Box>
+        )}
+
         {/* Hot tables */}
         {analysis.ioAnalysis.hotTables.length > 0 && (
           <Box>

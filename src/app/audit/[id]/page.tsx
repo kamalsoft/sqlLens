@@ -35,6 +35,7 @@ type ExecAnalysis = {
   performanceGrade?: string | null;
   summary?: string;
   prodVerdict?: { verdict: string; reason: string; driver: string | null };
+  planOperators?: { physicalOp: string; table: string | null; logicalReads: number | null; actualRows: number | null; executions: number | null }[];
   ioAnalysis?: {
     totalLogicalReads?: number | null;
     totalPhysicalReads?: number | null;
@@ -80,6 +81,14 @@ function ExecutionView({ response }: { response: ExecResponse }) {
         <dd>{fmt(a?.timeAnalysis?.totalMs, " ms")}</dd>
         <dt>Prod readiness</dt>
         <dd>{a?.prodVerdict ? `${a.prodVerdict.verdict}: ${a.prodVerdict.reason}` : "not stored"}</dd>
+        <dt>Costliest operators</dt>
+        <dd>
+          <ul>
+            {(a?.planOperators ?? []).map((op, i) => (
+              <li key={i}>{op.physicalOp}{op.table ? ` on ${op.table}` : ""}: {fmt(op.logicalReads, " logical reads")}</li>
+            ))}
+          </ul>
+        </dd>
         {a?.ioAnalysis?.rowCounts && Object.entries(a.ioAnalysis.rowCounts).map(([table, rows]) => (
           <span key={table} style={{ display: "contents" }}>
             <dt>Rows in {table}</dt>

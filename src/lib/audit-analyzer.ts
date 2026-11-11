@@ -18,8 +18,20 @@ export interface ProdVerdict {
 export interface Targets { maxLogicalReads: number | null; maxElapsedMs: number | null; maxScanCount: number | null }
 export const NO_TARGETS: Targets = { maxLogicalReads: null, maxElapsedMs: null, maxScanCount: null };
 
+/** P8-06: one plan operator with the runtime counters the plan recorded for it. */
+export interface PlanOperator {
+  nodeId: number;
+  physicalOp: string;
+  table: string | null;
+  actualRows: number | null;
+  logicalReads: number | null;
+  executions: number | null;
+}
+
 export interface AuditAnalysis {
   summary: string;
+  /** P8-06: the costliest operators by logical reads, then rows. */
+  planOperators: PlanOperator[];
   /** P8-02: prod-readiness verdict from evidence and user targets. */
   prodVerdict: ProdVerdict;
   /** null when no graded metric was captured. */
@@ -104,6 +116,59 @@ export function evidenceGap(stats: ExecutionStats): EvidenceGap | null {
   if (logicalReads === null) return { reason: 'logical reads not captured', table: null };
   if (elapsed === null) return { reason: 'elapsed time not captured', table: null };
   return null;
+}
+
+const sumAttr = (text: string, attr: string): number | null => {
+  const values = [...text.matchAll(new RegExp(`\\b${attr}="(\\d+)"`, 'g'))].map((m) => Number(m[1]));
+  return values.length ? values.reduce((a, b) => a + b, 0) : null;
+};
+
+/**
+ * P8-06: operators from the XML showplan, with runtime counters.
+ * shortcut: each operator's counters are the text between its RelOp and the next RelOp, which holds for the plans seen so far; upgrade with a real XML parser.
+ */
+export function planOperators(plan: string | null | undefined): PlanOperator[] {
+  if (!plan) return [];
+  const out: PlanOperator[] = [];
+  for (const chunk of plan.split(/(?=<RelOp\b)/)) {
+    const head = /^<RelOp\b[^>]*?\bNodeId="(\d+)"[^>]*?\bPhysicalOp="([^"]+)"/.exec(chunk);
+    if (!head) continue;
+    const table = /<Object\b[^>]*?\bTable="\[([^\]]+)\]"/.exec(chunk);
+    out.push({
+      nodeId: Number(head[1]),
+      physicalOp: head[2],
+      table: table ? table[1] : null,
+      actualRows: sumAttr(chunk, 'ActualRows'),
+      logicalReads: sumAttr(chunk, 'ActualLogicalReads'),
+      executions: sumAttr(chunk, 'ActualExecutions'),
+    });
+  }
+  return out;
+}
+
+const TOP_OPERATORS = 5;
+const SCAN_READS_NOTE = 1000;
+const LOOP_EXECUTIONS_NOTE = 1000;
+/** P8-06: the costliest operators, most logical reads first; operators with no runtime cost are dropped. */
+export function topOperators(ops: PlanOperator[]): PlanOperator[] {
+  return ops
+    .filter((o) => (o.logicalReads ?? 0) > 0 || (o.actualRows ?? 0) > 0)
+    .sort((a, b) => (b.logicalReads ?? 0) - (a.logicalReads ?? 0) || (b.actualRows ?? 0) - (a.actualRows ?? 0))
+    .slice(0, TOP_OPERATORS);
+}
+
+/** P8-06: recommendations that name the operator and table that cost the most. */
+export function operatorRecommendations(ops: PlanOperator[]): string[] {
+  const recs: string[] = [];
+  for (const o of ops) {
+    if (/Scan$/.test(o.physicalOp) && (o.logicalReads ?? 0) >= SCAN_READS_NOTE) {
+      recs.push(`${o.physicalOp} on ${o.table ?? 'an input'}: ${o.logicalReads?.toLocaleString()} logical reads. Look for a predicate that blocks a seek (an OR on a parameter, a function on the column, or an implicit conversion) or a missing index.`);
+    }
+    if (o.physicalOp === 'Nested Loops' && (o.executions ?? 0) >= LOOP_EXECUTIONS_NOTE) {
+      recs.push(`Nested Loops ran ${o.executions?.toLocaleString()} times${o.table ? ` on ${o.table}` : ''}: a row-by-row join. Rewrite as a set-based join or index the inner input.`);
+    }
+  }
+  return recs;
 }
 
 /** P8-02: READY / OPTIMIZE / INSUFFICIENT EVIDENCE. Evidence checks run before targets. */
@@ -210,7 +275,8 @@ export function analyzeExecution(result: ExecutionResult, targets: Targets = NO_
   else if (totalScan <= stats.io.length) pros.push('Scan count is minimal — likely using index seeks');
   else cons.push(`High scan count (${totalScan}) across tables — missing or unused indexes`);
 
-  const recommendations: string[] = [];
+  const operators = planOperators(stats.plan);
+  const recommendations: string[] = operatorRecommendations(topOperators(operators));
 
   if (totalLogical !== null && totalLogical > 1000) {
     recommendations.push(
@@ -244,6 +310,7 @@ export function analyzeExecution(result: ExecutionResult, targets: Targets = NO_
   return {
     summary: `${result.spLabel} executed in ${fmtMs(elapsed)} with ${fmtN(totalLogical)} total logical reads across ${stats.io.length} table(s). Performance grade: ${grade ?? 'not graded'}.`,
     prodVerdict: prodVerdict(stats, targets),
+    planOperators: topOperators(operators),
     performanceGrade: grade,
     gradeRationale: grade
       ? rationales[grade]
