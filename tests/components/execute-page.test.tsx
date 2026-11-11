@@ -207,6 +207,25 @@ describe("ExecutePage null handling and validation", () => {
     expect(panel).toHaveTextContent("Grade B");
   });
 
+  it("copies the raw output to the clipboard from the raw-output panel", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const single = {
+      mode: "single", simulated: true, warnings: [],
+      execution: { ...exec, stats: { ...exec.stats, rawOutput: "Table 'SalesOrders'. Scan count 5, logical reads 6" } },
+      analysis: analysis(),
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ result: single })));
+    const user = userEvent.setup();
+    view();
+    await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
+    await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
+    await user.click(await screen.findByRole("button", { name: "Show" }));
+    await user.click(screen.getByRole("button", { name: "Copy raw output" }));
+    expect(writeText).toHaveBeenCalledWith("Table 'SalesOrders'. Scan count 5, logical reads 6");
+    expect(await screen.findByText("Copied")).toBeInTheDocument();
+  });
+
   it("blocks an empty port without fetching", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

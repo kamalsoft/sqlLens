@@ -401,6 +401,17 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
 
 function RawStatsPanel({ execution }: { execution: ExecutionResult }) {
   const [show, setShow] = useState(false);
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const raw = execution.stats.rawOutput;
+  const copyRaw = async () => {
+    try {
+      await navigator.clipboard.writeText(raw);
+      setCopyState('copied');
+    } catch {
+      // Clipboard can be blocked (permissions, insecure page): the text stays selectable in the panel.
+      setCopyState('failed');
+    }
+  };
   return (
     <Box bg="gray.900" borderWidth="1px" borderColor="gray.700" borderRadius="xl" overflow="hidden">
       <Flex justify="space-between" align="center" px={5} py={3} borderBottomWidth="1px" borderColor="gray.700">
@@ -408,9 +419,14 @@ function RawStatsPanel({ execution }: { execution: ExecutionResult }) {
           <Text fontSize="sm" fontWeight="semibold" color="gray.300">📄 Raw Execution Output</Text>
           <Text fontSize="xs" color="gray.500">The server&apos;s messages for this run: the STATISTICS IO and TIME lines and the plan XML. Every number on this page is parsed from this text.</Text>
         </Box>
-        <Button size="xs" variant="ghost" colorPalette="gray" onClick={() => setShow(!show)}>
-          {show ? 'Hide' : 'Show'}
-        </Button>
+        <Flex gap={2} align="center">
+          <Button size="xs" variant="outline" colorPalette="cyan" aria-label="Copy raw output" onClick={copyRaw} disabled={!raw}>
+            {copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : 'Copy'}
+          </Button>
+          <Button size="xs" variant="ghost" colorPalette="gray" onClick={() => setShow(!show)}>
+            {show ? 'Hide' : 'Show'}
+          </Button>
+        </Flex>
       </Flex>
       {show && (
         <Box p={5}>
