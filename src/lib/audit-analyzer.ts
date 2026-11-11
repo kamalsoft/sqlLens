@@ -143,13 +143,24 @@ export interface EvidenceGap { reason: string; table: string | null }
  * Real tables whose scans and seeks, summed over the run, returned no rows. The run then did not
  * exercise that data, whatever the timing says. Temp tables are skipped: they fill during the run.
  */
-export function unreadTables(stats: ExecutionStats): string[] {
-  const rowsByTable = new Map<string, number>();
+function readCounters(stats: ExecutionStats): Map<string, { rows: number; executions: number }> {
+  const byTable = new Map<string, { rows: number; executions: number }>();
   for (const o of planOperators(stats.plan)) {
     if (!o.table || o.table.startsWith('#') || !/(Scan|Seek)$/.test(o.physicalOp) || o.actualRows === null) continue;
-    rowsByTable.set(o.table, (rowsByTable.get(o.table) ?? 0) + o.actualRows);
+    const t = byTable.get(o.table) ?? { rows: 0, executions: 0 };
+    byTable.set(o.table, { rows: t.rows + o.actualRows, executions: t.executions + (o.executions ?? 0) });
   }
-  return [...rowsByTable].filter(([, rows]) => rows === 0).map(([table]) => table);
+  return byTable;
+}
+
+/** Tables read by a scan or seek that returned no rows, and that the run did reach. */
+export function unreadTables(stats: ExecutionStats): string[] {
+  return [...readCounters(stats)].filter(([, c]) => c.rows === 0 && c.executions > 0).map(([table]) => table);
+}
+
+/** Tables whose scans and seeks never executed: the run stopped before it got to them. */
+export function unreachedTables(stats: ExecutionStats): string[] {
+  return [...readCounters(stats)].filter(([, c]) => c.executions === 0).map(([table]) => table);
 }
 
 export function evidenceGap(stats: ExecutionStats): EvidenceGap | null {
@@ -157,8 +168,12 @@ export function evidenceGap(stats: ExecutionStats): EvidenceGap | null {
     if (rows === 0) return { reason: `${table} has 0 rows`, table };
   }
   const unread = unreadTables(stats);
-  if (unread.length > 0) {
-    return { reason: `no rows read from ${unread.join(', ')}: the run did not exercise the data`, table: unread[0] };
+  const unreached = unreachedTables(stats);
+  if (unread.length > 0 || unreached.length > 0) {
+    const parts: string[] = [];
+    if (unread.length > 0) parts.push(`no rows read from ${unread.join(', ')}: the run did not exercise the data`);
+    if (unreached.length > 0) parts.push(`${unreached.join(', ')} not reached: the run stopped before reading it`);
+    return { reason: parts.join('; '), table: (unread[0] ?? unreached[0]) ?? null };
   }
   const { logicalReads, elapsed } = metricsOf(stats);
   if (logicalReads === null) return { reason: 'logical reads not captured', table: null };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeExecution, compareExecutions, operatorRecommendations, planFindings, planOperators, summarizeRuns, topOperators, unreadTables } from '@/lib/audit-analyzer';
+import { analyzeExecution, compareExecutions, operatorRecommendations, planFindings, planOperators, summarizeRuns, topOperators, unreadTables, unreachedTables } from '@/lib/audit-analyzer';
 import type { ExecutionResult, ExecutionStats } from '@/lib/sp-executor';
 
 function result(over: Partial<ExecutionStats> = {}, reads: number | null = 100): ExecutionResult {
@@ -290,5 +290,13 @@ describe('P8-07 generic plan findings', () => {
       'Consider SET NOCOUNT ON to suppress row count messages and reduce network traffic',
       'Review parameter sniffing: add OPTION (OPTIMIZE FOR UNKNOWN) if plans vary per parameter',
     ]));
+  });
+
+  it('says a table was not reached when none of its scans or seeks executed', () => {
+    const notReached = '<RelOp NodeId="9" PhysicalOp="Clustered Index Seek" LogicalOp="Clustered Index Seek" EstimateRows="1"><RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="0" ActualLogicalReads="0" ActualExecutions="0"></RunTimeCountersPerThread></RunTimeInformation><IndexScan><Object Database="[db]" Schema="[dbo]" Table="[Later]"></Object></IndexScan></RelOp>';
+    const readNoRows = '<RelOp NodeId="4" PhysicalOp="Index Seek" LogicalOp="Index Seek" EstimateRows="1"><RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="0" ActualLogicalReads="6" ActualExecutions="10"></RunTimeCountersPerThread></RunTimeInformation><IndexScan><Object Database="[db]" Schema="[dbo]" Table="[SalesOrders]"></Object></IndexScan></RelOp>';
+    const a = analyzeExecution(result({ plan: readNoRows + notReached }, 100), { maxLogicalReads: 1000, maxElapsedMs: null, maxScanCount: null });
+    expect(a.prodVerdict.reason).toBe('no rows read from SalesOrders: the run did not exercise the data; Later not reached: the run stopped before reading it');
+    expect(unreachedTables(result({ plan: notReached }, 100).stats)).toEqual(['Later']);
   });
 });
