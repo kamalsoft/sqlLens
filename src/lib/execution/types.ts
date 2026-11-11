@@ -53,7 +53,17 @@ export function isLocalHost(host: string): boolean {
 
 const INT_RE = /^-?\d+$/;
 /** YYYY-MM-DD with an optional time (space or T separator), and no time zone. */
-const NAIVE_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/;
+const NAIVE_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,7}))?)?)?$/;
+/** ISO 8601 with an explicit Z or ±hh:mm offset: the only text form that carries its own time zone. */
+const OFFSET_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,7}))?)?(Z|[+-]\d{2}:\d{2})$/;
+
+/** The UTC instant for literal components, or null when the calendar or the clock does not exist. */
+function instantFrom(y: number, mo: number, d: number, hh: number, mi: number, ss: number, frac: string | undefined): Date | null {
+  const ms = frac ? Math.floor(Number(`0.${frac}`) * 1000) : 0;
+  const utc = new Date(Date.UTC(y, mo - 1, d, hh, mi, ss, ms));
+  const real = utc.getUTCFullYear() === y && utc.getUTCMonth() === mo - 1 && utc.getUTCDate() === d;
+  return real && hh <= 23 && mi <= 59 && ss <= 59 ? utc : null;
+}
 const DEC_RE = /^-?\d+(\.\d+)?$/;
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
@@ -87,17 +97,25 @@ export function coerceParam(type: ParamType, value: ParamValue): string | number
     case 'date': {
       if (typeof value !== 'string' && typeof value !== 'number') return bad();
       // DT-1: a naive date-time is taken as the literal components, never through the server's local time zone.
-      const naive = typeof value === 'string' ? NAIVE_DATETIME_RE.exec(value.trim()) : null;
-      if (naive) {
-        const [y, mo, d, hh, mi, ss] = naive.slice(1, 7).map((x) => Number(x ?? 0));
-        const utc = new Date(Date.UTC(y, mo - 1, d, hh, mi, ss));
-        const real = utc.getUTCFullYear() === y && utc.getUTCMonth() === mo - 1 && utc.getUTCDate() === d;
-        if (!real || hh > 23 || mi > 59 || ss > 59) return bad();
-        return utc;
+      if (typeof value === 'number') {
+        const epoch = new Date(value);
+        if (Number.isNaN(epoch.getTime())) return bad();
+        return epoch;
       }
-      const d = new Date(value);
-      if (Number.isNaN(d.getTime())) bad();
-      return d;
+      const text = value.trim();
+      const naive = NAIVE_DATETIME_RE.exec(text);
+      if (naive) {
+        const parts = naive.slice(1).map((x) => (x === undefined ? undefined : x));
+        const utc = instantFrom(Number(parts[0]), Number(parts[1]), Number(parts[2]), Number(parts[3] ?? 0), Number(parts[4] ?? 0), Number(parts[5] ?? 0), parts[6]);
+        return utc ?? bad();
+      }
+      // Anything else must carry an explicit offset; without one the server's local time zone would decide.
+      const offset = OFFSET_DATETIME_RE.exec(text);
+      if (!offset) return bad();
+      const zone = offset[8] === 'Z' ? 0 : (offset[8][0] === '-' ? -1 : 1) * (Number(offset[8].slice(1, 3)) * 60 + Number(offset[8].slice(4, 6)));
+      const local = instantFrom(Number(offset[1]), Number(offset[2]), Number(offset[3]), Number(offset[4]), Number(offset[5]), Number(offset[6] ?? 0), offset[7]);
+      if (!local) return bad();
+      return new Date(local.getTime() - zone * 60_000);
     }
     case 'uniqueidentifier': {
       if (typeof value === 'string' && UUID_RE.test(value)) return value;

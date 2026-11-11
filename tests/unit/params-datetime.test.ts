@@ -27,4 +27,31 @@ describe('datetime parameters (DT-1)', () => {
     const v = coerceParam('datetime', '2024-01-01T00:00:00Z') as Date;
     expect(v.getTime()).toBe(Date.UTC(2024, 0, 1));
   });
+
+  it('rejects an offset string whose calendar date does not exist, instead of rolling over', () => {
+    expect(() => coerceParam('datetime', '2024-02-30T00:00:00Z')).toThrow(RangeError);
+    expect(() => coerceParam('datetime', '2024-02-30T00:00:00+02:00')).toThrow(RangeError);
+  });
+
+  it('rejects text forms that carry no offset, so the local time zone never decides', () => {
+    expect(() => coerceParam('datetime', 'Feb 30 2024')).toThrow(RangeError);
+    expect(() => coerceParam('datetime', '2024/01/01 00:00')).toThrow(RangeError);
+  });
+
+  it('rejects 24:00 rather than moving it to the next day', () => {
+    expect(() => coerceParam('datetime', '2024-01-01 24:00')).toThrow(RangeError);
+  });
+
+  it('keeps fractional seconds as milliseconds, with and without the T separator', () => {
+    expect((coerceParam('datetime', '2024-01-01 00:00:00.123') as Date).getTime()).toBe(Date.UTC(2024, 0, 1, 0, 0, 0, 123));
+    expect((coerceParam('datetime', '2024-01-01T00:00:00.5') as Date).getTime()).toBe(Date.UTC(2024, 0, 1, 0, 0, 0, 500));
+  });
+
+  it('applies an explicit offset to the instant it names', () => {
+    expect((coerceParam('datetime', '2024-01-01T00:00:00+02:00') as Date).getTime()).toBe(Date.UTC(2023, 11, 31, 22, 0, 0));
+  });
+
+  it('gives Postgres the same UTC instant for a naive value (timestamptz)', () => {
+    expect((coerceParam('datetime', '2024-01-01 00:00:00') as Date).toISOString()).toBe('2024-01-01T00:00:00.000Z');
+  });
 });
