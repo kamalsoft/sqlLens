@@ -279,7 +279,7 @@ Constraints: the query text is fixed in code. Table names come from the server's
 
 ### Security review 2026-11-11 (commits 8ecdb20, 23b7b4f, 0a4b43b)
 Status: APPROVED WITH CONDITIONS (read-only review by the security agent; not a merge approval)
-- C1 OPEN, needs a user decision: OUTPUT values are stored in the audit DB response and in the audit log file, whatever `logSqlText` says. In mssql an OUTPUT parameter is INOUT, so a caller's input value can come back and be stored. Options: A stop storing `outputs` (show them in the response only) / B keep and record an accepted risk.
+- C1 ACCEPTED RISK (user, 2026-11-11, option B): OUTPUT values stay in the audit DB response and the audit log file, whatever `logSqlText` says. In mssql an OUTPUT parameter is INOUT, so a caller's input value can come back and be stored. Accepted because the audit record is the only place to see what a procedure returned; revisit if audit records are shared outside the team.
 - C2 done: D-039 wording corrected above.
 - C3: `data/appconfig.json` stays out of every commit.
 Not verified: no live MSSQL run of the count query or the GO edge cases.
