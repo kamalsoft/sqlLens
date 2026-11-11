@@ -148,6 +148,7 @@ Ordered by risk first, then by what blocks a release. Each item names its plan t
 18. Approve or decline P0-04 (docs draft) and run P0-03's first real-database migration after a backup.
 19. Backup and restore runbook for `sqllens.db`; dependency update policy; threat model for non-localhost use.
 20. Merge overlapping skills: `sqllens-api-route-patterns`, `sqllens-auth-sessions`, `sqllens-security-redaction`.
+21. Remove the PostgreSQL feature (decided 2026-11-10: the app will not ship PostgreSQL). Covers `src/lib/execution/postgres.ts`, `src/lib/telemetry/postgres*`, the `pg` dependency, the PostgreSQL engine option in the UI and API, its tests and docs. Until removed, PostgreSQL batches allow `PREPARE TRANSACTION`, which can leave locks on the server (D-036, Security condition 2). Needs a decision record and Security sign-off.
 
 ## Roadmap Overview Matrix
 

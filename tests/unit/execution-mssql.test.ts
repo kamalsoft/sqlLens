@@ -147,9 +147,10 @@ describe('executeMssql', () => {
     expect(h.state.calls).toContain('rollback');
   });
 
-  it('rejects COMMIT inside a batch before connecting', async () => {
-    await expect(executeMssql(conn, { kind: 'batch', sql: 'UPDATE t SET a=1; COMMIT' }, opts)).rejects.toThrow(/Transaction control/);
-    expect(h.state.calls).toEqual([]);
+  it('runs COMMIT inside a batch as written (D-036)', async () => {
+    await executeMssql(conn, { kind: 'batch', sql: 'UPDATE t SET a=1; COMMIT' }, opts);
+    expect(h.state.texts).toContain('UPDATE t SET a=1; COMMIT');
+    expect(h.state.calls).toContain('begin');
   });
 });
 
@@ -167,15 +168,9 @@ describe('D-034 batch hardening', () => {
     expect(h.state.calls).toContain('begin');
   });
 
-  it('opens a nested transaction and probes @@TRANCOUNT after the batch', async () => {
+  it('wraps the batch in one transaction and does not probe @@TRANCOUNT (D-036)', async () => {
     await executeMssql(conn, { kind: 'batch', sql: 'UPDATE t SET a = 1' }, opts);
-    expect(h.state.texts[0]).toContain('BEGIN TRAN');
-    expect(h.state.texts.at(-1)).toContain('@@TRANCOUNT');
-  });
-
-  it('errors and still rolls back when the count drops below 2', async () => {
-    h.state.trancount = 1;
-    await expect(executeMssql(conn, { kind: 'batch', sql: 'SELECT 1' }, opts)).rejects.toThrow(/escaped the batch/);
+    expect(h.state.texts.join('\n')).not.toMatch(/BEGIN TRAN|@@TRANCOUNT/);
     expect(h.state.calls).toEqual(['connect', 'begin', 'rollback', 'close']);
   });
 

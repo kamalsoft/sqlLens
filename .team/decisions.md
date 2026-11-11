@@ -236,3 +236,12 @@ Options: A use a larger ONNX instruct model as the default (e.g. a 1.5B–3B Qwe
 Recommendation: C
 Impact if delayed: DoD review quality; P5-06 catalog and default model (D-026)
 User decision: C (both), as recommended (2026-10-25)
+
+### D-036 Allow transaction control in batch scripts (supersedes D-005 batch rule and D-034 B)
+Status: APPROVED
+Context (evidence): live run on 2026-11-10 returned "Transaction control statements are not allowed in a batch" for a stored procedure script (`src/lib/execution/request.ts:59`, `src/lib/execution/sql-scan.ts:77`). The user states that database scripts are expected to contain COMMIT/ROLLBACK and BEGIN.
+Options: A allow transaction control in MSSQL and PostgreSQL batches, keep the wrapper transaction (uncommitted work still rolls back) and keep the D-034 A ban on dynamic EXEC / sp_executesql / B remove the rejection and the D-034 @@TRANCOUNT guard too, leave no wrapper / C keep the check and add an opt-in per request
+Recommendation: A, with the D-034 A dynamic-exec ban kept. Risk: a script can commit changes, so scripts can write to the database. Anonymous `/api/execute` access is still possible until P2-05 (auth).
+Impact if delayed: none blocking. Blocks the user's script runs.
+User decision: A (2026-11-10, "I signoff the change request and approve it. go ahead and make the change"). Security sign-off was given by the user, not by the security agent review; the security review still needs to run.
+Security review (2026-11-10, verdict APPROVED WITH CONDITIONS): condition 2 (PostgreSQL `PREPARE TRANSACTION` is no longer blocked) is an accepted risk until the PostgreSQL feature is removed (ROADMAP backlog item 21). User accepted the risk (2026-11-10, "yes"). Conditions 1, 3 and 4 are met: auth on `/api/execute` is verified, the stale comments are fixed, and `data/appconfig.json` stays out of the PR.

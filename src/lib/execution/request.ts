@@ -1,8 +1,7 @@
 import { validateSqlInput } from '../validation/sql-input';
 import { isBoolean, isNumber, isString } from '../validation/body';
-import { assertNoTransactionControl } from './sql-scan';
 import {
-  coerceParam, ExecRejectedError, IDENT_RE, PARAM_NAME_RE, PARAM_TYPES,
+  coerceParam, IDENT_RE, PARAM_NAME_RE, PARAM_TYPES,
   type EngineName, type ExecConnection, type ExecParam, type ExecTarget, type ParamType,
 } from './types';
 
@@ -55,12 +54,6 @@ function parseTarget(raw: unknown, field: string, engine: EngineName, maxSqlLeng
   if (raw.kind === 'batch') {
     const v = validateSqlInput(raw.sql, maxSqlLength);
     if (!v.ok) return fail(v.error, `${field}.sql`);
-    if (engine !== 'simulation') {
-      try { assertNoTransactionControl(v.sql, engine); } catch (e) {
-        if (e instanceof ExecRejectedError) return fail(e.message, `${field}.sql`);
-        throw e;
-      }
-    }
     return { ok: true, value: { kind: 'batch', sql: v.sql } };
   }
   if (raw.kind === 'procedure') {

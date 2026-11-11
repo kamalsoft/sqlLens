@@ -131,9 +131,10 @@ describe('executePostgres', () => {
     expect(texts().at(-1)).toBe('ROLLBACK');
   });
 
-  it.each(['COMMIT', 'select 1; commit', "SELECT 1; E'\\''; END"])('rejects transaction control: %s', async (sql) => {
-    await expect(executePostgres(conn, { kind: 'batch', sql }, opts)).rejects.toThrow(/Transaction control/);
-    expect(h.state.configs).toHaveLength(0);
+  it('runs transaction control inside a batch as written (D-036)', async () => {
+    await executePostgres(conn, { kind: 'batch', sql: 'UPDATE t SET a = 1; COMMIT; SELECT 1' }, opts);
+    expect(texts()).toContain('COMMIT');
+    expect(texts().at(-1)).toBe('ROLLBACK');
   });
 });
 

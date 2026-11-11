@@ -1,6 +1,6 @@
 import sql from 'mssql';
 import { parseMssqlStatistics } from '../telemetry/mssql';
-import { assertNoDynamicExec, assertNoTransactionControl } from './sql-scan';
+import { assertNoDynamicExec } from './sql-scan';
 import {
   coerceParam, ExecAbortError, ExecTimeoutError, onAbort, TLS_WARNING,
   type DriverOutcome, type ExecConnection, type ExecOptions, type ExecTarget, type ParamType,
@@ -75,7 +75,6 @@ export async function executeMssql(
   conn: ExecConnection, target: ExecTarget, opts: ExecOptions,
 ): Promise<DriverOutcome> {
   if (target.kind === 'batch') {
-    assertNoTransactionControl(target.sql, 'mssql');
     assertNoDynamicExec(target.sql, 'mssql');
   }
   const { config, warnings } = buildMssqlConfig(conn, opts.timeoutMs);
@@ -108,8 +107,7 @@ export async function executeMssql(
 
     const setup = mk();
     current = setup;
-    // D-034: batch mode nests a second transaction so @@TRANCOUNT is 2 before user SQL.
-    await setup.batch(target.kind === 'batch' ? `${SET_STATS} BEGIN TRAN;` : SET_STATS);
+    await setup.batch(SET_STATS);
     checkFlags();
 
     const infos: string[] = [];
@@ -130,21 +128,6 @@ export async function executeMssql(
     const wallMs = performance.now() - started;
     checkFlags();
 
-    if (target.kind === 'batch') {
-      const probe = mk();
-      current = probe;
-      const pr = await probe.batch('SELECT @@TRANCOUNT AS tc');
-      checkFlags();
-      let tc: number | null = null;
-      for (const rs of pr.recordsets ?? []) {
-        const v = Array.isArray(rs) ? (rs[0] as Record<string, unknown> | undefined)?.tc : undefined;
-        if (typeof v === 'number') { tc = v; break; }
-      }
-      if (tc === null || tc < 2) {
-        throw new Error('A COMMIT/ROLLBACK escaped the batch (transaction count dropped below 2); the batch was rolled back and its results discarded');
-      }
-    }
-
     const stats = parseMssqlStatistics(infos.join('\n'));
     stats.plan = extractPlans(result.recordsets);
     stats.messages = infos.filter((m) => !NOISE.test(m));
@@ -159,7 +142,7 @@ export async function executeMssql(
   } finally {
     clearTimeout(timer);
     disposeAbort();
-    // D-005: a batch never commits.
+    // D-036: the batch transaction is rolled back here unless the script committed it.
     if (tx && txAttempted) { try { await tx.rollback(); } catch { /* no active transaction */ } }
     try { await pool.close(); } catch { /* already closed */ }
   }

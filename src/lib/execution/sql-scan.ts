@@ -71,23 +71,6 @@ export function firstKeyword(statement: string, dialect: Dialect): string {
   return m ? m[1].toUpperCase() : '';
 }
 
-const PG_TX_CONTROL = new Set(['COMMIT', 'END', 'ROLLBACK', 'ABORT', 'BEGIN', 'START', 'SAVEPOINT', 'RELEASE', 'PREPARE']);
-
-/** Batches run inside a transaction we always roll back; a batch must not end it itself. */
-export function assertNoTransactionControl(sql: string, dialect: Dialect): void {
-  if (dialect === 'postgres') {
-    for (const s of splitStatements(sql, dialect)) {
-      if (PG_TX_CONTROL.has(firstKeyword(s, dialect))) {
-        throw new ExecRejectedError('Transaction control statements are not allowed in a batch');
-      }
-    }
-    return;
-  }
-  if (/\b(COMMIT|ROLLBACK)\b/i.test(maskSql(sql, dialect))) {
-    throw new ExecRejectedError('Transaction control statements are not allowed in a batch');
-  }
-}
-
 /**
  * D-034: in MSSQL batch mode, EXEC/EXECUTE/sp_executesql can run text this scan cannot see
  * (e.g. dynamic COMMIT). Procedures must go through procedure mode.
