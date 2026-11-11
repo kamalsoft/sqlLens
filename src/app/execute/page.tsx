@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Box, Container, Heading, Text, Button, Flex,
   Spinner, Badge, Grid, Input, Separator,
@@ -9,9 +9,9 @@ import { GRADE_RULES, STANDARD_RECOMMENDATIONS, type AuditAnalysis, type Grade, 
 import type { ExecParam } from '@/components/execute/target-editor';
 import type { ExecutionResult } from '@/lib/sp-executor';
 import { useApi } from '@/components/api-client';
+import { readParamSets, setNamesFor, withSet, withoutSet, writeParamSets, type ParamSetStore, type SavedParam } from '@/lib/param-sets';
 import {
-  TargetEditor, buildTarget, emptyDraft, isDraftEmpty, targetError, newParamRow, type ParamType,
-  type TargetDraft,
+  TargetEditor, buildTarget, emptyDraft, isDraftEmpty, targetError, newParamRow, type ParamType, type TargetDraft,
 } from '@/components/execute/target-editor';
 
 type ComparisonAnalysis = AuditAnalysis & {
@@ -510,6 +510,37 @@ export default function ExecutePage() {
     }));
   };
 
+  // UX-3: named parameter sets per procedure, kept in this browser only.
+  const [paramStore, setParamStore] = useState<ParamSetStore>({});
+  useEffect(() => {
+    // Read after mount: browser storage is not available during the server render, so reading it earlier would mismatch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    try { setParamStore(readParamSets(window.localStorage)); } catch { /* storage blocked */ }
+  }, []);
+  const draftOf = (which: 'original' | 'optimized') => (which === 'original' ? original : optimized);
+  const setDraftOf = (which: 'original' | 'optimized') => (which === 'original' ? setOriginal : setOptimized);
+  const saveSet = (which: 'original' | 'optimized', setName: string) => {
+    const d = draftOf(which);
+    const rows: SavedParam[] = d.params.map((p) => ({ name: p.name, type: p.type, value: p.value, isNull: p.isNull, output: p.output }));
+    const next = withSet(paramStore, d.name.trim(), setName, rows);
+    const ok = writeParamSets(window.localStorage, next);
+    setParamStore(next);
+    setLoadNote((n) => ({ ...n, [which]: ok ? `Saved set “${setName}” in this browser.` : 'Could not save the set in this browser (storage is full or blocked).' }));
+  };
+  const loadSet = (which: 'original' | 'optimized', setName: string) => {
+    const d = draftOf(which);
+    const saved = paramStore[d.name.trim()]?.[setName] ?? [];
+    setDraftOf(which)({ ...d, params: saved.map((p) => ({ ...newParamRow(), ...p, type: p.type as ParamType })) });
+    setLoadNote((n) => ({ ...n, [which]: `Loaded set “${setName}”.` }));
+  };
+  const deleteSet = (which: 'original' | 'optimized', setName: string) => {
+    const d = draftOf(which);
+    const next = withoutSet(paramStore, d.name.trim(), setName);
+    writeParamSets(window.localStorage, next);
+    setParamStore(next);
+    setLoadNote((n) => ({ ...n, [which]: `Deleted set “${setName}”.` }));
+  };
+
   const connection = () => ({
     host, port: Number(port), database, username, password,
     ...(engine === 'mssql' ? { trustServerCertificate: trustCert } : {}),
@@ -762,6 +793,10 @@ export default function ExecutePage() {
               placeholder="-- Paste your Stored Procedure here..."
               onLoadParams={engine === 'mssql' ? () => void loadParams('original') : undefined}
               loadNote={loadNote.original}
+              setNames={setNamesFor(paramStore, original.name.trim())}
+              onSaveSet={(n) => saveSet('original', n)}
+              onLoadSet={(n) => loadSet('original', n)}
+              onDeleteSet={(n) => deleteSet('original', n)}
             />
           </Box>
 
@@ -776,6 +811,10 @@ export default function ExecutePage() {
                 placeholder="-- Paste your Optimized SP here..."
                 onLoadParams={engine === 'mssql' ? () => void loadParams('optimized') : undefined}
                 loadNote={loadNote.optimized}
+                setNames={setNamesFor(paramStore, optimized.name.trim())}
+                onSaveSet={(n) => saveSet('optimized', n)}
+                onLoadSet={(n) => loadSet('optimized', n)}
+                onDeleteSet={(n) => deleteSet('optimized', n)}
               />
             </Box>
           )}

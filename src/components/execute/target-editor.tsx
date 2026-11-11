@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Box, Button, Flex, Input, Text, Textarea } from '@chakra-ui/react';
 
 export const PARAM_TYPES = [
@@ -136,7 +136,7 @@ function Field({ caption, error, children }: { caption: string; error?: string |
 }
 
 export function TargetEditor({
-  kind, draft, onChange, placeholder, color, onLoadParams, loadNote,
+  kind, draft, onChange, placeholder, color, onLoadParams, loadNote, setNames, onSaveSet, onLoadSet, onDeleteSet,
 }: {
   kind: 'procedure' | 'batch';
   draft: TargetDraft;
@@ -146,7 +146,14 @@ export function TargetEditor({
   /** UX-2: read the procedure's parameters from the database into the rows. */
   onLoadParams?: () => void;
   loadNote?: string | null;
+  /** UX-3: named parameter sets for this procedure, kept in this browser. */
+  setNames?: string[];
+  onSaveSet?: (name: string) => void;
+  onLoadSet?: (name: string) => void;
+  onDeleteSet?: (name: string) => void;
 }) {
+  const [chosen, setChosen] = useState('');
+  const [newSetName, setNewSetName] = useState('');
   if (kind === 'batch') {
     return (
       <Textarea
@@ -179,6 +186,31 @@ export function TargetEditor({
         )}
       </Flex>
       {loadNote && <Text fontSize="xs" color="yellow.300" mb={2}>{loadNote}</Text>}
+      {onSaveSet && onLoadSet && onDeleteSet && (
+        <Flex gap={2} wrap="wrap" align="center" mb={3}>
+          <select
+            aria-label="Saved parameter sets" value={chosen} onChange={(e) => setChosen(e.target.value)}
+            className="rounded-md border border-gray-600 bg-gray-800 px-3 py-2 text-white" style={{ minHeight: 40 }}
+          >
+            <option value="">Saved sets</option>
+            {(setNames ?? []).map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+          <Button size="sm" variant="outline" disabled={!chosen} onClick={() => onLoadSet(chosen)}>Load set</Button>
+          <Button size="sm" variant="ghost" colorPalette="red" disabled={!chosen} onClick={() => { onDeleteSet(chosen); setChosen(''); }}>Delete set</Button>
+          <Input
+            size="md" aria-label="New set name" placeholder="Name this set" value={newSetName}
+            onChange={(e) => setNewSetName(e.target.value)} bg="gray.950" borderColor="gray.600" color="white" w={{ base: '100%', md: '200px' }}
+          />
+          <Button
+            size="sm" variant="outline" colorPalette="green"
+            disabled={!newSetName.trim() || draft.params.length === 0}
+            onClick={() => { onSaveSet(newSetName.trim()); setChosen(newSetName.trim()); setNewSetName(''); }}
+          >
+            Save set
+          </Button>
+          <Text fontSize="xs" color="gray.500" w="100%">Saved in this browser only. Passwords and connection details are never saved.</Text>
+        </Flex>
+      )}
       <Box display="flex" flexDirection="column" gap={3} mb={3}>
         {draft.params.map((row, i) => {
           const nameError = row.name.trim() && !NAME_RE.test(row.name.trim()) ? 'Use a name such as @StartDate' : null;

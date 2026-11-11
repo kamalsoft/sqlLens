@@ -58,6 +58,24 @@ describe('POST /api/execute/parameters (UX-2)', () => {
     expect(mock.list).not.toHaveBeenCalled();
   });
 
+  it('trims surrounding whitespace and passes only the trimmed name on', async () => {
+    mock.list.mockResolvedValue([{ name: '@a', sqlType: 'int', isOutput: false, hasDefault: false }]);
+    expect((await params(post({ engine: 'mssql', name: '  dbo.p\n', connection }, cookie))).status).toBe(200);
+    expect(mock.list.mock.calls[0][1]).toBe('dbo.p');
+  });
+
+  it.each(['[dbo].[p]', "dbo.p'x", 'dbo.pé', 'a.b.c', 'dbo.p--'])('400 for the name %j, without connecting', async (name) => {
+    const res = await params(post({ engine: 'mssql', name, connection }, cookie));
+    expect(res.status).toBe(400);
+    expect(mock.list).not.toHaveBeenCalled();
+  });
+
+  it('429 after 10 requests per session', async () => {
+    mock.list.mockResolvedValue([{ name: '@a', sqlType: 'int', isOutput: false, hasDefault: false }]);
+    for (let i = 0; i < 10; i++) expect((await params(post({ engine: 'mssql', name: 'dbo.p', connection }, cookie))).status).toBe(200);
+    expect((await params(post({ engine: 'mssql', name: 'dbo.p', connection }, cookie))).status).toBe(429);
+  });
+
   it('400 for postgres', async () => {
     expect((await params(post({ engine: 'postgres', name: 'dbo.p', connection }, cookie))).status).toBe(400);
   });

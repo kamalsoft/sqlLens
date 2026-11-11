@@ -214,18 +214,25 @@ export async function listProcedureParams(
 ): Promise<ProcedureParam[]> {
   const { config } = buildMssqlConfig(conn, timeoutMs);
   const pool = new sql.ConnectionPool(config);
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await pool.connect();
-    const req = pool.request();
-    req.input('procName', sql.NVarChar(256), procName);
-    const r = await req.query(
-      `SELECT p.name AS paramName, TYPE_NAME(p.user_type_id) AS typeName, p.is_output AS isOutput, p.has_default_value AS hasDefault ` +
-      `FROM sys.parameters AS p WHERE p.object_id = OBJECT_ID(@procName, N'P') ORDER BY p.parameter_id`,
-    );
-    return ((r.recordset ?? []) as { paramName: string; typeName: string; isOutput: boolean; hasDefault: boolean }[]).map((row) => ({
-      name: row.paramName, sqlType: row.typeName, isOutput: !!row.isOutput, hasDefault: !!row.hasDefault,
-    }));
+    const run = (async () => {
+      await pool.connect();
+      const req = pool.request();
+      req.input('procName', sql.NVarChar(256), procName);
+      const r = await req.query(
+        `SELECT p.name AS paramName, TYPE_NAME(p.user_type_id) AS typeName, p.is_output AS isOutput, p.has_default_value AS hasDefault ` +
+        `FROM sys.parameters AS p WHERE p.object_id = OBJECT_ID(@procName, N'P') ORDER BY p.parameter_id`,
+      );
+      return ((r.recordset ?? []) as { paramName: string; typeName: string; isOutput: boolean; hasDefault: boolean }[]).map((row) => ({
+        name: row.paramName, sqlType: row.typeName, isOutput: !!row.isOutput, hasDefault: !!row.hasDefault,
+      }));
+    })();
+    run.catch(() => {});
+    const limit = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new ExecTimeoutError()), timeoutMs); });
+    return await Promise.race([run, limit]);
   } finally {
+    if (timer) clearTimeout(timer);
     try { await pool.close(); } catch { /* already closed */ }
   }
 }
