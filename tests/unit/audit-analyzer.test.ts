@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeExecution, compareExecutions, operatorRecommendations, planOperators, summarizeRuns, topOperators, unreadTables } from '@/lib/audit-analyzer';
+import { analyzeExecution, compareExecutions, operatorRecommendations, planFindings, planOperators, summarizeRuns, topOperators, unreadTables } from '@/lib/audit-analyzer';
 import type { ExecutionResult, ExecutionStats } from '@/lib/sp-executor';
 
 function result(over: Partial<ExecutionStats> = {}, reads: number | null = 100): ExecutionResult {
@@ -246,5 +246,49 @@ describe('P8-02 unread data from the plan', () => {
 
   it('adds the reads of every statement on the same table', () => {
     expect(unreadTables(result({ plan: seek('SalesOrders', 0) + seek('SalesOrders', 7) }, 100).stats)).toEqual([]);
+  });
+});
+
+describe('P8-07 generic plan findings', () => {
+  // Object names are arbitrary on purpose: findings must not depend on them.
+  const plan = [
+    '<RelOp NodeId="1" PhysicalOp="Sequence Project" LogicalOp="Compute Scalar" EstimateRows="193.6">',
+    '<RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="333295" ActualExecutions="1"></RunTimeCountersPerThread></RunTimeInformation></RelOp>',
+    '<RelOp NodeId="2" PhysicalOp="Sort" LogicalOp="Sort" EstimateRows="193.6">',
+    '<Warnings><SpillToTempDb SpillLevel="1"></SpillToTempDb><SortSpillDetails WritesToTempDb="3671" ReadsFromTempDb="3671"></SortSpillDetails></Warnings>',
+    '<RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="10" ActualExecutions="1"></RunTimeCountersPerThread></RunTimeInformation></RelOp>',
+    '<RelOp NodeId="3" PhysicalOp="Clustered Index Seek" LogicalOp="Clustered Index Seek" EstimateRows="1">',
+    '<RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="333295" ActualLogicalReads="958207" ActualExecutions="333295"></RunTimeCountersPerThread></RunTimeInformation>',
+    '<IndexScan><Object Database="[db]" Schema="[dbo]" Table="[InnerTable]"></Object></IndexScan></RelOp>',
+  ].join('\n');
+
+  it('flags the operator that holds most of the logical reads', () => {
+    const f = planFindings(planOperators(plan));
+    expect(f.find((x) => x.kind === 'cost-concentration')).toMatchObject({ operator: 'Clustered Index Seek', table: 'InnerTable' });
+    expect(f.find((x) => x.kind === 'cost-concentration')?.message).toMatch(/accounts for 100% of logical reads/);
+  });
+
+  it('flags a row estimate far from the actual count, but not a per-execution match', () => {
+    const f = planFindings(planOperators(plan));
+    const estimates = f.filter((x) => x.kind === 'row-estimate');
+    expect(estimates.map((x) => x.operator)).toEqual(['Sequence Project']);
+    expect(estimates[0].message).toMatch(/estimated 194 rows per execution, actual 333,295/);
+  });
+
+  it('flags a tempdb spill with its writes', () => {
+    const f = planFindings(planOperators(plan));
+    expect(f.find((x) => x.kind === 'tempdb-spill')).toMatchObject({ operator: 'Sort', severity: 'medium' });
+    expect(f.find((x) => x.kind === 'tempdb-spill')?.message).toMatch(/spilled 3,671 pages/);
+  });
+
+  it('puts the findings into the recommendations and keeps the mandatory three', () => {
+    const r = analyzeExecution(result({ plan }, 9195));
+    expect(r.planFindings.length).toBeGreaterThan(0);
+    expect(r.recommendations.join('\n')).toMatch(/Refresh the statistics/);
+    expect(r.recommendations).toEqual(expect.arrayContaining([
+      'Run DBCC SHOW_STATISTICS([Table], [Index]) to validate index selectivity',
+      'Consider SET NOCOUNT ON to suppress row count messages and reduce network traffic',
+      'Review parameter sniffing: add OPTION (OPTIMIZE FOR UNKNOWN) if plans vary per parameter',
+    ]));
   });
 });

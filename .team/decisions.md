@@ -291,3 +291,7 @@ Change: `src/lib/execution/mssql.ts` keeps the run's results when the count quer
 ### D-041 Unread data withholds the verdict (P8-02 addendum)
 Status: APPROVED (user, 2026-11-11, "Proceed p8-02")
 Change: a real table whose scans and seeks all returned 0 rows (plan runtime counters, temp tables excluded) gives `INSUFFICIENT EVIDENCE` and withholds the grade. Evidence: run 2026-11-11 with 2024 dates and `@MinOrderValue` 1000 read 6 pages from SalesOrders, returned no rows, and graded C with "Excellent" time.
+
+### D-042 Generic plan findings (P8-07)
+Status: APPROVED (user, 2026-11-11, "go ahead")
+Change: `planFindings` from the plan's operator counters and warnings: cost concentration, row-estimate error per execution, tempdb spills. No object or procedure name is used by the rules.

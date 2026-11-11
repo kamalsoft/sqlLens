@@ -26,6 +26,20 @@ export interface PlanOperator {
   actualRows: number | null;
   logicalReads: number | null;
   executions: number | null;
+  /** P8-07: the plan's row estimate for this operator, per execution. */
+  estimatedRows: number | null;
+  /** P8-07: pages written to tempdb when this operator spilled, else null. */
+  spillWrites: number | null;
+}
+
+/** P8-07: a generic finding from the plan. Names are data from the run, never fixed in the code. */
+export interface PlanFinding {
+  kind: 'cost-concentration' | 'row-estimate' | 'tempdb-spill';
+  severity: 'high' | 'medium';
+  operator: string;
+  table: string | null;
+  message: string;
+  recommendation: string;
 }
 
 /** P8-03: one measured run (the warm-up is dropped before summarising). */
@@ -47,6 +61,8 @@ export interface AuditAnalysis {
   multiRun: RunSummary | null;
   /** P8-06: the costliest operators by logical reads, then rows. */
   planOperators: PlanOperator[];
+  /** P8-07: generic findings from the plan. */
+  planFindings: PlanFinding[];
   /** P8-02: prod-readiness verdict from evidence and user targets. */
   prodVerdict: ProdVerdict;
   /** null when no graded metric was captured. */
@@ -166,6 +182,8 @@ export function planOperators(plan: string | null | undefined): PlanOperator[] {
     const head = /^<RelOp\b[^>]*?\bNodeId="(\d+)"[^>]*?\bPhysicalOp="([^"]+)"/.exec(chunk);
     if (!head) continue;
     const table = /<Object\b[^>]*?\bTable="\[([^\]]+)\]"/.exec(chunk);
+    const open = chunk.slice(0, chunk.indexOf('>'));
+    const estimate = /\bEstimateRows="([0-9.eE+-]+)"/.exec(open);
     out.push({
       nodeId: Number(head[1]),
       physicalOp: head[2],
@@ -173,6 +191,8 @@ export function planOperators(plan: string | null | undefined): PlanOperator[] {
       actualRows: sumAttr(chunk, 'ActualRows'),
       logicalReads: sumAttr(chunk, 'ActualLogicalReads'),
       executions: sumAttr(chunk, 'ActualExecutions'),
+      estimatedRows: estimate ? Number(estimate[1]) : null,
+      spillWrites: /<SpillToTempDb\b/.test(chunk) ? sumAttr(chunk, 'WritesToTempDb') ?? 0 : null,
     });
   }
   return out;
@@ -187,6 +207,53 @@ export function topOperators(ops: PlanOperator[]): PlanOperator[] {
     .filter((o) => (o.logicalReads ?? 0) > 0 || (o.actualRows ?? 0) > 0 || (o.executions ?? 0) > 1)
     .sort((a, b) => (b.logicalReads ?? 0) - (a.logicalReads ?? 0) || (b.actualRows ?? 0) - (a.actualRows ?? 0))
     .slice(0, TOP_OPERATORS);
+}
+
+const COST_SHARE_FINDING = 50;
+const ESTIMATE_FACTOR_FINDING = 10;
+const ESTIMATE_MIN_ROWS = 1000;
+
+/**
+ * P8-07: findings from the plan, by operator type and measured counters only.
+ * - one operator holds most of the logical reads;
+ * - the row estimate is far from the rows actually read, per execution;
+ * - an operator spilled to tempdb (its memory grant was too small for the rows).
+ */
+export function planFindings(ops: PlanOperator[]): PlanFinding[] {
+  const findings: PlanFinding[] = [];
+  const totalReads = ops.reduce((sum, o) => sum + (o.logicalReads ?? 0), 0);
+  for (const o of ops) {
+    const name = `${o.physicalOp}${o.table ? ` on ${o.table}` : ''}`;
+    const reads = o.logicalReads ?? 0;
+    if (totalReads > 0 && (reads / totalReads) * 100 >= COST_SHARE_FINDING) {
+      const pct = Math.round((reads / totalReads) * 100);
+      findings.push({
+        kind: 'cost-concentration', severity: 'high', operator: o.physicalOp, table: o.table,
+        message: `${name} accounts for ${pct}% of logical reads`,
+        recommendation: `${name} accounts for ${pct}% of logical reads. Review the predicates and join keys that reach it, and whether an index or a different join would read fewer pages.`,
+      });
+    }
+    if (o.estimatedRows !== null && o.actualRows !== null && o.actualRows >= ESTIMATE_MIN_ROWS) {
+      const perExec = o.actualRows / Math.max(o.executions ?? 1, 1);
+      const hi = Math.max(o.estimatedRows, perExec);
+      const lo = Math.max(Math.min(o.estimatedRows, perExec), 1);
+      if (hi / lo >= ESTIMATE_FACTOR_FINDING) {
+        findings.push({
+          kind: 'row-estimate', severity: 'high', operator: o.physicalOp, table: o.table,
+          message: `${name} estimated ${Math.round(o.estimatedRows).toLocaleString()} rows per execution, actual ${Math.round(perExec).toLocaleString()}`,
+          recommendation: `${name} was estimated at ${Math.round(o.estimatedRows).toLocaleString()} rows but produced ${Math.round(perExec).toLocaleString()} per execution. Refresh the statistics for the columns it filters or joins on${o.table ? ` in ${o.table}` : ''}, or check for a predicate the optimizer cannot estimate.`,
+        });
+      }
+    }
+    if (o.spillWrites !== null) {
+      findings.push({
+        kind: 'tempdb-spill', severity: 'medium', operator: o.physicalOp, table: o.table,
+        message: `${name} spilled ${o.spillWrites.toLocaleString()} pages to tempdb`,
+        recommendation: `${name} spilled ${o.spillWrites.toLocaleString()} pages to tempdb: its memory grant was too small for the rows it handled. This usually follows a row estimate far below the actual count; fix the estimate first.`,
+      });
+    }
+  }
+  return findings;
 }
 
 /** P8-06: recommendations that name the operator and table that cost the most. */
@@ -333,7 +400,8 @@ export function analyzeExecution(result: ExecutionResult, targets: Targets = NO_
   else cons.push(`High scan count (${totalScan}) across tables — missing or unused indexes`);
 
   const operators = planOperators(stats.plan);
-  const recommendations: string[] = operatorRecommendations(topOperators(operators));
+  const findings = planFindings(operators);
+  const recommendations: string[] = [...new Set([...findings.map((f) => f.recommendation), ...operatorRecommendations(topOperators(operators))])];
 
   if (totalLogical !== null && totalLogical > 1000) {
     recommendations.push(
@@ -369,6 +437,7 @@ export function analyzeExecution(result: ExecutionResult, targets: Targets = NO_
     prodVerdict: prodVerdict(stats, targets, runs),
     multiRun: runs,
     planOperators: topOperators(operators),
+    planFindings: findings,
     performanceGrade: grade,
     gradeRationale: grade
       ? rationales[grade]
