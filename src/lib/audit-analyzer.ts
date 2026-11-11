@@ -143,12 +143,21 @@ export interface EvidenceGap { reason: string; table: string | null }
  * Real tables whose scans and seeks, summed over the run, returned no rows. The run then did not
  * exercise that data, whatever the timing says. Temp tables are skipped: they fill during the run.
  */
-function readCounters(stats: ExecutionStats): Map<string, { rows: number; executions: number }> {
-  const byTable = new Map<string, { rows: number; executions: number }>();
+/**
+ * Per real table: rows returned, executions, pages read (logical reads) and whether a seek or a scan did the reading.
+ * Pages read are index and data pages; they are not rows, so a seek can read pages and still return no rows.
+ */
+function readCounters(stats: ExecutionStats): Map<string, { rows: number; executions: number; pages: number; seek: boolean }> {
+  const byTable = new Map<string, { rows: number; executions: number; pages: number; seek: boolean }>();
   for (const o of planOperators(stats.plan)) {
     if (!o.table || o.table.startsWith('#') || !/(Scan|Seek)$/.test(o.physicalOp) || o.actualRows === null) continue;
-    const t = byTable.get(o.table) ?? { rows: 0, executions: 0 };
-    byTable.set(o.table, { rows: t.rows + o.actualRows, executions: t.executions + (o.executions ?? 0) });
+    const t = byTable.get(o.table) ?? { rows: 0, executions: 0, pages: 0, seek: false };
+    byTable.set(o.table, {
+      rows: t.rows + o.actualRows,
+      executions: t.executions + (o.executions ?? 0),
+      pages: t.pages + (o.logicalReads ?? 0),
+      seek: t.seek || /Seek$/.test(o.physicalOp),
+    });
   }
   return byTable;
 }
@@ -171,7 +180,14 @@ export function evidenceGap(stats: ExecutionStats): EvidenceGap | null {
   const unreached = unreachedTables(stats);
   if (unread.length > 0 || unreached.length > 0) {
     const parts: string[] = [];
-    if (unread.length > 0) parts.push(`no rows read from ${unread.join(', ')}: the run did not exercise the data`);
+    const counters = readCounters(stats);
+    if (unread.length > 0) {
+      const described = unread.map((table) => {
+        const c = counters.get(table)!;
+        return `${table}: the ${c.seek ? 'seek' : 'scan'} matched no rows (${c.pages.toLocaleString()} pages read)`;
+      });
+      parts.push(`${described.join('; ')}: the run did not exercise the data`);
+    }
     if (unreached.length > 0) parts.push(`${unreached.join(', ')} not reached: the run stopped before reading it`);
     return { reason: parts.join('; '), table: (unread[0] ?? unreached[0]) ?? null };
   }
@@ -225,6 +241,8 @@ export function topOperators(ops: PlanOperator[]): PlanOperator[] {
 }
 
 const COST_SHARE_FINDING = 50;
+/** Below this many logical reads a share is noise, not a finding. */
+const MIN_READS_FOR_SHARE = 100;
 const ESTIMATE_FACTOR_FINDING = 10;
 const ESTIMATE_MIN_ROWS = 1000;
 
@@ -240,7 +258,7 @@ export function planFindings(ops: PlanOperator[]): PlanFinding[] {
   for (const o of ops) {
     const name = `${o.physicalOp}${o.table ? ` on ${o.table}` : ''}`;
     const reads = o.logicalReads ?? 0;
-    if (totalReads > 0 && (reads / totalReads) * 100 >= COST_SHARE_FINDING) {
+    if (totalReads >= MIN_READS_FOR_SHARE && (reads / totalReads) * 100 >= COST_SHARE_FINDING) {
       const pct = Math.round((reads / totalReads) * 100);
       findings.push({
         kind: 'cost-concentration', severity: 'high', operator: o.physicalOp, table: o.table,

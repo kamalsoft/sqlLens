@@ -231,8 +231,13 @@ describe('P8-02 unread data from the plan', () => {
 
   it('withholds the verdict when a real table was read and no rows came back', () => {
     const a = analyzeExecution(result({ plan: seek('SalesOrders', 0) }, 100), { maxLogicalReads: 1000, maxElapsedMs: null, maxScanCount: null });
-    expect(a.prodVerdict).toEqual({ verdict: 'INSUFFICIENT EVIDENCE', reason: 'no rows read from SalesOrders: the run did not exercise the data', driver: 'SalesOrders' });
+    expect(a.prodVerdict).toEqual({ verdict: 'INSUFFICIENT EVIDENCE', reason: 'SalesOrders: the seek matched no rows (6 pages read): the run did not exercise the data', driver: 'SalesOrders' });
     expect(a.performanceGrade).toBeNull();
+  });
+
+  it('does not report a cost share on a handful of pages', () => {
+    const tiny = '<RelOp NodeId="4" PhysicalOp="Index Seek" LogicalOp="Index Seek" EstimateRows="1"><RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="0" ActualLogicalReads="4" ActualExecutions="1"></RunTimeCountersPerThread></RunTimeInformation><IndexScan><Object Database="[db]" Schema="[dbo]" Table="[SalesOrders]"></Object></IndexScan></RelOp>';
+    expect(planFindings(planOperators(tiny)).some((f) => f.kind === 'cost-concentration')).toBe(false);
   });
 
   it('does not flag a table that returned rows', () => {
@@ -296,7 +301,7 @@ describe('P8-07 generic plan findings', () => {
     const notReached = '<RelOp NodeId="9" PhysicalOp="Clustered Index Seek" LogicalOp="Clustered Index Seek" EstimateRows="1"><RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="0" ActualLogicalReads="0" ActualExecutions="0"></RunTimeCountersPerThread></RunTimeInformation><IndexScan><Object Database="[db]" Schema="[dbo]" Table="[Later]"></Object></IndexScan></RelOp>';
     const readNoRows = '<RelOp NodeId="4" PhysicalOp="Index Seek" LogicalOp="Index Seek" EstimateRows="1"><RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="0" ActualLogicalReads="6" ActualExecutions="10"></RunTimeCountersPerThread></RunTimeInformation><IndexScan><Object Database="[db]" Schema="[dbo]" Table="[SalesOrders]"></Object></IndexScan></RelOp>';
     const a = analyzeExecution(result({ plan: readNoRows + notReached }, 100), { maxLogicalReads: 1000, maxElapsedMs: null, maxScanCount: null });
-    expect(a.prodVerdict.reason).toBe('no rows read from SalesOrders: the run did not exercise the data; Later not reached: the run stopped before reading it');
+    expect(a.prodVerdict.reason).toBe('SalesOrders: the seek matched no rows (6 pages read): the run did not exercise the data; Later not reached: the run stopped before reading it');
     expect(unreachedTables(result({ plan: notReached }, 100).stats)).toEqual(['Later']);
   });
 });
