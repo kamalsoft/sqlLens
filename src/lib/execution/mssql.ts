@@ -175,11 +175,11 @@ export async function executeMssql(
   }
 }
 
-/** Real tables the run read: no temp tables, system worktables, or names that are not plain identifiers. */
+/** Names the run read that could be user tables: temp tables and names that are not plain identifiers are left out. The count query matches only user tables, so system work tables simply return no count. */
 const COUNT_TABLE_LIMIT = 50;
 function realTables(io: { table: string }[]): string[] {
   const names = [...new Set(io.map((r) => r.table))]
-    .filter((t) => !t.startsWith('#') && t !== 'Worktable' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(t));
+    .filter((t) => !t.startsWith('#') && /^[A-Za-z_][A-Za-z0-9_]*$/.test(t));
   return names.slice(0, COUNT_TABLE_LIMIT);
 }
 

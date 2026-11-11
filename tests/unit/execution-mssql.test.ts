@@ -250,11 +250,11 @@ describe('D-039 row counts for tables the run read', () => {
     expect(h.state.texts.some((t) => /sys\.partitions/.test(t) && !t.includes('Orders'))).toBe(true);
   });
 
-  it('does not count temp tables or the worktable', async () => {
+  it('does not count temp tables; system work tables are sent but match no user table', async () => {
     h.state.infos = [IO_TEMP];
     const out = await executeMssql({ ...conn, trustServerCertificate: true }, { kind: 'batch', sql: 'SELECT 1' }, opts);
-    expect(out.stats.tableRows).toBeUndefined();
-    expect(h.state.texts.some((t) => /sys\.partitions/.test(t))).toBe(false);
+    expect(out.stats.tableRows).toEqual({});
+    expect(h.state.inputs.map((i) => i.value)).toEqual(['Worktable']);
   });
 });
 
