@@ -23,7 +23,7 @@ type CompareResponse = {
 
 const WINNER_LABEL: Record<CompareModelResult['winner'], { text: string; palette: string }> = {
   original: { text: 'Original SP is better', palette: 'red' },
-  optimized: { text: 'Improved SP is better', palette: 'green' },
+  optimized: { text: 'Optimized SP is better', palette: 'green' },
   inconclusive: { text: 'Inconclusive', palette: 'gray' },
 };
 
@@ -114,7 +114,7 @@ export default function ComparePage() {
             </Heading>
           </Flex>
           <Text color="gray.400" fontSize="lg">
-            Compare the current and improved SP side by side with a local model: a verdict, the differences, and the risks of the change. Performance claims need execution metrics.
+            Compare the current and optimized SP side by side with a local model: a verdict, the differences, and the risks of the change. Performance claims need execution metrics.
           </Text>
         </Box>
 
@@ -186,7 +186,7 @@ END`}
               <Flex align="center" gap={2} mb={3}>
                 <Badge colorPalette="green" variant="subtle">OPTIMIZED</Badge>
                 <Text color="gray.300" fontSize="sm" fontWeight="semibold" textTransform="uppercase" letterSpacing="wider">
-                  Improved SP
+                  Optimized SP
                 </Text>
               </Flex>
               <Textarea
@@ -308,7 +308,7 @@ END`}
                 <Box overflowX="auto">
                   <table aria-label="Execution metrics" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                     <thead>
-                      <tr>{['Metric', 'Original', 'Improved', 'Change'].map((h) => <th key={h} style={{ textAlign: 'left', padding: '6px 8px', color: '#94a3b8' }}>{h}</th>)}</tr>
+                      <tr>{['Metric', 'Original', 'Optimized', 'Change'].map((h) => <th key={h} style={{ textAlign: 'left', padding: '6px 8px', color: '#94a3b8' }}>{h}</th>)}</tr>
                     </thead>
                     <tbody>
                       {metricRows.map(([name, m]) => (

@@ -35,7 +35,7 @@ afterEach(() => {
 describe("CompareVerdict", () => {
   it("shows the winner, confidence, differences, risks and captured metrics", () => {
     render(wrap(<CompareVerdict result={verdict} metrics={metrics} />));
-    expect(screen.getByTestId("compare-winner").textContent).toBe("Improved SP is better");
+    expect(screen.getByTestId("compare-winner").textContent).toBe("Optimized SP is better");
     expect(screen.getByText("Confidence 70%")).toBeTruthy();
     expect(screen.getByText("Adds a temp table")).toBeTruthy();
     expect(screen.getByText("Temp table adds tempdb use")).toBeTruthy();

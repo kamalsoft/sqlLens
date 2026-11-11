@@ -12,7 +12,7 @@ const navItems = [
   { href: "/refactor", label: "Refactor", icon: "✎" },
   { href: "/audit", label: "Audit", icon: "☰" },
   { href: "/settings", label: "Settings", icon: "⚙" },
-  { href: "/manage-models", label: "Models", icon: "◎" },
+  { href: "/manage-models", label: "Manage Models", icon: "◎" },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
