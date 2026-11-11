@@ -167,6 +167,17 @@ describe('P8-06 plan operator summary', () => {
     expect(top.some((o) => o.physicalOp === 'Nested Loops')).toBe(true);
   });
 
+  it('keeps an inner seek that runs once per outer row, even with no reads or rows of its own', () => {
+    const inner = [
+      '<RelOp NodeId="4" PhysicalOp="Index Seek" LogicalOp="Index Seek" EstimateRows="1">',
+      '<RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="0" ActualLogicalReads="0" ActualExecutions="1000000"></RunTimeCountersPerThread></RunTimeInformation>',
+      '<IndexScan><Object Database="[tempdb]" Schema="[dbo]" Table="[#CustomerAggregates]"></Object></IndexScan></RelOp>',
+    ].join('\n');
+    const top = topOperators(planOperators(inner));
+    expect(top.map((o) => o.physicalOp)).toEqual(['Index Seek']);
+    expect(operatorRecommendations(top)[0]).toMatch(/Index Seek on #CustomerAggregates ran 1,000,000 times/);
+  });
+
   it('names the costly scan and the row-by-row loop in the recommendations, keeping the mandatory three', () => {
     const r = analyzeExecution(result({ plan }, 9195));
     expect(r.recommendations.join('\n')).toMatch(/Clustered Index Scan on Customers: 9,185 logical reads/);

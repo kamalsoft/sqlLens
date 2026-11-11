@@ -167,7 +167,7 @@ const LOOP_EXECUTIONS_NOTE = 1000;
 /** P8-06: the costliest operators, most logical reads first; operators with no runtime cost are dropped. */
 export function topOperators(ops: PlanOperator[]): PlanOperator[] {
   return ops
-    .filter((o) => (o.logicalReads ?? 0) > 0 || (o.actualRows ?? 0) > 0)
+    .filter((o) => (o.logicalReads ?? 0) > 0 || (o.actualRows ?? 0) > 0 || (o.executions ?? 0) > 1)
     .sort((a, b) => (b.logicalReads ?? 0) - (a.logicalReads ?? 0) || (b.actualRows ?? 0) - (a.actualRows ?? 0))
     .slice(0, TOP_OPERATORS);
 }
@@ -179,8 +179,9 @@ export function operatorRecommendations(ops: PlanOperator[]): string[] {
     if (/Scan$/.test(o.physicalOp) && (o.logicalReads ?? 0) >= SCAN_READS_NOTE) {
       recs.push(`${o.physicalOp} on ${o.table ?? 'an input'}: ${o.logicalReads?.toLocaleString()} logical reads. Look for a predicate that blocks a seek (an OR on a parameter, a function on the column, or an implicit conversion) or a missing index.`);
     }
-    if (o.physicalOp === 'Nested Loops' && (o.executions ?? 0) >= LOOP_EXECUTIONS_NOTE) {
-      recs.push(`Nested Loops ran ${o.executions?.toLocaleString()} times${o.table ? ` on ${o.table}` : ''}: a row-by-row join. Rewrite as a set-based join or index the inner input.`);
+    // An inner input that runs once per outer row (a row-by-row join), whatever the operator.
+    if ((o.executions ?? 0) >= LOOP_EXECUTIONS_NOTE) {
+      recs.push(`${o.physicalOp}${o.table ? ` on ${o.table}` : ''} ran ${o.executions?.toLocaleString()} times: a row-by-row join. Rewrite as a set-based join or index the inner input.`);
     }
   }
   return recs;
