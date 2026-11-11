@@ -394,6 +394,26 @@ function gradeFromStats(stats: ExecutionStats): Grade | null {
   return 'F';
 }
 
+/**
+ * Which measured metric kept the run out of the next better grade. The grade is the worst of the
+ * three, so a fast run with many reads is graded by its reads; saying so avoids a grade that looks
+ * at odds with the time shown next to it.
+ */
+function gradeLimitedBy(stats: ExecutionStats, grade: Grade): string {
+  if (grade === 'A') return '';
+  const better = (['A', 'B', 'C', 'D'] as const)[['B', 'C', 'D', 'F'].indexOf(grade)];
+  const rule = GRADE_RULES[better];
+  const { logicalReads: reads, elapsed: ms } = metricsOf(stats);
+  const maxScan = stats.io.length ? Math.max(...stats.io.map(r => r.scanCount)) : null;
+  const over: string[] = [];
+  if (reads !== null && reads >= rule.reads) over.push(`logical reads ${reads.toLocaleString()} (grade ${better} needs under ${rule.reads.toLocaleString()})`);
+  if (ms !== null && ms >= rule.ms) over.push(`elapsed time ${ms} ms (grade ${better} needs under ${rule.ms.toLocaleString()} ms)`);
+  if (rule.scans !== null && maxScan !== null && maxScan > rule.scans) {
+    over.push(`highest scan count on one table ${maxScan} (grade ${better} needs at most ${rule.scans})`);
+  }
+  return over.length ? `. Graded ${grade} by ${over.join(' and ')}; the grade is the worst of reads, time and scans.` : '';
+}
+
 // ---------------------------------------------------------------------------
 // Single-run analysis
 // ---------------------------------------------------------------------------
@@ -491,7 +511,7 @@ export function analyzeExecution(result: ExecutionResult, targets: Targets = NO_
     planFindings: findings,
     performanceGrade: grade,
     gradeRationale: grade
-      ? rationales[grade]
+      ? rationales[grade] + gradeLimitedBy(stats, grade)
       : totalLogical === null || elapsed === null
         ? `Not graded — ${[elapsed === null && 'elapsed time', totalLogical === null && 'logical reads'].filter(Boolean).join(' and ')} not captured`
         : `Not graded — ${gap?.reason}`,

@@ -1,72 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useApi } from "@/components/api-client";
-import { IndexRecommendations, Section } from "@/components/review/ReviewResultView";
-import { MAX_INSTRUCTIONS_LENGTH, type RefactorResult, type RefactorStatus } from "@/lib/refactor-shared";
+import {
+  RefactorRawOutput, RefactorResultView, refactorFailure, type RefactorModel as Model, type RefactorResponse,
+} from "@/components/refactor/RefactorResultView";
+import { MAX_INSTRUCTIONS_LENGTH } from "@/lib/refactor-shared";
 import { NOT_SQL_ERROR, looksLikeSql } from "@/lib/validation/sql-input";
-
-type Model = { id: string; name: string; compatible: boolean; small?: boolean };
-
-type RefactorResponse = { id?: string; model?: string; lowConfidence?: boolean; result?: RefactorResult };
-
-const STATUS_MESSAGES: Record<Exclude<RefactorStatus, "provided">, string> = {
-  none: "The model did not return refactored SQL. Try again, add instructions, or use a larger model.",
-  unsafe: "The refactored SQL was removed because it modifies data the original procedure does not.",
-  truncated: "The refactored SQL was cut off at the new-token limit, so it was removed. Raise maxNewTokens in Settings.",
-};
-
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    // Clipboard API unavailable (non-secure context): fall back to a hidden textarea.
-    const area = document.createElement("textarea");
-    area.value = text;
-    area.setAttribute("readonly", "");
-    area.style.position = "fixed";
-    area.style.opacity = "0";
-    document.body.appendChild(area);
-    area.select();
-    const ok = document.execCommand("copy");
-    document.body.removeChild(area);
-    return ok;
-  }
-}
-
-function CopyButton({ text, label }: { text: string; label: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      type="button"
-      className="review-copy-button"
-      aria-label={label}
-      onClick={() =>
-        void copyText(text).then((ok) => {
-          setCopied(ok);
-          if (ok) setTimeout(() => setCopied(false), 2000);
-        })
-      }
-    >
-      {copied ? "Copied" : "Copy"}
-    </button>
-  );
-}
-
-function List({ title, items }: { title: string; items: string[] }) {
-  if (items.length === 0) return null;
-  return (
-    <Section title={title} count={items.length}>
-      <ul>
-        {items.map((item, i) => (
-          <li key={i}>{item}</li>
-        ))}
-      </ul>
-    </Section>
-  );
-}
 
 export default function RefactorPage() {
   const api = useApi();
@@ -123,21 +63,16 @@ export default function RefactorPage() {
     );
     if (res.ok && res.data?.result) {
       setResponse(res.data);
-    } else if (res.status !== 401) {
-      if (res.status === 504) setError("The model timed out. Try a shorter procedure or raise inferenceTimeoutMs in Settings.");
-      else if (res.status === 429) setError(res.error ?? "The model is busy. Wait for the current run to finish, then retry.");
-      else setError(res.error ?? "Refactor failed");
-      const d = res.details as { responseText?: unknown; message?: unknown } | null;
-      if (res.status === 502 && d && typeof d.responseText === "string") {
-        setRawOutput(d.responseText);
-        if (typeof d.message === "string") setValidation(d.message.split("; response ended with:")[0]);
+    } else {
+      const failure = refactorFailure(res);
+      if (failure) {
+        setError(failure.error);
+        setRawOutput(failure.rawOutput);
+        setValidation(failure.validation);
       }
     }
     setRunning(false);
   }
-
-  const result = response?.result;
-  const failed = result?.checks.filter((c) => !c.passed) ?? [];
 
   return (
     <main className="review-page">
@@ -246,89 +181,10 @@ END`}
               <strong>Running local refactor</strong>
               <p>The selected model is rewriting your procedure.</p>
             </div>
-          ) : result ? (
-            <section className="review-report" aria-label="Refactor result">
-              {response?.lowConfidence && (
-                <div className="review-alert" role="note">
-                  Small model — low-confidence result; review every change.
-                </div>
-              )}
-              <Section title="Summary">
-                <p>{result.summary}</p>
-              </Section>
-
-              <Section title="Refactored SQL">
-                {result.status === "provided" ? (
-                  <>
-                    {failed.length > 0 && (
-                      <div className="review-alert" role="note" data-testid="checks-failed">
-                        {failed.length} check(s) failed. Fix them before deploying this SQL.
-                      </div>
-                    )}
-                    <ul className="review-checks" aria-label="Checks">
-                      {result.checks.map((check) => (
-                        <li key={check.id} className={check.passed ? "review-check-pass" : "review-check-fail"}>
-                          <span aria-hidden="true">{check.passed ? "✓" : "✗"}</span> {check.label}
-                          {check.detail && <small> — {check.detail}</small>}
-                        </li>
-                      ))}
-                    </ul>
-                    <div className="review-code-header">
-                      <span>Not executed or validated against a database. Test before deploying.</span>
-                      <CopyButton text={result.refactoredSql} label="Copy refactored SQL" />
-                    </div>
-                    <pre className="review-code review-code-tall" aria-label="Refactored SQL">{result.refactoredSql}</pre>
-                  </>
-                ) : (
-                  <p className="review-empty" data-testid="refactor-status">
-                    {STATUS_MESSAGES[result.status]}
-                    {result.statusDetail && ` (${result.statusDetail}.)`}
-                  </p>
-                )}
-              </Section>
-
-              <List title="Changes" items={result.changes} />
-              <IndexRecommendations items={result.indexRecommendations} />
-
-              {result.viewRecommendations.length > 0 && (
-                <Section title="View recommendations" count={result.viewRecommendations.length}>
-                  <ul className="review-recommendations">
-                    {result.viewRecommendations.map((view) => (
-                      <li key={view.name}>
-                        <strong>{view.name}</strong>
-                        {view.reason && <p>{view.reason}</p>}
-                        {view.createStatement && (
-                          <>
-                            <div className="review-code-header">
-                              <span>Suggestion only.</span>
-                              <CopyButton text={view.createStatement} label={`Copy view ${view.name}`} />
-                            </div>
-                            <pre className="review-code">{view.createStatement}</pre>
-                          </>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </Section>
-              )}
-
-              <List title="Other recommendations" items={result.otherRecommendations} />
-              <List title="Limitations" items={result.limitations} />
-
-              {response?.id && (
-                <p className="review-empty">
-                  Saved as an <Link href={`/audit/${response.id}`}>audit record</Link>.
-                </p>
-              )}
-            </section>
+          ) : response?.result ? (
+            <RefactorResultView response={response} />
           ) : rawOutput ? (
-            <>
-              <div className="review-alert" role="note">
-                The model&apos;s answer could not be read, so its raw output is shown below. Treat it as unverified.
-              </div>
-              <pre className="review-code" aria-label="Response preview">{rawOutput}</pre>
-              {validation && <p className="review-empty">Validation: {validation}</p>}
-            </>
+            <RefactorRawOutput rawOutput={rawOutput} validation={validation} />
           ) : (
             <div className="review-state">
               <div className="review-state-icon">✦</div>

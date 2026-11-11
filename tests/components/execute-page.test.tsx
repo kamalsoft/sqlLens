@@ -207,6 +207,32 @@ describe("ExecutePage null handling and validation", () => {
     expect(panel).toHaveTextContent("Grade B");
   });
 
+  it("offers a refactor after a run, and Use as Optimized fills the Optimized editor in compare mode (RF-2, RF-6)", async () => {
+    const single = { mode: "single", simulated: true, warnings: [], execution: exec, analysis: analysis() };
+    const refactored = "SELECT CustomerID FROM dbo.Customers;";
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url === "/api/review/models") return json({ models: [{ id: "m1", name: "Model One", compatible: true }] });
+      if (url === "/api/refactor") {
+        return json({ result: {
+          status: "provided", refactoredSql: refactored, formatted: true, checks: [], summary: "s", changes: [],
+          indexRecommendations: [], viewRecommendations: [], otherRecommendations: [], limitations: [],
+        } });
+      }
+      return json({ result: single });
+    }));
+    const user = userEvent.setup();
+    view();
+    expect(screen.queryByRole("button", { name: "Refactor Stored Procedure" })).toBeNull();
+    await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select * from dbo.Customers");
+    await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
+    await user.click(await screen.findByRole("button", { name: "Refactor Stored Procedure" }));
+    await screen.findByRole("option", { name: "Model One" });
+    await user.click(screen.getByRole("button", { name: "Generate refactor" }));
+    await user.click(await screen.findByRole("button", { name: "Use as Optimized" }));
+    expect(screen.getByPlaceholderText(/Paste your Optimized SP/)).toHaveValue(refactored);
+    expect(screen.getByPlaceholderText(/Paste your Stored Procedure/)).toHaveValue("select * from dbo.Customers");
+  });
+
   it("copies the raw output to the clipboard from the raw-output panel", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });

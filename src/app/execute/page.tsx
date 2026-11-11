@@ -10,6 +10,7 @@ import type { ExecParam } from '@/components/execute/target-editor';
 import type { ExecutionResult } from '@/lib/sp-executor';
 import { useApi } from '@/components/api-client';
 import { gradeToken, VERDICT_TONE, verdictTone } from '@/lib/status-tone';
+import { RefactorPanel, type RefactorSource } from '@/components/execute/refactor-panel';
 import { readParamSets, setNamesFor, withSet, withoutSet, writeParamSets, type ParamSetStore, type SavedParam } from '@/lib/param-sets';
 import {
   TargetEditor, buildTarget, emptyDraft, isDraftEmpty, targetError, newParamRow, type ParamType, type TargetDraft,
@@ -489,6 +490,7 @@ export default function ExecutePage() {
   const [result, setResult] = useState<ExecuteResult | null>(null);
   const [usedParams, setUsedParams] = useState<ExecParam[]>([]);
   const [submittedSql, setSubmittedSql] = useState<{ original: string; optimized: string } | null>(null);
+  const [ranSource, setRanSource] = useState<{ source: RefactorSource; engine: typeof engine; connection: Record<string, unknown> } | null>(null);
   // UX-1: the first problem in the inputs, shown next to the Execute button and used to block the run.
   const inputProblem = (kind === 'procedure' && !isDraftEmpty(kind, original) && targetError(kind, original))
     || (mode === 'compare' && kind === 'procedure' && !isDraftEmpty(kind, optimized) && targetError(kind, optimized))
@@ -598,6 +600,14 @@ export default function ExecutePage() {
     setTesting(false);
   }
 
+  /** RF-6: a refactored batch goes into the Optimized editor; nothing runs until Execute is pressed. */
+  function useAsOptimized(sql: string) {
+    setMode('compare');
+    setKind('batch');
+    setOptimized({ ...emptyDraft(), sql });
+    setResult(null);
+  }
+
   function handleCancel() {
     abortRef.current?.abort();
   }
@@ -618,6 +628,12 @@ export default function ExecutePage() {
     setError(null);
     setResult(null);
     setUsedParams(orig.target.kind === 'procedure' ? orig.target.params : []);
+    // RF-2: the refactor panel works on what was run, on the server it ran on, even if the form changes afterwards.
+    setRanSource({
+      source: orig.target.kind === 'batch' ? { kind: 'batch', sql: orig.target.sql } : { kind: 'procedure', name: orig.target.name },
+      engine,
+      connection: engine !== 'simulation' ? connection() : {},
+    });
     const textOf = (d: TargetDraft) => kind === 'batch'
       ? d.sql
       : `${d.name}\n${d.params.map((p) => `  ${p.name} ${p.type} = ${p.isNull ? 'NULL' : p.value}`).join('\n')}`;
@@ -903,6 +919,13 @@ export default function ExecutePage() {
               <>
                 <AnalysisPanel analysis={result.analysis} title={`📊 Execution Analysis — ${result.execution.spLabel}`} params={usedParams} outputs={result.execution.outputs} />
                 <RawStatsPanel execution={result.execution} />
+                {result.execution.success && ranSource && (
+                  <RefactorPanel
+                    key={result.execution.recordNumber}
+                    source={ranSource.source} engine={ranSource.engine} connection={ranSource.connection}
+                    analysis={result.analysis} onUseAsOptimized={useAsOptimized}
+                  />
+                )}
               </>
             ) : (
               <>

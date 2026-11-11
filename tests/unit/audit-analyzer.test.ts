@@ -321,3 +321,33 @@ describe('FIX-2 parallel plans', () => {
     expect(planFindings(planOperators(parallelSort)).some((f) => f.kind === 'row-estimate')).toBe(false);
   });
 });
+
+describe('grade rationale names the metric that set the grade', () => {
+  const row = (table: string, logicalReads: number, scanCount: number) => ({
+    table, scanCount, logicalReads, physicalReads: 0, readAheadReads: 0, lobLogicalReads: 0, lobPhysicalReads: 0, lobReadAheadReads: 0,
+  });
+
+  it('a fast run with many reads is graded by its reads, not its time (record 000080)', () => {
+    const a = analyzeExecution(result({
+      totalElapsedMs: 684,
+      io: [row('SalesOrders', 1703, 11), row('#StagedSales', 2040, 12), row('Customers', 9315, 11), row('#CustomerAggregates', 1077, 11), row('ProcedureExecutionAudit', 4, 0)],
+    }));
+    expect(a.performanceGrade).toBe('D');
+    expect(a.gradeRationale).toContain(`Graded D by logical reads ${(14139).toLocaleString()} (grade C needs under ${(5000).toLocaleString()})`);
+    expect(a.gradeRationale).not.toContain('elapsed time');
+  });
+
+  it('names every metric over the next grade', () => {
+    const a = analyzeExecution(result({ totalElapsedMs: 300, io: [row('T', 1500, 5)] }));
+    expect(a.performanceGrade).toBe('C');
+    expect(a.gradeRationale).toContain('logical reads');
+    expect(a.gradeRationale).toContain('elapsed time 300 ms (grade B needs under 200 ms)');
+    expect(a.gradeRationale).toContain('highest scan count on one table 5 (grade B needs at most 3)');
+  });
+
+  it('an A needs no explanation', () => {
+    const a = analyzeExecution(result({ totalElapsedMs: 11, io: [row('T', 100, 1)] }));
+    expect(a.performanceGrade).toBe('A');
+    expect(a.gradeRationale).not.toContain('Graded');
+  });
+});
