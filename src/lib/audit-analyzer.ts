@@ -197,9 +197,16 @@ export function evidenceGap(stats: ExecutionStats): EvidenceGap | null {
   return null;
 }
 
+const attrValues = (text: string, attr: string): number[] =>
+  [...text.matchAll(new RegExp(`\\b${attr}="(\\d+)"`, 'g'))].map((m) => Number(m[1]));
 const sumAttr = (text: string, attr: string): number | null => {
-  const values = [...text.matchAll(new RegExp(`\\b${attr}="(\\d+)"`, 'g'))].map((m) => Number(m[1]));
+  const values = attrValues(text, attr);
   return values.length ? values.reduce((a, b) => a + b, 0) : null;
+};
+/** The largest per-thread value. A parallel operator reports one execution per thread, so the sum overcounts. */
+const maxAttr = (text: string, attr: string): number | null => {
+  const values = attrValues(text, attr);
+  return values.length ? Math.max(...values) : null;
 };
 
 /**
@@ -221,7 +228,8 @@ export function planOperators(plan: string | null | undefined): PlanOperator[] {
       table: table ? table[1] : null,
       actualRows: sumAttr(chunk, 'ActualRows'),
       logicalReads: sumAttr(chunk, 'ActualLogicalReads'),
-      executions: sumAttr(chunk, 'ActualExecutions'),
+      // Max, not sum: a parallel operator reports ActualExecutions per thread. An inner loop run by one thread still reports its full count.
+      executions: maxAttr(chunk, 'ActualExecutions'),
       estimatedRows: estimate ? Number(estimate[1]) : null,
       spillWrites: /<SpillToTempDb\b/.test(chunk) ? sumAttr(chunk, 'WritesToTempDb') ?? 0 : null,
     });

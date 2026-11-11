@@ -305,3 +305,19 @@ describe('P8-07 generic plan findings', () => {
     expect(unreachedTables(result({ plan: notReached }, 100).stats)).toEqual(['Later']);
   });
 });
+
+describe('FIX-2 parallel plans', () => {
+  const threads = (rows: number[]) => rows.map((r, i) => `<RunTimeCountersPerThread Thread="${i}" ActualRows="${r}" ActualExecutions="1"></RunTimeCountersPerThread>`).join('');
+  const parallelSort = '<RelOp NodeId="2" PhysicalOp="Sort" LogicalOp="Sort" EstimateRows="333751">'
+    + `<RunTimeInformation>${threads([33375, 33375, 33375, 33375, 33376, 33375, 33375, 33375, 33376, 33375])}</RunTimeInformation></RelOp>`;
+
+  it('takes executions per operator as the largest thread count, not the sum', () => {
+    const [sort] = planOperators(parallelSort);
+    expect(sort.actualRows).toBe(333752); // the ten thread counts in the fixture
+    expect(sort.executions).toBe(1);
+  });
+
+  it('does not report a row estimate error for a parallel operator that matches its estimate', () => {
+    expect(planFindings(planOperators(parallelSort)).some((f) => f.kind === 'row-estimate')).toBe(false);
+  });
+});
