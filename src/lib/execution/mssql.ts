@@ -185,7 +185,7 @@ async function countRows(req: MssqlRequestLike, tables: string[]): Promise<Recor
   tables.forEach((t, i) => req.input(`t${i}`, sql.NVarChar(128), t));
   const names = tables.map((_, i) => `@t${i}`).join(', ');
   const r = await req.batch(
-    `SELECT o.name AS tableName, SUM(p.[rows]) AS rowCount FROM sys.objects AS o ` +
+    `SELECT o.name AS tableName, SUM(p.[rows]) AS [rowCount] FROM sys.objects AS o ` +
     `INNER JOIN sys.partitions AS p ON p.object_id = o.object_id AND p.index_id IN (0, 1) ` +
     `WHERE o.type = 'U' AND o.name IN (${names}) GROUP BY o.name`,
   );

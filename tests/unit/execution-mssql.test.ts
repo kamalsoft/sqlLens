@@ -240,7 +240,8 @@ describe('D-039 row counts for tables the run read', () => {
     const out = await executeMssql({ ...conn, trustServerCertificate: true }, { kind: 'batch', sql: 'SELECT 1' }, opts);
     expect(out.stats.tableRows).toEqual({ Orders: 0 });
     // ROWS is a reserved word in T-SQL: the column must be bracketed.
-    expect(h.state.texts.find((t) => /sys\.partitions/.test(t))).toContain('SUM(p.[rows])');
+    // ROWS and ROWCOUNT are reserved words in T-SQL: both aliases and columns must be bracketed.
+    expect(h.state.texts.find((t) => /sys\.partitions/.test(t))).toMatch(/SUM\(p\.\[rows\]\) AS \[rowCount\]/);
     expect(h.state.inputs).toContainEqual({ name: 't0', type: 'NVarChar(128)', value: 'Orders' });
     expect(h.state.texts.some((t) => /sys\.partitions/.test(t) && !t.includes('Orders'))).toBe(true);
   });
