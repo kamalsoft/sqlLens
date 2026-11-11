@@ -359,12 +359,13 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      <button type="button" onClick={() => void handleSave()} disabled={disabled}>
-        {saving ? "Saving..." : "Save Settings"}
-      </button>
-
-      {message && <p role="status">{message}</p>}
-      {error && error.field === null && <p role="alert">{error.message}</p>}
+      <div className="page-actions form-actions">
+        <button type="button" className="button button-primary" onClick={() => void handleSave()} disabled={disabled}>
+          {saving ? "Saving..." : "Save Settings"}
+        </button>
+        {message && <p role="status" className="status-note">{message}</p>}
+      </div>
+      {error && error.field === null && <p role="alert" className="alert">{error.message}</p>}
     </>
   );
 }

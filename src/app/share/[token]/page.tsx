@@ -34,7 +34,7 @@ function CompareShare({ data }: { data: CompareSharePayload | CompareResult }) {
     );
   }
   return (
-    <Text color="red.300" role="alert">This shared comparison uses a format this page cannot show.</Text>
+    <Text color="status.bad" role="alert">This shared comparison uses a format this page cannot show.</Text>
   );
 }
 
@@ -65,30 +65,30 @@ export default function SharePage({ params }: { params: Promise<{ token: string 
   }, [params, api]);
 
   return (
-    <Box minH="100vh" bg="gray.950" color="white">
+    <Box minH="100vh" bg="bg.canvas" color="fg.default">
       <Container maxW="container.xl" py={10}>
         {loading && (
           <Flex justify="center" align="center" py={20} gap={4} direction="column" role="status">
-            <Spinner size="xl" color="blue.400" borderWidth="3px" />
-            <Text color="gray.400">Loading shared result...</Text>
+            <Spinner size="xl" color="accent.default" borderWidth="3px" />
+            <Text color="fg.muted">Loading shared result...</Text>
           </Flex>
         )}
         {error && (
-          <Box bg="red.950" borderWidth="1px" borderColor="red.700" borderRadius="xl" p={6} role="alert">
-            <Text color="red.300" fontWeight="semibold">Shared result unavailable</Text>
-            <Text color="red.400" fontSize="sm" mt={1}>{error}</Text>
+          <Box bg="bg.raised" borderWidth="1px" borderColor="status.bad" borderRadius="xl" p={6} role="alert">
+            <Text color="status.bad" fontWeight="semibold">Shared result unavailable</Text>
+            <Text color="status.bad" fontSize="sm" mt={1}>{error}</Text>
           </Box>
         )}
         {data && !loading && (
           <Box>
             <Flex align="center" gap={3} mb={8}>
-              <Badge colorPalette={data.type === 'REVIEW' ? 'blue' : 'purple'} size="lg" px={3} py={1} borderRadius="full">
+              <Badge colorPalette="brand" size="lg" px={3} py={1} borderRadius="full">
                 {data.type}
               </Badge>
-              <Heading size="xl" color="white">Shared SQLLens Result</Heading>
+              <Heading size="xl" color="fg.default">Shared SQLLens Result</Heading>
             </Flex>
             {data.expiresAt && (
-              <Text color="gray.400" fontSize="sm" mb={4}>
+              <Text color="fg.muted" fontSize="sm" mb={4}>
                 Expires {new Date(data.expiresAt).toLocaleString()}
               </Text>
             )}

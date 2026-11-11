@@ -9,6 +9,7 @@ import { GRADE_RULES, STANDARD_RECOMMENDATIONS, type AuditAnalysis, type Grade, 
 import type { ExecParam } from '@/components/execute/target-editor';
 import type { ExecutionResult } from '@/lib/sp-executor';
 import { useApi } from '@/components/api-client';
+import { gradeToken, VERDICT_TONE, verdictTone } from '@/lib/status-tone';
 import { readParamSets, setNamesFor, withSet, withoutSet, writeParamSets, type ParamSetStore, type SavedParam } from '@/lib/param-sets';
 import {
   TargetEditor, buildTarget, emptyDraft, isDraftEmpty, targetError, newParamRow, type ParamType, type TargetDraft,
@@ -41,14 +42,14 @@ function GradeBadge({ grade }: { grade: string | null }) {
   if (grade === null) {
     return <Badge colorPalette="gray" variant="subtle" px={3} py={2}>Not graded</Badge>;
   }
-  const colors: Record<string, string> = { A: 'green', B: 'blue', C: 'yellow', D: 'orange', F: 'red' };
+  // The letter carries the meaning; the colour is a second cue (colour-vision safe palette, theme-tokens.ts).
+  const tone = gradeToken(grade);
   return (
     <Box
       display="inline-flex" alignItems="center" justifyContent="center"
-      w="56px" h="56px" borderRadius="full"
-      bg={`${colors[grade] || 'gray'}.900`}
-      borderWidth="2px" borderColor={`${colors[grade] || 'gray'}.500`}
-      fontSize="2xl" fontWeight="black" color={`${colors[grade] || 'gray'}.300`}
+      w="56px" h="56px" borderRadius="full" bg="bg.canvas"
+      borderWidth="2px" borderColor={tone}
+      fontSize="2xl" fontWeight="black" color={tone} aria-label={`Grade ${grade}`}
     >
       {grade}
     </Box>
@@ -56,22 +57,35 @@ function GradeBadge({ grade }: { grade: string | null }) {
 }
 
 function VerdictCard({ verdict }: { verdict: ProdVerdict }) {
-  const color = verdict.verdict === 'READY' ? 'green' : verdict.verdict === 'OPTIMIZE' ? 'orange' : verdict.verdict === 'UNSTABLE' ? 'red' : 'yellow';
+  const tone = verdictTone(verdict.verdict);
   return (
-    <Box p={4} bg="gray.950" borderRadius="lg" borderLeftWidth="4px" borderColor={`${color}.500`} aria-label="Prod-readiness verdict">
-      <Text fontSize="xs" color="gray.500" textTransform="uppercase" letterSpacing="wider">Prod readiness</Text>
-      <Text fontSize="xl" fontWeight="bold" color={`${color}.300`}>{verdict.verdict}</Text>
-      <Text fontSize="sm" color="gray.300">{verdict.reason}{verdict.driver ? ` (${verdict.driver})` : ''}</Text>
+    <Box p={4} bg="bg.canvas" borderRadius="lg" borderLeftWidth="4px" borderColor={tone.token} aria-label="Prod-readiness verdict">
+      <Text fontSize="xs" color="fg.muted" textTransform="uppercase" letterSpacing="wider">Prod readiness</Text>
+      <Text fontSize="xl" fontWeight="bold" color={tone.token}>
+        <Box as="span" aria-hidden="true" mr={2}>{tone.symbol}</Box>{verdict.verdict}
+      </Text>
+      <Text fontSize="sm" color="fg.default">{verdict.reason}{verdict.driver ? ` (${verdict.driver})` : ''}</Text>
     </Box>
   );
 }
 
-function StatCard({ label, value, unit = '', color = 'blue' }: { label: string; value: string | number | null; unit?: string; color?: string }) {
+/** The verdict key: each state with its symbol and colour, so the meaning is written out, not only shown. */
+function VerdictKey() {
   return (
-    <Box bg="gray.900" borderWidth="1px" borderColor="gray.700" borderRadius="xl" p={4} textAlign="center">
-      <Text fontSize="xs" color="gray.500" textTransform="uppercase" letterSpacing="wider" mb={1}>{label}</Text>
-      <Text fontSize="2xl" fontWeight="bold" color={`${color}.300`}>{value === null ? 'Not captured' : value.toLocaleString()}</Text>
-      {unit && value !== null && <Text fontSize="xs" color="gray.500">{unit}</Text>}
+    <Box aria-label="Verdict key" display="flex" flexWrap="wrap" gap={4} fontSize="xs" color="fg.muted">
+      {Object.entries(VERDICT_TONE).map(([name, t]) => (
+        <Box key={name} as="span" color={t.token} fontWeight="semibold"><span aria-hidden="true">{t.symbol} </span>{name}</Box>
+      ))}
+    </Box>
+  );
+}
+
+function StatCard({ label, value, unit = '', color = 'accent.default' }: { label: string; value: string | number | null; unit?: string; color?: string }) {
+  return (
+    <Box bg="bg.panel" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" p={4} textAlign="center">
+      <Text fontSize="xs" color="fg.muted" textTransform="uppercase" letterSpacing="wider" mb={1}>{label}</Text>
+      <Text fontSize="2xl" fontWeight="bold" color={color}>{value === null ? 'Not captured' : value.toLocaleString()}</Text>
+      {unit && value !== null && <Text fontSize="xs" color="fg.muted">{unit}</Text>}
     </Box>
   );
 }
@@ -84,10 +98,10 @@ const FINDING_WHY: Record<PlanFinding['kind'], string> = {
 
 function FindingCard({ finding }: { finding: PlanFinding }) {
   return (
-    <Box p={4} bg="gray.950" borderRadius="lg" borderLeftWidth="3px" borderColor={finding.severity === 'high' ? 'red.500' : 'yellow.500'}>
-      <Text color="white" fontWeight="semibold" fontSize="sm">{finding.message}</Text>
-      <Text color="gray.200" fontSize="sm" mt={2}>{finding.recommendation}</Text>
-      <Text color="gray.500" fontSize="xs" mt={2}>Why: {FINDING_WHY[finding.kind]}</Text>
+    <Box p={4} bg="bg.canvas" borderRadius="lg" borderLeftWidth="3px" borderColor={finding.severity === 'high' ? 'status.bad' : 'status.warn'}>
+      <Text color="fg.default" fontWeight="semibold" fontSize="sm">{finding.message}</Text>
+      <Text color="fg.default" fontSize="sm" mt={2}>{finding.recommendation}</Text>
+      <Text color="fg.muted" fontSize="xs" mt={2}>Why: {FINDING_WHY[finding.kind]}</Text>
     </Box>
   );
 }
@@ -101,40 +115,40 @@ function RecommendationsPanel({ analysis }: { analysis: AuditAnalysis }) {
   const high = findings.filter((f) => f.severity === 'high');
   const medium = findings.filter((f) => f.severity === 'medium');
   return (
-    <Box borderWidth="1px" borderColor="gray.700" borderRadius="xl" bg="gray.900" p={5} aria-label="Recommendations" display="flex" flexDirection="column" gap={5}>
+    <Box borderWidth="1px" borderColor="border.subtle" borderRadius="xl" bg="bg.panel" p={5} aria-label="Recommendations" display="flex" flexDirection="column" gap={5}>
       <Box>
-        <Heading size="sm" color="blue.300">💡 Recommendations</Heading>
-        <Text fontSize="xs" color="gray.400" mt={1}>
+        <Heading size="sm" color="accent.default">💡 Recommendations</Heading>
+        <Text fontSize="xs" color="fg.muted" mt={1}>
           How to use: start with the verdict, take the first high-priority finding, change the SQL, then run the changed SQL in compare mode and check that the verdict and grade improve.
         </Text>
       </Box>
       {findings.length === 0 && other.length === 0 && (
-        <Text fontSize="sm" color="gray.400">No plan findings for this run.</Text>
+        <Text fontSize="sm" color="fg.muted">No plan findings for this run.</Text>
       )}
       {high.length > 0 && (
         <Box>
-          <Text fontSize="xs" color="red.300" textTransform="uppercase" letterSpacing="wider" mb={2}>High priority</Text>
+          <Text fontSize="xs" color="status.bad" textTransform="uppercase" letterSpacing="wider" mb={2}>High priority</Text>
           <Box display="flex" flexDirection="column" gap={2}>{high.map((f, i) => <FindingCard key={`h${i}`} finding={f} />)}</Box>
         </Box>
       )}
       {medium.length > 0 && (
         <Box>
-          <Text fontSize="xs" color="yellow.300" textTransform="uppercase" letterSpacing="wider" mb={2}>Medium priority</Text>
+          <Text fontSize="xs" color="status.warn" textTransform="uppercase" letterSpacing="wider" mb={2}>Medium priority</Text>
           <Box display="flex" flexDirection="column" gap={2}>{medium.map((f, i) => <FindingCard key={`m${i}`} finding={f} />)}</Box>
         </Box>
       )}
       {other.length > 0 && (
         <Box>
-          <Text fontSize="xs" color="gray.400" textTransform="uppercase" letterSpacing="wider" mb={2}>Other observations</Text>
+          <Text fontSize="xs" color="fg.muted" textTransform="uppercase" letterSpacing="wider" mb={2}>Other observations</Text>
           <Box as="ul" pl={5} display="flex" flexDirection="column" gap={1}>
-            {other.map((r, i) => <Box as="li" key={i} color="gray.200" fontSize="sm">{r}</Box>)}
+            {other.map((r, i) => <Box as="li" key={i} color="fg.default" fontSize="sm">{r}</Box>)}
           </Box>
         </Box>
       )}
       <Box>
-        <Text fontSize="xs" color="gray.400" textTransform="uppercase" letterSpacing="wider" mb={2}>Standard checks</Text>
+        <Text fontSize="xs" color="fg.muted" textTransform="uppercase" letterSpacing="wider" mb={2}>Standard checks</Text>
         <Box as="ul" pl={5} display="flex" flexDirection="column" gap={1}>
-          {STANDARD_RECOMMENDATIONS.map((r) => <Box as="li" key={r} color="gray.300" fontSize="sm">{r}</Box>)}
+          {STANDARD_RECOMMENDATIONS.map((r) => <Box as="li" key={r} color="fg.default" fontSize="sm">{r}</Box>)}
         </Box>
       </Box>
     </Box>
@@ -149,9 +163,9 @@ function GradeLegend({ current }: { current: Grade | null }) {
   const grades: Grade[] = ['A', 'B', 'C', 'D', 'F'];
   return (
     <Box overflowX="auto" aria-label="Grade legend">
-      <Box as="table" fontSize="xs" color="gray.300" w="100%">
+      <Box as="table" fontSize="xs" color="fg.default" w="100%">
         <thead>
-          <tr style={{ textAlign: 'left', color: '#718096' }}>
+          <tr style={{ textAlign: 'left', color: 'var(--muted)' }}>
             <th>Grade</th><th>Logical reads</th><th>Time</th><th>Scans</th><th>Meaning</th>
           </tr>
         </thead>
@@ -160,7 +174,7 @@ function GradeLegend({ current }: { current: Grade | null }) {
             const rule = g === 'F' ? null : GRADE_RULES[g];
             const isCurrent = current === g;
             return (
-              <tr key={g} style={{ background: isCurrent ? '#2d3748' : undefined }}>
+              <tr key={g} style={{ background: isCurrent ? 'var(--panel-strong)' : undefined }}>
                 <td><strong>{g}</strong>{isCurrent ? ' ◀' : ''}</td>
                 <td>{rule ? `under ${rule.reads.toLocaleString()}` : `not under D's limits`}</td>
                 <td>{rule ? `under ${rule.ms.toLocaleString()} ms` : 'not under D\'s limit'}</td>
@@ -171,7 +185,7 @@ function GradeLegend({ current }: { current: Grade | null }) {
           })}
         </tbody>
       </Box>
-      <Text fontSize="xs" color="gray.500" mt={2}>
+      <Text fontSize="xs" color="fg.muted" mt={2}>
         A run must be under every limit of a grade. &quot;Not graded&quot; means the evidence is incomplete (see the verdict reason).
       </Text>
     </Box>
@@ -183,27 +197,27 @@ function OptimizedPanel({ original, optimized, originalText, optimizedText }: {
   original: AuditAnalysis; optimized: AuditAnalysis; originalText: string; optimizedText: string;
 }) {
   const sides = [
-    { label: 'Original', color: 'red', analysis: original, text: originalText },
-    { label: 'Optimized', color: 'green', analysis: optimized, text: optimizedText },
+    { label: 'Original', color: 'accent.default', analysis: original, text: originalText },
+    { label: 'Optimized', color: 'status.ok', analysis: optimized, text: optimizedText },
   ];
   return (
-    <Box borderWidth="1px" borderColor="gray.700" borderRadius="xl" bg="gray.900" p={5} aria-label="Original and optimized SQL">
-      <Heading size="sm" color="green.300" mb={4}>🟢 Original vs Optimized</Heading>
+    <Box borderWidth="1px" borderColor="border.subtle" borderRadius="xl" bg="bg.panel" p={5} aria-label="Original and optimized SQL">
+      <Heading size="sm" color="status.ok" mb={4}>🟢 Original vs Optimized</Heading>
       <Grid templateColumns={{ base: '1fr', md: '1fr 1fr' }} gap={4}>
         {sides.map((side) => (
-          <Box key={side.label} p={4} bg="gray.950" borderRadius="lg" borderLeftWidth="3px" borderColor={`${side.color}.500`}>
-            <Text fontSize="xs" color={`${side.color}.300`} textTransform="uppercase" letterSpacing="wider">{side.label}</Text>
-            <Text fontSize="sm" color="gray.300" mt={1}>
+          <Box key={side.label} p={4} bg="bg.canvas" borderRadius="lg" borderLeftWidth="3px" borderColor={side.color}>
+            <Text fontSize="xs" color={side.color} textTransform="uppercase" letterSpacing="wider">{side.label}</Text>
+            <Text fontSize="sm" color="fg.default" mt={1}>
               Grade {side.analysis.performanceGrade ?? 'not graded'} · {side.analysis.ioAnalysis.totalLogicalReads === null ? 'reads not captured' : `${side.analysis.ioAnalysis.totalLogicalReads.toLocaleString()} logical reads`} · {side.analysis.timeAnalysis.totalMs === null ? 'time not captured' : `${side.analysis.timeAnalysis.totalMs} ms`}
             </Text>
-            <Text fontSize="xs" color="gray.500" mt={1}>{side.analysis.prodVerdict?.verdict ?? ''}</Text>
-            <Box as="pre" mt={3} p={3} bg="black" borderRadius="md" fontSize="xs" color="gray.200" maxH="320px" overflow="auto" whiteSpace="pre-wrap">
+            <Text fontSize="xs" color="fg.muted" mt={1}>{side.analysis.prodVerdict?.verdict ?? ''}</Text>
+            <Box as="pre" mt={3} p={3} bg="bg.code" borderRadius="md" fontSize="xs" color="fg.default" maxH="320px" overflow="auto" whiteSpace="pre-wrap">
               {side.text || '(empty)'}
             </Box>
           </Box>
         ))}
       </Grid>
-      <Text fontSize="xs" color="gray.500" mt={3}>
+      <Text fontSize="xs" color="fg.muted" mt={3}>
         Refactor output from the Refactor page is not run here. Paste it into Optimized SP and run it; SQL runs only when you press the button.
       </Text>
     </Box>
@@ -214,13 +228,13 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
   analysis: AuditAnalysis; title: string; params?: ExecParam[]; outputs?: Record<string, unknown>;
 }) {
   return (
-    <Box borderWidth="1px" borderColor="gray.700" borderRadius="xl" overflow="hidden">
-      <Box bg="gray.800" px={6} py={4} borderBottomWidth="1px" borderColor="gray.700">
+    <Box borderWidth="1px" borderColor="border.subtle" borderRadius="xl" overflow="hidden">
+      <Box bg="bg.raised" px={6} py={4} borderBottomWidth="1px" borderColor="border.subtle">
         <Flex align="center" gap={4}>
           <GradeBadge grade={analysis.performanceGrade} />
           <Box>
-            <Heading size="md" color="white">{title}</Heading>
-            <Text fontSize="sm" color="gray.400">{analysis.gradeRationale}</Text>
+            <Heading size="md" color="fg.default">{title}</Heading>
+            <Text fontSize="sm" color="fg.muted">{analysis.gradeRationale}</Text>
           </Box>
         </Flex>
         <Box mt={3}><GradeLegend current={analysis.performanceGrade} /></Box>
@@ -228,30 +242,30 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
 
       <Box px={6} py={6} display="flex" flexDirection="column" gap={6}>
         {/* Verdict first (P8-04) */}
-        {analysis.prodVerdict && <VerdictCard verdict={analysis.prodVerdict} />}
+        {analysis.prodVerdict && <><VerdictCard verdict={analysis.prodVerdict} /><VerdictKey /></>}
 
         {/* Summary */}
-        <Text color="gray.200" lineHeight="tall">{analysis.summary}</Text>
+        <Text color="fg.default" lineHeight="tall">{analysis.summary}</Text>
 
-        <Separator borderColor="gray.700" />
+        <Separator borderColor="border.subtle" />
 
         {/* Stats */}
         <Grid templateColumns={{ base: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' }} gap={4}>
-          <StatCard label="Total Logical Reads" value={analysis.ioAnalysis.totalLogicalReads} color="blue" />
-          <StatCard label="Physical Reads" value={analysis.ioAnalysis.totalPhysicalReads} color={analysis.ioAnalysis.totalPhysicalReads === null ? 'gray' : analysis.ioAnalysis.totalPhysicalReads > 0 ? 'orange' : 'green'} />
-          <StatCard label="Scan Count" value={analysis.ioAnalysis.totalScanCount} color={analysis.ioAnalysis.totalScanCount === null ? 'gray' : analysis.ioAnalysis.totalScanCount > 3 ? 'red' : 'green'} />
-          <StatCard label="Total Time" value={analysis.timeAnalysis.totalMs} unit="ms" color={analysis.timeAnalysis.totalMs === null ? 'gray' : analysis.timeAnalysis.totalMs > 1000 ? 'red' : 'green'} />
+          <StatCard label="Total Logical Reads" value={analysis.ioAnalysis.totalLogicalReads} color="accent.default" />
+          <StatCard label="Physical Reads" value={analysis.ioAnalysis.totalPhysicalReads} color={analysis.ioAnalysis.totalPhysicalReads === null ? 'fg.muted' : analysis.ioAnalysis.totalPhysicalReads > 0 ? 'status.warn' : 'status.ok'} />
+          <StatCard label="Scan Count" value={analysis.ioAnalysis.totalScanCount} color={analysis.ioAnalysis.totalScanCount === null ? 'fg.muted' : analysis.ioAnalysis.totalScanCount > 3 ? 'status.bad' : 'status.ok'} />
+          <StatCard label="Total Time" value={analysis.timeAnalysis.totalMs} unit="ms" color={analysis.timeAnalysis.totalMs === null ? 'fg.muted' : analysis.timeAnalysis.totalMs > 1000 ? 'status.bad' : 'status.ok'} />
         </Grid>
 
-        <Separator borderColor="gray.700" />
+        <Separator borderColor="border.subtle" />
 
         {/* Row counts for the real tables the run read (D-039) */}
         {analysis.ioAnalysis.rowCounts && (
           <Box>
-            <Text fontSize="sm" fontWeight="semibold" color="blue.300" mb={3} textTransform="uppercase" letterSpacing="wider">Row counts (tables read)</Text>
+            <Text fontSize="sm" fontWeight="semibold" color="accent.default" mb={3} textTransform="uppercase" letterSpacing="wider">Row counts (tables read)</Text>
             <Grid templateColumns={{ base: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' }} gap={3}>
               {Object.entries(analysis.ioAnalysis.rowCounts).map(([table, rows]) => (
-                <StatCard key={table} label={table} value={rows} color={rows === 0 ? 'red' : 'blue'} />
+                <StatCard key={table} label={table} value={rows} color={rows === 0 ? 'status.bad' : 'accent.default'} />
               ))}
             </Grid>
           </Box>
@@ -259,11 +273,11 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
 
         {/* Repeated runs (P8-03) */}
         {analysis.multiRun && (
-          <Box p={4} bg="gray.950" borderRadius="lg" borderLeftWidth="3px" borderColor="teal.500" aria-label="Repeated runs summary">
-            <Text fontSize="xs" color="gray.500" textTransform="uppercase" letterSpacing="wider">
+          <Box p={4} bg="bg.canvas" borderRadius="lg" borderLeftWidth="3px" borderColor="accent.default" aria-label="Repeated runs summary">
+            <Text fontSize="xs" color="fg.muted" textTransform="uppercase" letterSpacing="wider">
               {analysis.multiRun.runs} measured runs (warm-up of {analysis.multiRun.warmupRuns} dropped)
             </Text>
-            <Text color="gray.200" fontSize="sm">
+            <Text color="fg.default" fontSize="sm">
               Elapsed median {analysis.multiRun.elapsedMs?.median ?? 'n/a'} ms, p95 {analysis.multiRun.elapsedMs?.p95 ?? 'n/a'} ms,
               spread {analysis.multiRun.spreadPct === null ? 'n/a' : `${Math.round(analysis.multiRun.spreadPct)}%`}.
               Logical reads median {analysis.multiRun.logicalReads?.median ?? 'n/a'}.
@@ -274,13 +288,13 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
         {/* Parameters used (P8-04) */}
         {params && params.length > 0 && (
           <Box>
-            <Text fontSize="sm" fontWeight="semibold" color="gray.300" mb={3} textTransform="uppercase" letterSpacing="wider">Parameters used</Text>
+            <Text fontSize="sm" fontWeight="semibold" color="fg.default" mb={3} textTransform="uppercase" letterSpacing="wider">Parameters used</Text>
             <Box as="dl" display="grid" gridTemplateColumns={{ base: '1fr', md: 'auto 1fr' }} gap={2} fontSize="sm">
               {params.map((p, i) => (
                 <Flex key={i} gap={2} align="baseline" wrap="wrap" gridColumn="1 / -1">
-                  <Text as="dt" color="gray.400" fontFamily="mono">{p.name}</Text>
-                  <Text as="dd" color="white" fontFamily="mono">{p.value === null ? 'NULL' : String(p.value)} <Text as="span" color="gray.500">({p.type})</Text></Text>
-                  {p.output && <Badge colorPalette="purple" size="sm">OUTPUT</Badge>}
+                  <Text as="dt" color="fg.muted" fontFamily="mono">{p.name}</Text>
+                  <Text as="dd" color="fg.default" fontFamily="mono">{p.value === null ? 'NULL' : String(p.value)} <Text as="span" color="fg.muted">({p.type})</Text></Text>
+                  {p.output && <Badge colorPalette="brand" size="sm">OUTPUT</Badge>}
                 </Flex>
               ))}
             </Box>
@@ -290,8 +304,8 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
         {/* OUTPUT parameter values returned by the run */}
         {outputs && Object.keys(outputs).length > 0 && (
           <Box>
-            <Text fontSize="sm" fontWeight="semibold" color="cyan.300" mb={3} textTransform="uppercase" letterSpacing="wider">OUTPUT parameters</Text>
-            <Box as="pre" fontSize="xs" color="cyan.300" bg="gray.950" p={3} borderRadius="lg" overflowX="auto" fontFamily="mono">
+            <Text fontSize="sm" fontWeight="semibold" color="accent.default" mb={3} textTransform="uppercase" letterSpacing="wider">OUTPUT parameters</Text>
+            <Box as="pre" fontSize="xs" color="accent.default" bg="bg.canvas" p={3} borderRadius="lg" overflowX="auto" fontFamily="mono">
               {JSON.stringify(outputs, null, 2)}
             </Box>
           </Box>
@@ -299,34 +313,34 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
 
         {/* Time breakdown */}
         <Box>
-          <Text fontSize="sm" fontWeight="semibold" color="cyan.400" mb={3} textTransform="uppercase" letterSpacing="wider">⏱ Time Analysis</Text>
+          <Text fontSize="sm" fontWeight="semibold" color="accent.default" mb={3} textTransform="uppercase" letterSpacing="wider">⏱ Time Analysis</Text>
           <Grid templateColumns="1fr 1fr" gap={4}>
-            <Box p={4} bg="gray.800" borderRadius="lg">
-              <Text fontSize="xs" color="gray.500" mb={1}>Parse & Compile</Text>
-              <Text color="cyan.300" fontWeight="bold">{analysis.timeAnalysis.parseTimeMs === null ? 'Not captured' : `${analysis.timeAnalysis.parseTimeMs}ms`}</Text>
+            <Box p={4} bg="bg.raised" borderRadius="lg">
+              <Text fontSize="xs" color="fg.muted" mb={1}>Parse & Compile</Text>
+              <Text color="accent.default" fontWeight="bold">{analysis.timeAnalysis.parseTimeMs === null ? 'Not captured' : `${analysis.timeAnalysis.parseTimeMs}ms`}</Text>
             </Box>
-            <Box p={4} bg="gray.800" borderRadius="lg">
-              <Text fontSize="xs" color="gray.500" mb={1}>Execution</Text>
-              <Text color="cyan.300" fontWeight="bold">{analysis.timeAnalysis.executeTimeMs === null ? 'Not captured' : `${analysis.timeAnalysis.executeTimeMs}ms`}</Text>
+            <Box p={4} bg="bg.raised" borderRadius="lg">
+              <Text fontSize="xs" color="fg.muted" mb={1}>Execution</Text>
+              <Text color="accent.default" fontWeight="bold">{analysis.timeAnalysis.executeTimeMs === null ? 'Not captured' : `${analysis.timeAnalysis.executeTimeMs}ms`}</Text>
             </Box>
           </Grid>
-          <Box mt={3} p={4} bg="gray.800" borderRadius="lg" borderLeftWidth="3px" borderColor="cyan.500">
-            <Text color="gray.300" fontSize="sm">{analysis.timeAnalysis.classification}</Text>
-            <Text color="gray.500" fontSize="xs" mt={1}>{analysis.timeAnalysis.recommendation}</Text>
+          <Box mt={3} p={4} bg="bg.raised" borderRadius="lg" borderLeftWidth="3px" borderColor="accent.default">
+            <Text color="fg.default" fontSize="sm">{analysis.timeAnalysis.classification}</Text>
+            <Text color="fg.muted" fontSize="xs" mt={1}>{analysis.timeAnalysis.recommendation}</Text>
           </Box>
         </Box>
 
-        <Separator borderColor="gray.700" />
+        <Separator borderColor="border.subtle" />
 
         {/* Costliest plan operators (P8-06) */}
         {analysis.planOperators && analysis.planOperators.length > 0 && (
           <Box>
-            <Text fontSize="sm" fontWeight="semibold" color="purple.300" mb={3} textTransform="uppercase" letterSpacing="wider">Costliest plan operators</Text>
+            <Text fontSize="sm" fontWeight="semibold" color="accent.default" mb={3} textTransform="uppercase" letterSpacing="wider">Costliest plan operators</Text>
             <Box display="flex" flexDirection="column" gap={2}>
               {analysis.planOperators.map((op, i) => (
-                <Box key={i} p={4} bg="gray.800" borderRadius="lg" borderLeftWidth="3px" borderColor="purple.500">
-                  <Text color="white" fontWeight="semibold" fontSize="sm">{op.physicalOp}{op.table ? ` on ${op.table}` : ''}</Text>
-                  <Text color="gray.400" fontSize="xs" mt={1}>
+                <Box key={i} p={4} bg="bg.raised" borderRadius="lg" borderLeftWidth="3px" borderColor="accent.default">
+                  <Text color="fg.default" fontWeight="semibold" fontSize="sm">{op.physicalOp}{op.table ? ` on ${op.table}` : ''}</Text>
+                  <Text color="fg.muted" fontSize="xs" mt={1}>
                     {op.logicalReads === null ? 'reads not captured' : `${op.logicalReads.toLocaleString()} logical reads`}
                     {' · '}{op.actualRows === null ? 'rows not captured' : `${op.actualRows.toLocaleString()} rows`}
                     {op.executions !== null && op.executions > 1 ? ` · ${op.executions.toLocaleString()} executions` : ''}
@@ -340,24 +354,24 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
         {/* Hot tables */}
         {analysis.ioAnalysis.hotTables.length > 0 && (
           <Box>
-            <Text fontSize="sm" fontWeight="semibold" color="orange.400" mb={3} textTransform="uppercase" letterSpacing="wider">🔥 Hot Tables (I/O)</Text>
+            <Text fontSize="sm" fontWeight="semibold" color="status.warn" mb={3} textTransform="uppercase" letterSpacing="wider">🔥 Hot Tables (I/O)</Text>
             <Box display="flex" flexDirection="column" gap={2}>
               {analysis.ioAnalysis.hotTables.map((ht, i) => (
-                <Box key={i} p={4} bg="gray.800" borderRadius="lg" borderLeftWidth="3px"
-                  borderColor={ht.concern.startsWith('HIGH') ? 'red.500' : ht.concern.startsWith('MEDIUM') ? 'yellow.500' : 'green.500'}>
+                <Box key={i} p={4} bg="bg.raised" borderRadius="lg" borderLeftWidth="3px"
+                  borderColor={ht.concern.startsWith('HIGH') ? 'status.bad' : ht.concern.startsWith('MEDIUM') ? 'status.warn' : 'status.ok'}>
                   <Flex justify="space-between" align="flex-start">
                     <Box>
-                      <Text color="white" fontWeight="semibold" fontSize="sm">{ht.table}</Text>
-                      <Text color="gray.400" fontSize="xs" mt={1}>{ht.concern}</Text>
+                      <Text color="fg.default" fontWeight="semibold" fontSize="sm">{ht.table}</Text>
+                      <Text color="fg.muted" fontSize="xs" mt={1}>{ht.concern}</Text>
                     </Box>
                     <Flex gap={4} textAlign="right">
                       <Box>
-                        <Text fontSize="xs" color="gray.500">Logical Reads</Text>
-                        <Text color="orange.300" fontWeight="bold">{ht.logicalReads.toLocaleString()}</Text>
+                        <Text fontSize="xs" color="fg.muted">Logical Reads</Text>
+                        <Text color="status.warn" fontWeight="bold">{ht.logicalReads.toLocaleString()}</Text>
                       </Box>
                       <Box>
-                        <Text fontSize="xs" color="gray.500">Scans</Text>
-                        <Text color={ht.scanCount > 10 ? 'red.400' : 'gray.300'} fontWeight="bold">{ht.scanCount}</Text>
+                        <Text fontSize="xs" color="fg.muted">Scans</Text>
+                        <Text color={ht.scanCount > 10 ? 'status.bad' : 'fg.default'} fontWeight="bold">{ht.scanCount}</Text>
                       </Box>
                     </Flex>
                   </Flex>
@@ -367,31 +381,31 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
           </Box>
         )}
 
-        <Separator borderColor="gray.700" />
+        <Separator borderColor="border.subtle" />
 
         {/* Pros & Cons */}
         <Grid templateColumns="1fr 1fr" gap={4}>
           <Box>
-            <Text fontSize="sm" fontWeight="semibold" color="green.400" mb={3} textTransform="uppercase" letterSpacing="wider">✅ Pros</Text>
+            <Text fontSize="sm" fontWeight="semibold" color="status.ok" mb={3} textTransform="uppercase" letterSpacing="wider">✅ Pros</Text>
             {analysis.prosAndCons.pros.map((p, i) => (
               <Flex key={i} gap={2} mb={2} align="flex-start">
-                <Text color="green.400">+</Text>
-                <Text color="gray.300" fontSize="sm">{p}</Text>
+                <Text color="status.ok">+</Text>
+                <Text color="fg.default" fontSize="sm">{p}</Text>
               </Flex>
             ))}
           </Box>
           <Box>
-            <Text fontSize="sm" fontWeight="semibold" color="red.400" mb={3} textTransform="uppercase" letterSpacing="wider">❌ Cons</Text>
+            <Text fontSize="sm" fontWeight="semibold" color="status.bad" mb={3} textTransform="uppercase" letterSpacing="wider">❌ Cons</Text>
             {analysis.prosAndCons.cons.map((c, i) => (
               <Flex key={i} gap={2} mb={2} align="flex-start">
-                <Text color="red.400">−</Text>
-                <Text color="gray.300" fontSize="sm">{c}</Text>
+                <Text color="status.bad">−</Text>
+                <Text color="fg.default" fontSize="sm">{c}</Text>
               </Flex>
             ))}
           </Box>
         </Grid>
 
-        <Separator borderColor="gray.700" />
+        <Separator borderColor="border.subtle" />
 
         <RecommendationsPanel analysis={analysis} />
       </Box>
@@ -413,14 +427,14 @@ function RawStatsPanel({ execution }: { execution: ExecutionResult }) {
     }
   };
   return (
-    <Box bg="gray.900" borderWidth="1px" borderColor="gray.700" borderRadius="xl" overflow="hidden">
-      <Flex justify="space-between" align="center" px={5} py={3} borderBottomWidth="1px" borderColor="gray.700">
+    <Box bg="bg.panel" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" overflow="hidden">
+      <Flex justify="space-between" align="center" px={5} py={3} borderBottomWidth="1px" borderColor="border.subtle">
         <Box>
-          <Text fontSize="sm" fontWeight="semibold" color="gray.300">📄 Raw Execution Output</Text>
-          <Text fontSize="xs" color="gray.500">The server&apos;s messages for this run: the STATISTICS IO and TIME lines and the plan XML. Every number on this page is parsed from this text.</Text>
+          <Text fontSize="sm" fontWeight="semibold" color="fg.default">📄 Raw Execution Output</Text>
+          <Text fontSize="xs" color="fg.muted">The server&apos;s messages for this run: the STATISTICS IO and TIME lines and the plan XML. Every number on this page is parsed from this text.</Text>
         </Box>
         <Flex gap={2} align="center">
-          <Button size="xs" variant="outline" colorPalette="cyan" aria-label="Copy raw output" onClick={copyRaw} disabled={!raw}>
+          <Button size="xs" variant="outline" colorPalette="brand" aria-label="Copy raw output" onClick={copyRaw} disabled={!raw}>
             {copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : 'Copy'}
           </Button>
           <Button size="xs" variant="ghost" colorPalette="gray" onClick={() => setShow(!show)}>
@@ -431,17 +445,17 @@ function RawStatsPanel({ execution }: { execution: ExecutionResult }) {
       {show && (
         <Box p={5}>
           <Flex gap={4} mb={4} flexWrap="wrap">
-            <Badge colorPalette="blue">Record #{execution.recordNumber}</Badge>
+            <Badge colorPalette="brand">Record #{execution.recordNumber}</Badge>
             <Badge colorPalette="gray">Engine: {execution.connectionEngine}</Badge>
             <Badge colorPalette="gray">{execution.executedAt}</Badge>
-            <Badge colorPalette={execution.success ? 'green' : 'red'}>{execution.success ? 'SUCCESS' : 'FAILED'}</Badge>
+            <Badge variant="outline" color={execution.success ? 'status.ok' : 'status.bad'} borderColor={execution.success ? 'status.ok' : 'status.bad'}>{execution.success ? 'SUCCESS' : 'FAILED'}</Badge>
           </Flex>
-          <Box as="pre" fontSize="xs" color="green.300" bg="gray.950" p={4} borderRadius="lg"
+          <Box as="pre" fontSize="xs" color="status.ok" bg="bg.canvas" p={4} borderRadius="lg"
             overflowX="auto" fontFamily="mono" whiteSpace="pre-wrap" lineHeight="tall">
             {execution.stats.rawOutput}
           </Box>
           {execution.recordNumber && (
-            <Text fontSize="xs" color="gray.500" mt={3}>📁 Audit log saved</Text>
+            <Text fontSize="xs" color="fg.muted" mt={3}>📁 Audit log saved</Text>
           )}
         </Box>
       )}
@@ -638,33 +652,29 @@ export default function ExecutePage() {
   }
 
   return (
-    <Box minH="100vh" bg="gray.950" color="white">
-      <Container maxW="container.xl" py={10}>
+    <Box color="fg.default">
+      <Container maxW="container.xl" p={0}>
 
         {/* Header */}
-        <Box mb={8}>
-          <Flex align="center" gap={3} mb={2}>
-            <Badge colorPalette="orange" size="lg" px={3} py={1} borderRadius="full">R003 / R004</Badge>
-            <Heading as="h1" size="2xl" bgGradient="to-r" gradientFrom="orange.400" gradientTo="red.400" bgClip="text">
-              Execute & Audit SP
-            </Heading>
-          </Flex>
-          <Text color="gray.400" fontSize="lg">
-            Execute Stored Procedures, collect full IO/Statistical metrics, store audit logs, and get deep R004 performance analysis.
-          </Text>
-        </Box>
+        <header className="page-header">
+          <div>
+            <p className="page-kicker">Execution</p>
+            <h2 className="page-title">Execute & Audit SP</h2>
+            <p className="analysis-note">Execute Stored Procedures, collect full IO/Statistical metrics, store audit logs, and get deep R004 performance analysis.</p>
+          </div>
+        </header>
 
         {/* Mode toggle */}
         <Flex gap={3} mb={6}>
           <Button
-            size="sm" colorPalette="orange"
+            size="sm" colorPalette="brand"
             variant={mode === 'single' ? 'solid' : 'outline'}
             onClick={() => setMode('single')}
           >
             Single SP
           </Button>
           <Button
-            size="sm" colorPalette="purple"
+            size="sm" colorPalette="brand"
             variant={mode === 'compare' ? 'solid' : 'outline'}
             onClick={() => setMode('compare')}
           >
@@ -672,43 +682,43 @@ export default function ExecutePage() {
           </Button>
           {mode === 'single' && (
             <Flex align="center" gap={2}>
-              <Text fontSize="xs" color="gray.400">Runs</Text>
+              <Text fontSize="xs" color="fg.muted">Runs</Text>
               <Input
                 size="xs" type="number" min={1} max={20} w="72px" value={runs} aria-label="Runs"
                 onChange={(e) => setRuns(Math.min(20, Math.max(1, Math.trunc(Number(e.target.value) || 1))))}
-                bg="gray.950" borderColor="gray.600" color="white"
+                bg="bg.canvas" borderColor="border.subtle" color="fg.default"
               />
-              <Text fontSize="xs" color="gray.500">1 = one run; more adds a warm-up and summary</Text>
+              <Text fontSize="xs" color="fg.muted">1 = one run; more adds a warm-up and summary</Text>
             </Flex>
           )}
         </Flex>
 
         {/* Target kind toggle */}
         <Flex gap={3} mb={6} role="group" aria-label="Target kind">
-          <Button size="sm" colorPalette="cyan" variant={kind === 'procedure' ? 'solid' : 'outline'}
+          <Button size="sm" colorPalette="brand" variant={kind === 'procedure' ? 'solid' : 'outline'}
             aria-pressed={kind === 'procedure'} onClick={() => setKind('procedure')}>
             Procedure
           </Button>
-          <Button size="sm" colorPalette="cyan" variant={kind === 'batch' ? 'solid' : 'outline'}
+          <Button size="sm" colorPalette="brand" variant={kind === 'batch' ? 'solid' : 'outline'}
             aria-pressed={kind === 'batch'} onClick={() => setKind('batch')}>
             Batch
           </Button>
         </Flex>
 
         {/* Connection Config */}
-        <Box bg="gray.900" borderWidth="1px" borderColor="gray.700" borderRadius="xl" p={6} mb={6}>
-          <Text fontSize="sm" fontWeight="semibold" color="gray.300" mb={4} textTransform="uppercase" letterSpacing="wider">
+        <Box bg="bg.panel" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" p={6} mb={6}>
+          <Text fontSize="sm" fontWeight="semibold" color="fg.default" mb={4} textTransform="uppercase" letterSpacing="wider">
             🔌 Database Connection
           </Text>
           <Grid templateColumns={{ base: '1fr', md: 'repeat(3, 1fr)' }} gap={4}>
             <Box>
-              <Text fontSize="xs" color="gray.400" mb={1}>Engine</Text>
+              <Text fontSize="xs" color="fg.muted" mb={1}>Engine</Text>
               <select
                 value={engine}
                 onChange={(e) =>
                   setEngine(e.target.value as 'simulation' | 'mssql' | 'postgres')
                 }
-                className="w-full rounded-md border border-gray-600 bg-gray-800 px-3 py-2 text-white outline-none ring-0 focus:border-orange-500"
+                className="w-full rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-2 text-[var(--text)] outline-none ring-0 focus:border-[var(--accent-default)]"
               >
                 <option value="simulation">🧪 Simulation (no DB needed)</option>
                 <option value="mssql">🗄 SQL Server (mssql)</option>
@@ -719,26 +729,26 @@ export default function ExecutePage() {
             {engine !== 'simulation' && (
               <>
                 <Box>
-                  <Text fontSize="xs" color="gray.400" mb={1}>Host</Text>
-                  <Input size="sm" value={host} onChange={e => setHost(e.target.value)} bg="gray.800" borderColor="gray.600" color="white" placeholder="localhost" />
+                  <Text fontSize="xs" color="fg.muted" mb={1}>Host</Text>
+                  <Input size="sm" value={host} onChange={e => setHost(e.target.value)} bg="bg.raised" borderColor="border.subtle" color="fg.default" placeholder="localhost" />
                 </Box>
                 <Box>
-                  <Text fontSize="xs" color="gray.400" mb={1}>Port</Text>
-                  <Input size="sm" value={port} onChange={e => setPort(e.target.value)} bg="gray.800" borderColor="gray.600" color="white" placeholder="1433" aria-label="Port" aria-invalid={portError !== null} />
-                  {portError && <Text fontSize="xs" color="red.300" mt={1} role="alert">{portError}</Text>}
+                  <Text fontSize="xs" color="fg.muted" mb={1}>Port</Text>
+                  <Input size="sm" value={port} onChange={e => setPort(e.target.value)} bg="bg.raised" borderColor="border.subtle" color="fg.default" placeholder="1433" aria-label="Port" aria-invalid={portError !== null} />
+                  {portError && <Text fontSize="xs" color="status.bad" mt={1} role="alert">{portError}</Text>}
                 </Box>
                 <Box>
-                  <Text fontSize="xs" color="gray.400" mb={1}>Database</Text>
-                  <Input size="sm" value={database} onChange={e => setDatabase(e.target.value)} bg="gray.800" borderColor="gray.600" color="white" placeholder="MyDatabase" />
+                  <Text fontSize="xs" color="fg.muted" mb={1}>Database</Text>
+                  <Input size="sm" value={database} onChange={e => setDatabase(e.target.value)} bg="bg.raised" borderColor="border.subtle" color="fg.default" placeholder="MyDatabase" />
                 </Box>
                 <Box>
-                  <Text fontSize="xs" color="gray.400" mb={1}>Username</Text>
-                  <Input size="sm" value={username} onChange={e => setUsername(e.target.value)} bg="gray.800" borderColor="gray.600" color="white" placeholder="sa" />
+                  <Text fontSize="xs" color="fg.muted" mb={1}>Username</Text>
+                  <Input size="sm" value={username} onChange={e => setUsername(e.target.value)} bg="bg.raised" borderColor="border.subtle" color="fg.default" placeholder="sa" />
                 </Box>
                 <Box>
-                  <Text fontSize="xs" color="gray.400" mb={1}>Password</Text>
+                  <Text fontSize="xs" color="fg.muted" mb={1}>Password</Text>
                   <Box position="relative">
-                    <Input size="sm" type={showPassword ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} bg="gray.800" borderColor="gray.600" color="white" placeholder="••••••••" pr={9} />
+                    <Input size="sm" type={showPassword ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} bg="bg.raised" borderColor="border.subtle" color="fg.default" placeholder="••••••••" pr={9} />
                     <Button
                       type="button"
                       aria-label={showPassword ? 'Hide password' : 'Show password'}
@@ -767,9 +777,9 @@ export default function ExecutePage() {
                       type="checkbox"
                       checked={trustCert}
                       onChange={(e) => setTrustCert(e.target.checked)}
-                      className="h-4 w-4 rounded border-gray-600 bg-gray-700 text-blue-500"
+                      className="h-4 w-4 rounded border-[var(--panel-border)] bg-[var(--panel-strong)] text-[var(--accent-default)]"
                     />
-                    <Text fontSize="xs" color="gray.400">Trust Server Certificate</Text>
+                    <Text fontSize="xs" color="fg.muted">Trust Server Certificate</Text>
                   </Flex>
                 )}
               </>
@@ -777,18 +787,18 @@ export default function ExecutePage() {
           </Grid>
           {engine !== 'simulation' && (
             <Flex mt={4} gap={3} align="center">
-              <Button size="sm" variant="outline" colorPalette="blue" onClick={handleTest}
+              <Button size="sm" variant="outline" colorPalette="brand" onClick={handleTest}
                 loading={testing} loadingText="Testing..." disabled={testing || !host.trim() || !database.trim()}>
                 Test connection
               </Button>
               {testInfo && (
-                <Text fontSize="sm" role="status" color={testInfo.ok ? 'green.300' : 'red.300'}>{testInfo.message}</Text>
+                <Text fontSize="sm" role="status" color={testInfo.ok ? 'status.ok' : 'status.bad'}>{testInfo.message}</Text>
               )}
             </Flex>
           )}
           {engine === 'simulation' && (
-            <Box mt={4} p={3} bg="blue.950" borderRadius="lg" borderWidth="1px" borderColor="blue.800">
-              <Text fontSize="sm" color="blue.300">
+            <Box mt={4} p={3} bg="bg.raised" borderRadius="lg" borderWidth="1px" borderColor="accent.default">
+              <Text fontSize="sm" color="accent.default">
                 🧪 <strong>Simulation Mode:</strong> Generates realistic SQL Server statistical output based on SP pattern analysis. No database connection required.
               </Text>
             </Box>
@@ -797,15 +807,15 @@ export default function ExecutePage() {
 
         {/* SP Input */}
         <Grid templateColumns={mode === 'compare' ? '1fr 1fr' : '1fr'} gap={5} mb={6}>
-          <Box bg="gray.900" borderWidth="1px" borderColor="gray.700" borderRadius="xl" p={5}>
+          <Box bg="bg.panel" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" p={5}>
             <Flex align="center" gap={2} mb={3}>
-              {mode === 'compare' && <Badge colorPalette="red" variant="subtle">ORIGINAL</Badge>}
-              <Text fontSize="sm" fontWeight="semibold" color="gray.300" textTransform="uppercase" letterSpacing="wider">
+              {mode === 'compare' && <Badge variant="outline" color="accent.default" borderColor="accent.default">ORIGINAL</Badge>}
+              <Text fontSize="sm" fontWeight="semibold" color="fg.default" textTransform="uppercase" letterSpacing="wider">
                 {mode === 'compare' ? 'Current SP' : 'Stored Procedure'}
               </Text>
             </Flex>
             <TargetEditor
-              kind={kind} draft={original} onChange={setOriginal} color={mode === 'compare' ? 'red.200' : 'cyan.100'}
+              kind={kind} draft={original} onChange={setOriginal} color="fg.default"
               placeholder="-- Paste your Stored Procedure here..."
               onLoadParams={engine === 'mssql' ? () => void loadParams('original') : undefined}
               loadNote={loadNote.original}
@@ -817,13 +827,13 @@ export default function ExecutePage() {
           </Box>
 
           {mode === 'compare' && (
-            <Box bg="gray.900" borderWidth="1px" borderColor="gray.700" borderRadius="xl" p={5}>
+            <Box bg="bg.panel" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" p={5}>
               <Flex align="center" gap={2} mb={3}>
-                <Badge colorPalette="green" variant="subtle">OPTIMIZED</Badge>
-                <Text fontSize="sm" fontWeight="semibold" color="gray.300" textTransform="uppercase" letterSpacing="wider">Optimized SP</Text>
+                <Badge variant="outline" color="status.ok" borderColor="status.ok">OPTIMIZED</Badge>
+                <Text fontSize="sm" fontWeight="semibold" color="fg.default" textTransform="uppercase" letterSpacing="wider">Optimized SP</Text>
               </Flex>
               <TargetEditor
-                kind={kind} draft={optimized} onChange={setOptimized} color="green.200"
+                kind={kind} draft={optimized} onChange={setOptimized} color="fg.default"
                 placeholder="-- Paste your Optimized SP here..."
                 onLoadParams={engine === 'mssql' ? () => void loadParams('optimized') : undefined}
                 loadNote={loadNote.optimized}
@@ -839,10 +849,10 @@ export default function ExecutePage() {
         {/* Execute button */}
         <Flex justify="flex-end" gap={3} mb={8}>
           {loading && (
-            <Button size="lg" variant="outline" colorPalette="red" onClick={handleCancel}>Cancel</Button>
+            <Button size="lg" variant="outline" color="status.bad" borderColor="status.bad" onClick={handleCancel}>Cancel</Button>
           )}
           <Button
-            colorPalette="orange"
+            colorPalette="brand"
             size="lg"
             px={10}
             onClick={handleExecute}
@@ -853,15 +863,15 @@ export default function ExecutePage() {
             ▶ Execute & Audit
           </Button>
           {inputProblem && (
-            <Text fontSize="sm" color="red.300" w="100%" textAlign="right">Fix before running: {inputProblem}</Text>
+            <Text fontSize="sm" color="status.bad" w="100%" textAlign="right">Fix before running: {inputProblem}</Text>
           )}
         </Flex>
 
         {/* Loading */}
         {loading && (
           <Flex justify="center" align="center" py={16} gap={4} direction="column" role="status">
-            <Spinner size="xl" color="orange.400" borderWidth="3px" />
-            <Text color="gray.400">
+            <Spinner size="xl" color="status.warn" borderWidth="3px" />
+            <Text color="fg.muted">
               Executing SP{mode === 'compare' ? 's' : ''} and collecting STATISTICS IO / TIME data...
             </Text>
           </Flex>
@@ -869,9 +879,9 @@ export default function ExecutePage() {
 
         {/* Error */}
         {error && (
-          <Box bg="red.950" borderWidth="1px" borderColor="red.700" borderRadius="xl" p={5} mb={6} role="alert">
-            <Text color="red.300" fontWeight="semibold">⚠️ Execution Failed</Text>
-            <Text color="red.400" fontSize="sm" mt={1}>{error}</Text>
+          <Box bg="bg.raised" borderWidth="1px" borderColor="status.bad" borderRadius="xl" p={5} mb={6} role="alert">
+            <Text color="status.bad" fontWeight="semibold">⚠️ Execution Failed</Text>
+            <Text color="status.bad" fontSize="sm" mt={1}>{error}</Text>
           </Box>
         )}
 
@@ -879,14 +889,14 @@ export default function ExecutePage() {
         {result && !loading && (
           <Box display="flex" flexDirection="column" gap={6}>
             {result.warnings && result.warnings.length > 0 && (
-              <Box bg="yellow.950" borderWidth="1px" borderColor="yellow.700" borderRadius="xl" p={4} role="status">
-                <Text color="yellow.300" fontWeight="semibold" fontSize="sm">Warnings</Text>
-                {result.warnings.map((w, i) => <Text key={i} color="yellow.200" fontSize="sm">{w}</Text>)}
+              <Box bg="bg.raised" borderWidth="1px" borderColor="status.warn" borderRadius="xl" p={4} role="status">
+                <Text color="status.warn" fontWeight="semibold" fontSize="sm">Warnings</Text>
+                {result.warnings.map((w, i) => <Text key={i} color="fg.default" fontSize="sm">{w}</Text>)}
               </Box>
             )}
             {(result.simulated ??
               (result.mode === 'single' ? result.execution.stats.simulated : result.original.execution.stats.simulated)) && (
-              <Box><Badge colorPalette="yellow">Simulated</Badge></Box>
+              <Box><Badge variant="outline" color="status.warn" borderColor="status.warn">Simulated</Badge></Box>
             )}
 
             {result.mode === 'single' ? (
@@ -899,17 +909,17 @@ export default function ExecutePage() {
                 {/* Comparison improvement strip */}
                 {result.comparison.improvementPercent != null && (
                   <Box p={5} borderRadius="xl" borderWidth="1px"
-                    bg={result.comparison.improvementPercent > 0 ? 'green.950' : 'red.950'}
-                    borderColor={result.comparison.improvementPercent > 0 ? 'green.700' : 'red.700'}>
+                    bg={result.comparison.improvementPercent > 0 ? 'bg.raised' : 'bg.raised'}
+                    borderColor={result.comparison.improvementPercent > 0 ? 'status.ok' : 'status.bad'}>
                     <Flex align="center" gap={4}>
                       <Box fontSize="3xl">{result.comparison.improvementPercent > 20 ? '🚀' : result.comparison.improvementPercent > 0 ? '📈' : '📉'}</Box>
                       <Box>
-                        <Text fontWeight="bold" color={result.comparison.improvementPercent > 0 ? 'green.300' : 'red.300'} fontSize="lg">
+                        <Text fontWeight="bold" color={result.comparison.improvementPercent > 0 ? 'status.ok' : 'status.bad'} fontSize="lg">
                           {result.comparison.improvementPercent > 0
                             ? `${result.comparison.improvementPercent}% I/O Improvement`
                             : `${Math.abs(result.comparison.improvementPercent)}% I/O Regression`}
                         </Text>
-                        <Text color="gray.400" fontSize="sm">{result.comparison.comparisonSummary}</Text>
+                        <Text color="fg.muted" fontSize="sm">{result.comparison.comparisonSummary}</Text>
                       </Box>
                     </Flex>
                   </Box>
@@ -920,7 +930,7 @@ export default function ExecutePage() {
                   {(['compare', 'original', 'optimized'] as const).map(tab => (
                     <Button key={tab} size="sm"
                       variant={activeTab === tab ? 'solid' : 'outline'}
-                      colorPalette={tab === 'original' ? 'red' : tab === 'optimized' ? 'green' : 'orange'}
+                      colorPalette="brand"
                       onClick={() => setActiveTab(tab)}
                     >
                       {tab === 'compare' ? '📊 Comparison' : tab === 'original' ? '🔴 Original' : '🟢 Optimized'}

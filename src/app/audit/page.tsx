@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useApi } from "@/components/api-client";
 import { filterAudits, NO_FILTER, type AuditFilter, type AuditListItem } from "@/lib/audit-filter";
+import { cssVar, gradeToken, verdictTone } from "@/lib/status-tone";
 
 const TYPES = ["EXECUTE", "EXECUTE_COMPARE", "COMPARE", "REVIEW"];
 const VERDICTS = ["READY", "OPTIMIZE", "UNSTABLE", "INSUFFICIENT EVIDENCE"];
@@ -33,7 +34,7 @@ export default function AuditListPage() {
   const set = (patch: Partial<AuditFilter>) => setFilter((f) => ({ ...f, ...patch }));
 
   return (
-    <main>
+    <>
       <header className="page-header">
         <div>
           <p className="page-kicker">History</p>
@@ -41,38 +42,39 @@ export default function AuditListPage() {
         </div>
       </header>
 
-      {error && <div role="alert">{error}</div>}
+      {error && <div role="alert" className="alert">{error}</div>}
       {!error && audits === null && <p role="status">Loading audit history...</p>}
       {audits && audits.length === 0 && <p>No audit records yet.</p>}
 
       {audits && audits.length > 0 && (
         <>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+          <section className="panel panel-card">
+          <div className="filter-row">
             <input
               aria-label="Search audit records" placeholder="Search procedure, record, verdict"
               value={filter.query} onChange={(e) => set({ query: e.target.value })}
-              style={{ flex: "1 1 220px", minHeight: 40, padding: "8px 10px" }}
+              className="input"
             />
-            <select aria-label="Filter by type" value={filter.type} onChange={(e) => set({ type: e.target.value })} style={{ minHeight: 40 }}>
+            <select aria-label="Filter by type" value={filter.type} onChange={(e) => set({ type: e.target.value })} className="select">
               <option value="">All types</option>
               {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
-            <select aria-label="Filter by verdict" value={filter.verdict} onChange={(e) => set({ verdict: e.target.value })} style={{ minHeight: 40 }}>
+            <select aria-label="Filter by verdict" value={filter.verdict} onChange={(e) => set({ verdict: e.target.value })} className="select">
               <option value="">All verdicts</option>
               {VERDICTS.map((v) => <option key={v} value={v}>{v}</option>)}
             </select>
-            <select aria-label="Filter by grade" value={filter.grade} onChange={(e) => set({ grade: e.target.value })} style={{ minHeight: 40 }}>
+            <select aria-label="Filter by grade" value={filter.grade} onChange={(e) => set({ grade: e.target.value })} className="select">
               <option value="">All grades</option>
               {GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
             </select>
           </div>
-          <p role="status" style={{ fontSize: 12, marginBottom: 8 }}>Showing {shown.length} of {audits.length}</p>
+          <p role="status" className="status-note">Showing {shown.length} of {audits.length}</p>
 
           {shown.length === 0 ? (
             <p>No records match these filters. Clear a filter to see more.</p>
           ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table aria-label="Audit history">
+            <div className="table-wrap">
+              <table aria-label="Audit history" className="data-table">
                 <thead>
                   <tr>
                     <th>Record</th>
@@ -94,8 +96,8 @@ export default function AuditListPage() {
                       </td>
                       <td>{audit.type}</td>
                       <td style={{ fontFamily: "monospace", fontSize: 12 }}>{audit.procedure ?? "-"}</td>
-                      <td>{audit.grade ?? "not graded"}</td>
-                      <td>{audit.verdict ?? "-"}</td>
+                      <td><span style={{ color: cssVar(gradeToken(audit.grade ?? null)), fontWeight: 700 }}>{audit.grade ?? "not graded"}</span></td>
+                      <td>{audit.verdict ? (<span style={{ color: cssVar(verdictTone(audit.verdict).token), fontWeight: 700 }}><span aria-hidden="true">{verdictTone(audit.verdict).symbol} </span>{audit.verdict}</span>) : "-"}</td>
                       <td>{new Date(audit.createdAt).toLocaleString()}</td>
                       <td>{audit.engine ?? "-"}</td>
                       <td>{audit.status}</td>
@@ -109,8 +111,9 @@ export default function AuditListPage() {
               </table>
             </div>
           )}
+          </section>
         </>
       )}
-    </main>
+    </>
   );
 }

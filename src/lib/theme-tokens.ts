@@ -17,9 +17,15 @@ export const TOKENS: Record<ThemeMode, Record<string, string>> = {
     'border.subtle': '#334155',
     'accent.default': '#22D3EE', // links, focus, active tab text
     'accent.solid': '#0891B2',   // primary button background (dark text on it: 4.85:1)
-    'status.ok': '#4ADE80',
-    'status.warn': '#FACC15',
-    'status.bad': '#F87171',
+    'status.ok': '#56B4E9',   // colour-blind safe (Okabe-Ito blue)
+    'status.warn': '#E69F00', // orange
+    'status.bad': '#FF7A4D',  // vermillion, lightened for text
+    'status.info': '#CBD5E1', // neutral slate: no verdict yet
+    'grade.A': '#56B4E9',
+    'grade.B': '#2BC39A',
+    'grade.C': '#F0E442',
+    'grade.D': '#E69F00',
+    'grade.F': '#FF7A4D',
   },
   light: {
     'bg.canvas': '#F8FAFC',
@@ -32,9 +38,15 @@ export const TOKENS: Record<ThemeMode, Record<string, string>> = {
     'border.subtle': '#CBD5E1',
     'accent.default': '#0E7490',
     'accent.solid': '#0E7490',
-    'status.ok': '#15803D',
-    'status.warn': '#A16207',
-    'status.bad': '#B91C1C',
+    'status.ok': '#0B5C8C',
+    'status.warn': '#8A5A00',
+    'status.bad': '#B33C12',
+    'status.info': '#334155',
+    'grade.A': '#0B5C8C',
+    'grade.B': '#00694D',
+    'grade.C': '#6B5D00',
+    'grade.D': '#8A5A00',
+    'grade.F': '#B33C12',
   },
 };
 
@@ -53,6 +65,15 @@ export const TEXT_ON_BACKGROUND: { text: string; bg: string }[] = [
   { text: 'status.ok', bg: 'bg.panel' },
   { text: 'status.warn', bg: 'bg.panel' },
   { text: 'status.bad', bg: 'bg.panel' },
+  { text: 'status.info', bg: 'bg.panel' },
+  { text: 'status.ok', bg: 'bg.raised' },
+  { text: 'status.warn', bg: 'bg.raised' },
+  { text: 'status.bad', bg: 'bg.raised' },
+  { text: 'status.info', bg: 'bg.raised' },
+  ...['A', 'B', 'C', 'D', 'F'].flatMap((g) => [
+    { text: `grade.${g}`, bg: 'bg.panel' },
+    { text: `grade.${g}`, bg: 'bg.raised' },
+  ]),
 ];
 
 /** WCAG 2.x contrast ratio between two hex colours. */

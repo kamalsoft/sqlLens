@@ -85,6 +85,7 @@ describe('POST /api/execute', () => {
     const json = await res.json();
     expect(json.result.simulated).toBe(true);
     expect(json.result.execution.stats.simulated).toBe(true);
+    expect(json.result.execution.spLabel).toBe('SQL Batch');
     expect(typeof json.recordNumber).toBe('number');
     expect(json).not.toHaveProperty('sharedToken');
     const row = db.prepare('SELECT engine, simulated, status, shared_token FROM audit_requests WHERE id = ?').get(json.id) as Record<string, unknown>;
@@ -94,6 +95,8 @@ describe('POST /api/execute', () => {
   it('simulation accepts a procedure target', async () => {
     const res = await execute(post({ mode: 'single', engine: 'simulation', original: { kind: 'procedure', name: 'dbo.p', params: [] } }, cookie));
     expect(res.status).toBe(200);
+    // A single run is not an "original": nothing is being compared with it.
+    expect((await res.json()).result.execution.spLabel).toBe('Stored Procedure');
   });
 
   it('live run: persists metadata, never the password or username', async () => {
