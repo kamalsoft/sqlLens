@@ -3,7 +3,7 @@ import { insertAudit } from '@/db/audit-repo';
 import { requireSession } from '@/lib/auth';
 import { readAppConfig } from '@/lib/app-config';
 import { executeSP, type ExecutionResult } from '@/lib/sp-executor';
-import { analyzeExecution, compareExecutions } from '@/lib/audit-analyzer';
+import { analyzeExecution, compareExecutions, summarizeRuns, type RunSample } from '@/lib/audit-analyzer';
 import { parseExecuteRequest } from '@/lib/execution/request';
 import { ExecAbortError, ExecTimeoutError, type ExecTarget } from '@/lib/execution/types';
 import { rateLimit } from '@/lib/request-guard';
@@ -43,8 +43,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Live execution is disabled' }, { status: 403 });
     }
 
+    // P8-03: repeated runs, single mode only. The first run is a warm-up and is dropped from the summary.
+    const runs = body.body.runs ?? 1;
+    if (typeof runs !== 'number' || !Number.isInteger(runs) || runs < 1 || runs > cfg.maxRuns) {
+      return badRequest(`runs must be an integer from 1 to ${cfg.maxRuns}`, 'runs');
+    }
+    if (runs > 1 && req.mode !== 'single') return badRequest('Repeated runs apply to single mode only', 'runs');
+    const WARMUP_RUNS = 1;
+    const total = runs > 1 ? WARMUP_RUNS + runs : 1;
+
     const opts = { timeoutMs: cfg.queryTimeoutMs, signal: request.signal, logSqlText: cfg.logSqlText };
-    const originalResult = await executeSP(req.original, 'Original_SP', req.engine, req.connection, opts);
+    const results: ExecutionResult[] = [];
+    const samples: RunSample[] = [];
+    for (let i = 0; i < total; i++) {
+      const run = await executeSP(req.original, 'Original_SP', req.engine, req.connection, { ...opts, audit: i === total - 1 });
+      results.push(run);
+      samples.push({ elapsedMs: run.stats.totalElapsedMs, logicalReads: sumReads(run) });
+      if (!run.success) break;
+    }
+    const originalResult = results[results.length - 1];
+    const repeatedOk = results.length === total && originalResult.success;
+    const runSummary = runs > 1 && repeatedOk ? summarizeRuns(samples, WARMUP_RUNS) : null;
 
     let result: Record<string, unknown>;
     let auditType: 'EXECUTE' | 'EXECUTE_COMPARE' = 'EXECUTE';
@@ -71,7 +90,7 @@ export async function POST(request: Request) {
         simulated: req.engine === 'simulation',
         warnings,
         execution: originalResult,
-        analysis: analyzeExecution(originalResult, { maxLogicalReads: cfg.maxLogicalReads, maxElapsedMs: cfg.maxElapsedMs, maxScanCount: cfg.maxScanCount }),
+        analysis: analyzeExecution(originalResult, { maxLogicalReads: cfg.maxLogicalReads, maxElapsedMs: cfg.maxElapsedMs, maxScanCount: cfg.maxScanCount }, runSummary),
       };
     }
 

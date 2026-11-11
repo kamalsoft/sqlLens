@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeExecution, compareExecutions, operatorRecommendations, planOperators, topOperators } from '@/lib/audit-analyzer';
+import { analyzeExecution, compareExecutions, operatorRecommendations, planOperators, summarizeRuns, topOperators } from '@/lib/audit-analyzer';
 import type { ExecutionResult, ExecutionStats } from '@/lib/sp-executor';
 
 function result(over: Partial<ExecutionStats> = {}, reads: number | null = 100): ExecutionResult {
@@ -177,5 +177,39 @@ describe('P8-06 plan operator summary', () => {
       'Review parameter sniffing: add OPTION (OPTIMIZE FOR UNKNOWN) if plans vary per parameter',
     ]));
     expect(r.planOperators[0].physicalOp).toBe('Clustered Index Scan');
+  });
+});
+
+describe('P8-03 repeated runs', () => {
+  const sample = (elapsedMs: number, logicalReads = 100) => ({ elapsedMs, logicalReads });
+  const TARGETS = { maxLogicalReads: 1000, maxElapsedMs: null, maxScanCount: null };
+
+  it('drops the warm-up and reports median, p95 and spread', () => {
+    const r = summarizeRuns([sample(900), sample(10), sample(20), sample(30), sample(40)], 1);
+    expect(r.runs).toBe(4);
+    expect(r.warmupRuns).toBe(1);
+    expect(r.elapsedMs).toEqual({ min: 10, median: 25, p95: 40, max: 40 });
+    expect(r.spreadPct).toBeCloseTo(120);
+  });
+
+  it('gives an UNSTABLE verdict instead of READY when timing varies too much', () => {
+    const runs = summarizeRuns([sample(0), sample(10), sample(50)], 1);
+    const a = analyzeExecution(result({}, 100), TARGETS, runs);
+    expect(a.prodVerdict.verdict).toBe('UNSTABLE');
+    expect(a.multiRun).toEqual(runs);
+  });
+
+  it('keeps READY when the runs agree', () => {
+    const runs = summarizeRuns([sample(0), sample(10), sample(11)], 1);
+    expect(analyzeExecution(result({}, 100), TARGETS, runs).prodVerdict.verdict).toBe('READY');
+  });
+
+  it('keeps OPTIMIZE over UNSTABLE when a metric is over target', () => {
+    const runs = summarizeRuns([sample(0), sample(10), sample(50)], 1);
+    expect(analyzeExecution(result({}, 5000), TARGETS, runs).prodVerdict.verdict).toBe('OPTIMIZE');
+  });
+
+  it('reports no multi-run summary for a single run', () => {
+    expect(analyzeExecution(result({}, 100), TARGETS).multiRun).toBeNull();
   });
 });

@@ -56,7 +56,7 @@ function GradeBadge({ grade }: { grade: string | null }) {
 }
 
 function VerdictCard({ verdict }: { verdict: ProdVerdict }) {
-  const color = verdict.verdict === 'READY' ? 'green' : verdict.verdict === 'OPTIMIZE' ? 'orange' : 'yellow';
+  const color = verdict.verdict === 'READY' ? 'green' : verdict.verdict === 'OPTIMIZE' ? 'orange' : verdict.verdict === 'UNSTABLE' ? 'red' : 'yellow';
   return (
     <Box p={4} bg="gray.950" borderRadius="lg" borderLeftWidth="4px" borderColor={`${color}.500`} aria-label="Prod-readiness verdict">
       <Text fontSize="xs" color="gray.500" textTransform="uppercase" letterSpacing="wider">Prod readiness</Text>
@@ -119,6 +119,20 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
                 <StatCard key={table} label={table} value={rows} color={rows === 0 ? 'red' : 'blue'} />
               ))}
             </Grid>
+          </Box>
+        )}
+
+        {/* Repeated runs (P8-03) */}
+        {analysis.multiRun && (
+          <Box p={4} bg="gray.950" borderRadius="lg" borderLeftWidth="3px" borderColor="teal.500" aria-label="Repeated runs summary">
+            <Text fontSize="xs" color="gray.500" textTransform="uppercase" letterSpacing="wider">
+              {analysis.multiRun.runs} measured runs (warm-up of {analysis.multiRun.warmupRuns} dropped)
+            </Text>
+            <Text color="gray.200" fontSize="sm">
+              Elapsed median {analysis.multiRun.elapsedMs?.median ?? 'n/a'} ms, p95 {analysis.multiRun.elapsedMs?.p95 ?? 'n/a'} ms,
+              spread {analysis.multiRun.spreadPct === null ? 'n/a' : `${Math.round(analysis.multiRun.spreadPct)}%`}.
+              Logical reads median {analysis.multiRun.logicalReads?.median ?? 'n/a'}.
+            </Text>
           </Box>
         )}
 
@@ -297,6 +311,7 @@ function RawStatsPanel({ execution }: { execution: ExecutionResult }) {
 export default function ExecutePage() {
   const api = useApi();
   const [mode, setMode] = useState<'single' | 'compare'>('single');
+  const [runs, setRuns] = useState(1);
   const [kind, setKind] = useState<'procedure' | 'batch'>('batch');
   const [original, setOriginal] = useState<TargetDraft>(emptyDraft());
   const [optimized, setOptimized] = useState<TargetDraft>(emptyDraft());
@@ -391,6 +406,7 @@ export default function ExecutePage() {
           ...(engine !== 'simulation' ? { connection: connection() } : {}),
           original: orig.target,
           ...(opt && opt.ok ? { optimized: opt.target } : {}),
+          ...(mode === 'single' && runs > 1 ? { runs } : {}),
         }),
       },
       'Execution failed'
@@ -439,6 +455,17 @@ export default function ExecutePage() {
           >
             Compare Original vs Optimized
           </Button>
+          {mode === 'single' && (
+            <Flex align="center" gap={2}>
+              <Text fontSize="xs" color="gray.400">Runs</Text>
+              <Input
+                size="xs" type="number" min={1} max={20} w="72px" value={runs} aria-label="Runs"
+                onChange={(e) => setRuns(Math.min(20, Math.max(1, Math.trunc(Number(e.target.value) || 1))))}
+                bg="gray.950" borderColor="gray.600" color="white"
+              />
+              <Text fontSize="xs" color="gray.500">1 = one run; more adds a warm-up and summary</Text>
+            </Flex>
+          )}
         </Flex>
 
         {/* Target kind toggle */}

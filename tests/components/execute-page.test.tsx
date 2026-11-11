@@ -142,6 +142,23 @@ describe("ExecutePage null handling and validation", () => {
     expect(screen.getByText(/Clustered Index Scan on Customers/)).toBeInTheDocument();
   });
 
+  it("shows the repeated-runs summary when the run was repeated (P8-03)", async () => {
+    const single = {
+      mode: "single", simulated: true, warnings: [], execution: exec,
+      analysis: analysis({
+        prodVerdict: { verdict: "UNSTABLE", reason: "elapsed varies 120% across 4 runs", driver: null },
+        multiRun: { runs: 4, warmupRuns: 1, elapsedMs: { min: 10, median: 25, p95: 40, max: 40 }, logicalReads: { min: 1, median: 1, p95: 1, max: 1 }, spreadPct: 120 },
+      }),
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ result: single })));
+    const user = userEvent.setup();
+    view();
+    await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
+    await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
+    expect(await screen.findByText("4 measured runs (warm-up of 1 dropped)")).toBeInTheDocument();
+    expect(screen.getByLabelText("Prod-readiness verdict")).toHaveTextContent("UNSTABLE");
+  });
+
   it("blocks an empty port without fetching", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

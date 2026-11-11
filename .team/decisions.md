@@ -275,4 +275,11 @@ Context (evidence): run 2026-11-11 (record 56) read 1,000,000 `Customers` rows (
 Options: 1 read-only `SELECT COUNT(*)` per real table on the same connection before the run / 2 runtime `ActualRows` only / 3 remove the check.
 User decision: 1 (2026-11-11, reply "1").
 Deviation: row counts come from `sys.partitions` (parameterized table names), not `COUNT(*)`, so no table name enters the SQL text. Exact for committed rows; in-transaction changes are not verified (see the shortcut comment in `src/lib/execution/mssql.ts`).
-Constraints: the query is fixed in code (table names validated against `IDENT_RE`, never taken from the user's SQL); it runs inside the existing connection and timeout; it is read-only; it is a new SQL execution path, so Security sign-off is required.
+Constraints: the query text is fixed in code. Table names come from the server's STATISTICS IO messages, which a script can fake with PRINT or RAISERROR; they must match an identifier pattern, are bound as parameters, and the count is schema-blind (same-name tables in two schemas are summed). Security review 2026-11-11: low risk, no injection path found; it runs inside the existing connection and timeout; it is read-only; it is a new SQL execution path, so Security sign-off is required.
+
+### Security review 2026-11-11 (commits 8ecdb20, 23b7b4f, 0a4b43b)
+Status: APPROVED WITH CONDITIONS (read-only review by the security agent; not a merge approval)
+- C1 OPEN, needs a user decision: OUTPUT values are stored in the audit DB response and in the audit log file, whatever `logSqlText` says. In mssql an OUTPUT parameter is INOUT, so a caller's input value can come back and be stored. Options: A stop storing `outputs` (show them in the response only) / B keep and record an accepted risk.
+- C2 done: D-039 wording corrected above.
+- C3: `data/appconfig.json` stays out of every commit.
+Not verified: no live MSSQL run of the count query or the GO edge cases.

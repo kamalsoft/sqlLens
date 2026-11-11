@@ -29,6 +29,8 @@ export type AppConfig = {
   maxLogicalReads: number | null;
   maxElapsedMs: number | null;
   maxScanCount: number | null;
+  /** P8-03: most runs one request may ask for (the first is a warm-up). */
+  maxRuns: number;
 };
 
 export const defaultAppConfig: AppConfig = {
@@ -52,6 +54,7 @@ export const defaultAppConfig: AppConfig = {
   maxLogicalReads: null,
   maxElapsedMs: null,
   maxScanCount: null,
+  maxRuns: 5,
 };
 
 type Rule = (v: unknown) => boolean;
@@ -133,6 +136,7 @@ const rules: Record<keyof AppConfig, Rule> = {
   maxLogicalReads: optionalInt(1, 1e12),
   maxElapsedMs: optionalInt(1, 3_600_000),
   maxScanCount: optionalInt(1, 1e9),
+  maxRuns: int(1, 20),
 };
 
 /**

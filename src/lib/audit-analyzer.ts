@@ -7,7 +7,7 @@ import type { ExecutionStats, ExecutionResult } from './sp-executor';
 
 export type Grade = 'A' | 'B' | 'C' | 'D' | 'F';
 
-export type ProdVerdictName = 'READY' | 'OPTIMIZE' | 'INSUFFICIENT EVIDENCE';
+export type ProdVerdictName = 'READY' | 'OPTIMIZE' | 'INSUFFICIENT EVIDENCE' | 'UNSTABLE';
 export interface ProdVerdict {
   verdict: ProdVerdictName;
   reason: string;
@@ -28,8 +28,23 @@ export interface PlanOperator {
   executions: number | null;
 }
 
+/** P8-03: one measured run (the warm-up is dropped before summarising). */
+export interface RunSample { elapsedMs: number | null; logicalReads: number | null }
+export interface Spread { min: number; median: number; p95: number; max: number }
+/** P8-03: median, p95 and spread across the measured runs. */
+export interface RunSummary {
+  runs: number;
+  warmupRuns: number;
+  elapsedMs: Spread | null;
+  logicalReads: Spread | null;
+  /** (max - min) / median of elapsed time, in percent; null when not measurable. */
+  spreadPct: number | null;
+}
+
 export interface AuditAnalysis {
   summary: string;
+  /** P8-03: null for a single run. */
+  multiRun: RunSummary | null;
   /** P8-06: the costliest operators by logical reads, then rows. */
   planOperators: PlanOperator[];
   /** P8-02: prod-readiness verdict from evidence and user targets. */
@@ -171,8 +186,28 @@ export function operatorRecommendations(ops: PlanOperator[]): string[] {
   return recs;
 }
 
+const UNSTABLE_SPREAD_PCT = 25;
+
+function spread(values: number[]): Spread | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const n = sorted.length;
+  const mid = n % 2 === 1 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
+  const p95 = sorted[Math.min(n - 1, Math.ceil(0.95 * n) - 1)];
+  return { min: sorted[0], median: mid, p95, max: sorted[n - 1] };
+}
+
+/** P8-03: summarise measured runs; the first `warmupRuns` are dropped. */
+export function summarizeRuns(samples: RunSample[], warmupRuns: number): RunSummary {
+  const measured = samples.slice(warmupRuns);
+  const elapsed = spread(measured.flatMap((r) => (r.elapsedMs === null ? [] : [r.elapsedMs])));
+  const reads = spread(measured.flatMap((r) => (r.logicalReads === null ? [] : [r.logicalReads])));
+  const spreadPct = elapsed && elapsed.median > 0 ? ((elapsed.max - elapsed.min) / elapsed.median) * 100 : null;
+  return { runs: measured.length, warmupRuns, elapsedMs: elapsed, logicalReads: reads, spreadPct };
+}
+
 /** P8-02: READY / OPTIMIZE / INSUFFICIENT EVIDENCE. Evidence checks run before targets. */
-export function prodVerdict(stats: ExecutionStats, targets: Targets): ProdVerdict {
+export function prodVerdict(stats: ExecutionStats, targets: Targets, runs: RunSummary | null = null): ProdVerdict {
   const gap = evidenceGap(stats);
   if (gap) return { verdict: 'INSUFFICIENT EVIDENCE', reason: gap.reason, driver: gap.table };
   const { logicalReads: reads, elapsed: ms } = metricsOf(stats);
@@ -190,6 +225,10 @@ export function prodVerdict(stats: ExecutionStats, targets: Targets): ProdVerdic
   }
   if (targets.maxScanCount !== null && scan !== null && scan > targets.maxScanCount) {
     return { verdict: 'OPTIMIZE', reason: `scan count ${scan} over target ${targets.maxScanCount}`, driver: hottest(stats, 'scanCount') };
+  }
+  // P8-03: a READY that rests on unstable timing is not READY.
+  if (runs && runs.spreadPct !== null && runs.spreadPct > UNSTABLE_SPREAD_PCT) {
+    return { verdict: 'UNSTABLE', reason: `elapsed varies ${Math.round(runs.spreadPct)}% across ${runs.runs} runs`, driver: null };
   }
   return { verdict: 'READY', reason: 'all captured metrics within targets', driver: null };
 }
@@ -219,7 +258,7 @@ function gradeFromStats(stats: ExecutionStats): Grade | null {
 // Single-run analysis
 // ---------------------------------------------------------------------------
 
-export function analyzeExecution(result: ExecutionResult, targets: Targets = NO_TARGETS): AuditAnalysis {
+export function analyzeExecution(result: ExecutionResult, targets: Targets = NO_TARGETS, runs: RunSummary | null = null): AuditAnalysis {
   const stats = result.stats;
   const m = metricsOf(stats);
   const totalLogical = m.logicalReads;
@@ -309,7 +348,8 @@ export function analyzeExecution(result: ExecutionResult, targets: Targets = NO_
 
   return {
     summary: `${result.spLabel} executed in ${fmtMs(elapsed)} with ${fmtN(totalLogical)} total logical reads across ${stats.io.length} table(s). Performance grade: ${grade ?? 'not graded'}.`,
-    prodVerdict: prodVerdict(stats, targets),
+    prodVerdict: prodVerdict(stats, targets, runs),
+    multiRun: runs,
     planOperators: topOperators(operators),
     performanceGrade: grade,
     gradeRationale: grade

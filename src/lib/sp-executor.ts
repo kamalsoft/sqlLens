@@ -230,6 +230,8 @@ export function targetText(target: ExecTarget): string {
 
 export interface ExecuteOptions extends ExecOptions {
   logSqlText: boolean;
+  /** P8-03: false for warm-up and intermediate runs, so only the final run writes an audit file. */
+  audit?: boolean;
 }
 
 /**
@@ -276,7 +278,7 @@ export async function executeSP(
       stats = simulateExecution(text, spLabel);
     }
 
-    writeAuditLog(recordNumber, spLabel, text, stats, engine, opts.logSqlText, outputs);
+    if (opts.audit !== false) writeAuditLog(recordNumber, spLabel, text, stats, engine, opts.logSqlText, outputs);
     return { recordNumber, spLabel, connectionEngine: engine, executedAt, stats, warnings, outputs, success: true };
   } catch (err) {
     if (err instanceof ExecTimeoutError || err instanceof ExecAbortError) {
