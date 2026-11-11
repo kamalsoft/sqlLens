@@ -7,8 +7,21 @@ import type { ExecutionStats, ExecutionResult } from './sp-executor';
 
 export type Grade = 'A' | 'B' | 'C' | 'D' | 'F';
 
+export type ProdVerdictName = 'READY' | 'OPTIMIZE' | 'INSUFFICIENT EVIDENCE';
+export interface ProdVerdict {
+  verdict: ProdVerdictName;
+  reason: string;
+  /** The table or metric that drove an OPTIMIZE verdict, else null. */
+  driver: string | null;
+}
+/** P8-02 user targets; null = not set. */
+export interface Targets { maxLogicalReads: number | null; maxElapsedMs: number | null; maxScanCount: number | null }
+export const NO_TARGETS: Targets = { maxLogicalReads: null, maxElapsedMs: null, maxScanCount: null };
+
 export interface AuditAnalysis {
   summary: string;
+  /** P8-02: prod-readiness verdict from evidence and user targets. */
+  prodVerdict: ProdVerdict;
   /** null when no graded metric was captured. */
   performanceGrade: Grade | null;
   gradeRationale: string;
@@ -76,10 +89,41 @@ function delta(original: number | null, optimized: number | null): MetricDelta {
 // Grade thresholds. Metrics that were not captured are skipped, not treated as 0.
 // ---------------------------------------------------------------------------
 
+/** P8-02: READY / OPTIMIZE / INSUFFICIENT EVIDENCE. Evidence checks run before targets. */
+export function prodVerdict(stats: ExecutionStats, targets: Targets): ProdVerdict {
+  const { logicalReads: reads, elapsed: ms } = metricsOf(stats);
+  // D-039: a real table the run read with zero rows means the run did not exercise the data.
+  for (const [table, rows] of Object.entries(stats.tableRows ?? {})) {
+    if (rows === 0) return { verdict: 'INSUFFICIENT EVIDENCE', reason: `${table} has 0 rows`, driver: table };
+  }
+  if (reads === null) return { verdict: 'INSUFFICIENT EVIDENCE', reason: 'logical reads not captured', driver: null };
+  if (ms === null) return { verdict: 'INSUFFICIENT EVIDENCE', reason: 'elapsed time not captured', driver: null };
+  if (targets.maxLogicalReads === null && targets.maxElapsedMs === null && targets.maxScanCount === null) {
+    return { verdict: 'INSUFFICIENT EVIDENCE', reason: 'no targets set', driver: null };
+  }
+  const scan = ioSum(stats, 'scanCount');
+  if (targets.maxLogicalReads !== null && reads > targets.maxLogicalReads) {
+    return { verdict: 'OPTIMIZE', reason: `logical reads ${reads} over target ${targets.maxLogicalReads}`, driver: hottest(stats, 'logicalReads') };
+  }
+  if (targets.maxElapsedMs !== null && ms > targets.maxElapsedMs) {
+    return { verdict: 'OPTIMIZE', reason: `elapsed ${ms}ms over target ${targets.maxElapsedMs}ms`, driver: null };
+  }
+  if (targets.maxScanCount !== null && scan !== null && scan > targets.maxScanCount) {
+    return { verdict: 'OPTIMIZE', reason: `scan count ${scan} over target ${targets.maxScanCount}`, driver: hottest(stats, 'scanCount') };
+  }
+  return { verdict: 'READY', reason: 'all captured metrics within targets', driver: null };
+}
+
+function hottest(stats: ExecutionStats, key: 'logicalReads' | 'scanCount'): string | null {
+  const top = [...stats.io].sort((a, b) => b[key] - a[key])[0];
+  return top && top[key] > 0 ? top.table : null;
+}
+
 function gradeFromStats(stats: ExecutionStats): Grade | null {
   const { logicalReads: reads, elapsed: ms } = metricsOf(stats);
   const maxScan = stats.io.length ? Math.max(...stats.io.map(r => r.scanCount)) : null;
-  if (reads === null && ms === null) return null;
+  // P8-01: a grade needs both measured reads and time; time alone is not enough.
+  if (reads === null || ms === null) return null;
 
   const ok = (v: number | null, limit: number) => v === null || v < limit;
   const scanOk = (limit: number) => maxScan === null || maxScan <= limit;
@@ -95,7 +139,7 @@ function gradeFromStats(stats: ExecutionStats): Grade | null {
 // Single-run analysis
 // ---------------------------------------------------------------------------
 
-export function analyzeExecution(result: ExecutionResult): AuditAnalysis {
+export function analyzeExecution(result: ExecutionResult, targets: Targets = NO_TARGETS): AuditAnalysis {
   const stats = result.stats;
   const m = metricsOf(stats);
   const totalLogical = m.logicalReads;
@@ -123,6 +167,7 @@ export function analyzeExecution(result: ExecutionResult): AuditAnalysis {
 
   const timeClassification =
     elapsed === null ? 'Not captured'
+    : totalLogical === null || totalScan === null ? `Time ${elapsed}ms only — I/O not captured`
     : elapsed < 50 ? 'Excellent (< 50ms)'
     : elapsed < 200 ? 'Good (< 200ms)'
     : elapsed < 1000 ? 'Acceptable (< 1s)'
@@ -181,8 +226,11 @@ export function analyzeExecution(result: ExecutionResult): AuditAnalysis {
 
   return {
     summary: `${result.spLabel} executed in ${fmtMs(elapsed)} with ${fmtN(totalLogical)} total logical reads across ${stats.io.length} table(s). Performance grade: ${grade ?? 'not graded'}.`,
+    prodVerdict: prodVerdict(stats, targets),
     performanceGrade: grade,
-    gradeRationale: grade ? rationales[grade] : 'Not graded — neither logical reads nor elapsed time was captured',
+    gradeRationale: grade
+      ? rationales[grade]
+      : `Not graded — ${[elapsed === null && 'elapsed time', totalLogical === null && 'logical reads'].filter(Boolean).join(' and ')} not captured`,
     ioAnalysis: { totalLogicalReads: totalLogical, totalPhysicalReads: totalPhysical, totalScanCount: totalScan, hotTables, recommendation: hotTables[0]?.concern || 'No hot tables identified' },
     timeAnalysis: {
       parseTimeMs: stats.parseAndCompileTime ?? null,

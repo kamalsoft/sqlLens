@@ -1,8 +1,7 @@
 import { validateSqlInput } from '../validation/sql-input';
 import { isBoolean, isNumber, isString } from '../validation/body';
-import { assertNoTransactionControl } from './sql-scan';
 import {
-  coerceParam, ExecRejectedError, IDENT_RE, PARAM_NAME_RE, PARAM_TYPES,
+  coerceParam, IDENT_RE, PARAM_NAME_RE, PARAM_TYPES,
   type EngineName, type ExecConnection, type ExecParam, type ExecTarget, type ParamType,
 } from './types';
 
@@ -55,12 +54,6 @@ function parseTarget(raw: unknown, field: string, engine: EngineName, maxSqlLeng
   if (raw.kind === 'batch') {
     const v = validateSqlInput(raw.sql, maxSqlLength);
     if (!v.ok) return fail(v.error, `${field}.sql`);
-    if (engine !== 'simulation') {
-      try { assertNoTransactionControl(v.sql, engine); } catch (e) {
-        if (e instanceof ExecRejectedError) return fail(e.message, `${field}.sql`);
-        throw e;
-      }
-    }
     return { ok: true, value: { kind: 'batch', sql: v.sql } };
   }
   if (raw.kind === 'procedure') {
@@ -79,7 +72,9 @@ function parseTarget(raw: unknown, field: string, engine: EngineName, maxSqlLeng
       const v = p.value;
       if (!(v === null || isString(v) || isNumber(v) || isBoolean(v))) return fail('Invalid parameter value', `${f}.value`);
       try { coerceParam(p.type as ParamType, v); } catch { return fail(`Value does not match type ${p.type}`, `${f}.value`); }
-      params.push({ name: p.name, type: p.type as ParamType, value: v });
+      if (p.output !== undefined && !isBoolean(p.output)) return fail('Invalid parameter output flag', `${f}.output`);
+      if (p.output === true && engine !== 'mssql') return fail('OUTPUT parameters are supported for MSSQL only', `${f}.output`);
+      params.push({ name: p.name, type: p.type as ParamType, value: v, ...(p.output === true ? { output: true } : {}) });
     }
     return { ok: true, value: { kind: 'procedure', name: raw.name, params } };
   }

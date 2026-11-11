@@ -236,3 +236,43 @@ Options: A use a larger ONNX instruct model as the default (e.g. a 1.5B–3B Qwe
 Recommendation: C
 Impact if delayed: DoD review quality; P5-06 catalog and default model (D-026)
 User decision: C (both), as recommended (2026-10-25)
+
+### D-036 Allow transaction control in batch scripts (supersedes D-005 batch rule and D-034 B)
+Status: APPROVED
+Context (evidence): live run on 2026-11-10 returned "Transaction control statements are not allowed in a batch" for a stored procedure script (`src/lib/execution/request.ts:59`, `src/lib/execution/sql-scan.ts:77`). The user states that database scripts are expected to contain COMMIT/ROLLBACK and BEGIN.
+Options: A allow transaction control in MSSQL and PostgreSQL batches, keep the wrapper transaction (uncommitted work still rolls back) and keep the D-034 A ban on dynamic EXEC / sp_executesql / B remove the rejection and the D-034 @@TRANCOUNT guard too, leave no wrapper / C keep the check and add an opt-in per request
+Recommendation: A, with the D-034 A dynamic-exec ban kept. Risk: a script can commit changes, so scripts can write to the database. Anonymous `/api/execute` access is still possible until P2-05 (auth).
+Impact if delayed: none blocking. Blocks the user's script runs.
+User decision: A (2026-11-10, "I signoff the change request and approve it. go ahead and make the change"). Security sign-off was given by the user, not by the security agent review; the security review still needs to run.
+Security review (2026-11-10, verdict APPROVED WITH CONDITIONS): condition 2 (PostgreSQL `PREPARE TRANSACTION` is no longer blocked) is an accepted risk until the PostgreSQL feature is removed (ROADMAP backlog item 21). User accepted the risk (2026-11-10, "yes"). Conditions 1, 3 and 4 are met: auth on `/api/execute` is verified, the stale comments are fixed, and `data/appconfig.json` stays out of the PR.
+
+### D-037 Prod-readiness verdict for stored procedure runs
+Status: APPROVED (option C: P8-02 verdict now, P8-03 multi-run later)
+Context (evidence): live run 2026-11-11 reported grade A from elapsed time alone while logical reads, physical reads and scan count were "Not captured" (`src/lib/audit-analyzer.ts`, grade from time only). The user needs evidence to decide "ready for prod" or "optimize first".
+Options:
+A Verdict from measured evidence only: `READY` / `OPTIMIZE` / `INSUFFICIENT EVIDENCE`, against user-set thresholds (max logical reads, max elapsed, max scans). Multi-run statistics added later (P8-03).
+B Keep grades (A to F) but grade only when I/O and time are both captured. No thresholds.
+C Option A now, with P8-03 (multi-run) deferred.
+Recommendation: C. It stops false "A" grades now and gives a decision basis. Multi-run is the highest-risk part (repeated execution) and needs its own authorization.
+Impact if delayed: the user cannot take a prod-readiness decision from the app; grades can mislead.
+User decision: C (2026-11-11, "APPROVED: start P8-02"). Thresholds are not set yet; until they are, the verdict is `INSUFFICIENT EVIDENCE: no targets set`. P8-03 (repeated execution) is not approved.
+
+### D-038 Windows authentication for MSSQL connections
+Status: APPROVED (option A: NTLM now)
+Context (evidence): the user wants Windows authentication as the final option for SQL Server connections. Today `ExecConnection` only carries SQL logins (`username` and `password`, `src/lib/execution/types.ts`), and `buildMssqlConfig` passes them to `mssql`. The app runs on macOS, where SSPI (Integrated Security) is not available.
+Options:
+A NTLM via `mssql`'s `authentication: { type: 'ntlm' }`, with `domain`, `username` and `password` in the request. Works from macOS and Linux against a Windows-hosted SQL Server. Adds a `domain` field.
+B Integrated Security (SSPI) through the Windows-only `msnodesqlv8` driver. Needs a Windows host and a new native dependency.
+C A and B: NTLM everywhere, SSPI when the app runs on Windows.
+Recommendation: A now, since it covers the current macOS setup without a new native dependency. B later only if the app is hosted on Windows.
+Constraints: the password is never persisted or logged (existing rule). Kerberos is out of scope. Security sign-off is required (auth and credentials).
+Impact if delayed: the user cannot connect to Windows-authenticated SQL Server instances.
+User decision: A (2026-11-11). P9-01 is not started; it needs `APPROVED: start P9-01`.
+
+### D-039 Empty-table check for P8-02 (replaces the TableCardinality rule)
+Status: APPROVED (option 1). Implemented 2026-11-11 under `APPROVED: start P8-02-count`; Security sign-off still required before merge.
+Context (evidence): run 2026-11-11 (record 56) read 1,000,000 `Customers` rows (`ActualRows`) while the plan's `TableCardinality` said 0. The compile-time value is stale, so the rule gave a false `INSUFFICIENT EVIDENCE: Customers has 0 rows`. The rule was removed from `src/lib/audit-analyzer.ts` the same day.
+Options: 1 read-only `SELECT COUNT(*)` per real table on the same connection before the run / 2 runtime `ActualRows` only / 3 remove the check.
+User decision: 1 (2026-11-11, reply "1").
+Deviation: row counts come from `sys.partitions` (parameterized table names), not `COUNT(*)`, so no table name enters the SQL text. Exact for committed rows; in-transaction changes are not verified (see the shortcut comment in `src/lib/execution/mssql.ts`).
+Constraints: the query is fixed in code (table names validated against `IDENT_RE`, never taken from the user's SQL); it runs inside the existing connection and timeout; it is read-only; it is a new SQL execution path, so Security sign-off is required.

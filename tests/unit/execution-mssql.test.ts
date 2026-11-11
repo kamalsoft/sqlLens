@@ -5,6 +5,8 @@ const h = vi.hoisted(() => {
   const state = {
     calls: [] as string[],
     inputs: [] as { name: string; type: unknown; value: unknown }[],
+    outputs: [] as { name: string; type: unknown; value: unknown }[],
+    procOutput: {} as Record<string, unknown>,
     texts: [] as string[],
     config: null as unknown,
     infos: [] as string[],
@@ -14,6 +16,7 @@ const h = vi.hoisted(() => {
     cancelled: 0,
     release: null as null | (() => void),
     trancount: 2,
+    countRows: [] as unknown[],
   };
   return { state };
 });
@@ -24,6 +27,7 @@ vi.mock('mssql', () => {
     handlers: Handler[] = [];
     on(_e: string, cb: Handler) { this.handlers.push(cb); }
     input(name: string, type: unknown, value: unknown) { s.inputs.push({ name, type, value }); }
+    output(name: string, type: unknown, value: unknown) { s.outputs.push({ name, type, value }); }
     cancel() { s.cancelled++; s.release?.(); }
     async run(text: string) {
       s.texts.push(text);
@@ -31,11 +35,12 @@ vi.mock('mssql', () => {
       if (/@@TRANCOUNT/.test(text)) return { recordsets: [[{ tc: s.trancount }]] };
       if (s.hang) await new Promise<void>((_, rej) => { s.release = () => rej(Object.assign(new Error('Canceled.'), { code: 'ECANCEL' })); });
       if (s.failBatch) throw s.failBatch;
+      if (/sys\.partitions/.test(text)) return { recordsets: [s.countRows] };
       for (const m of s.infos) this.handlers.forEach((cb) => cb({ message: m }));
       return { recordsets: s.recordsets };
     }
     batch(t: string) { return this.run(t); }
-    execute(n: string) { return this.run(`EXEC ${n}`); }
+    async execute(n: string) { return { ...(await this.run(`EXEC ${n}`)), output: s.procOutput }; }
   }
   class ConnectionPool {
     constructor(cfg: unknown) { s.config = cfg; }
@@ -69,9 +74,10 @@ const conn = { host: 'db.example.com', database: 'app', username: 'sa', password
 const opts = { timeoutMs: 5000 };
 const IO = "Table 'Orders'. Scan count 1, logical reads 42, physical reads 2, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.";
 const TIME = ' SQL Server Execution Times:\n   CPU time = 5 ms,  elapsed time = 9 ms.';
+const IO_TEMP = "Table '#StagedSales_000001'. Scan count 1, logical reads 0, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.\nTable 'Worktable'. Scan count 0, logical reads 0, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.";
 
 beforeEach(() => {
-  Object.assign(h.state, { calls: [], inputs: [], texts: [], infos: [], recordsets: [], failBatch: null, hang: false, cancelled: 0, release: null, trancount: 2 });
+  Object.assign(h.state, { calls: [], inputs: [], outputs: [], procOutput: {}, texts: [], infos: [], recordsets: [], failBatch: null, hang: false, cancelled: 0, release: null, trancount: 2, countRows: [] });
 });
 
 describe('mssql TLS defaults (P6-08)', () => {
@@ -147,9 +153,10 @@ describe('executeMssql', () => {
     expect(h.state.calls).toContain('rollback');
   });
 
-  it('rejects COMMIT inside a batch before connecting', async () => {
-    await expect(executeMssql(conn, { kind: 'batch', sql: 'UPDATE t SET a=1; COMMIT' }, opts)).rejects.toThrow(/Transaction control/);
-    expect(h.state.calls).toEqual([]);
+  it('runs COMMIT inside a batch as written (D-036)', async () => {
+    await executeMssql(conn, { kind: 'batch', sql: 'UPDATE t SET a=1; COMMIT' }, opts);
+    expect(h.state.texts).toContain('UPDATE t SET a=1; COMMIT');
+    expect(h.state.calls).toContain('begin');
   });
 });
 
@@ -167,15 +174,16 @@ describe('D-034 batch hardening', () => {
     expect(h.state.calls).toContain('begin');
   });
 
-  it('opens a nested transaction and probes @@TRANCOUNT after the batch', async () => {
-    await executeMssql(conn, { kind: 'batch', sql: 'UPDATE t SET a = 1' }, opts);
-    expect(h.state.texts[0]).toContain('BEGIN TRAN');
-    expect(h.state.texts.at(-1)).toContain('@@TRANCOUNT');
+  it('runs GO-separated parts as separate batches in the same transaction (D-036)', async () => {
+    await executeMssql(conn, { kind: 'batch', sql: 'CREATE PROCEDURE p AS SELECT 1\nGO\nSELECT 2' }, opts);
+    const run = h.state.texts.filter((t) => !/SET STATISTICS/.test(t));
+    expect(run).toEqual(['CREATE PROCEDURE p AS SELECT 1', 'SELECT 2']);
+    expect(h.state.calls).toEqual(['connect', 'begin', 'rollback', 'close']);
   });
 
-  it('errors and still rolls back when the count drops below 2', async () => {
-    h.state.trancount = 1;
-    await expect(executeMssql(conn, { kind: 'batch', sql: 'SELECT 1' }, opts)).rejects.toThrow(/escaped the batch/);
+  it('wraps the batch in one transaction and does not probe @@TRANCOUNT (D-036)', async () => {
+    await executeMssql(conn, { kind: 'batch', sql: 'UPDATE t SET a = 1' }, opts);
+    expect(h.state.texts.join('\n')).not.toMatch(/BEGIN TRAN|@@TRANCOUNT/);
     expect(h.state.calls).toEqual(['connect', 'begin', 'rollback', 'close']);
   });
 
@@ -201,5 +209,46 @@ describe('testMssqlConnection', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('OUTPUT parameters', () => {
+  it('binds OUTPUT parameters with output() and returns their values', async () => {
+    h.state.procOutput = { ExecutionLogID: 42 };
+    const out = await executeMssql(conn, {
+      kind: 'procedure', name: 'dbo.p',
+      params: [
+        { name: '@RegionID', type: 'int', value: 1 },
+        { name: '@ExecutionLogID', type: 'int', value: null, output: true },
+      ],
+    }, opts);
+    expect(h.state.inputs.map((i) => i.name)).toEqual(['RegionID']);
+    expect(h.state.outputs.map((o) => o.name)).toEqual(['ExecutionLogID']);
+    expect(out.outputs).toEqual({ ExecutionLogID: 42 });
+  });
+
+  it('returns no outputs for input-only procedures', async () => {
+    const out = await executeMssql(conn, { kind: 'procedure', name: 'dbo.p', params: [] }, opts);
+    expect(out.outputs).toEqual({});
+  });
+});
+
+describe('D-039 row counts for tables the run read', () => {
+  it('counts the real tables from the IO output and binds names as parameters', async () => {
+    h.state.infos = [IO, TIME];
+    h.state.countRows = [{ tableName: 'Orders', rowCount: 0 }];
+    const out = await executeMssql({ ...conn, trustServerCertificate: true }, { kind: 'batch', sql: 'SELECT 1' }, opts);
+    expect(out.stats.tableRows).toEqual({ Orders: 0 });
+    // ROWS is a reserved word in T-SQL: the column must be bracketed.
+    expect(h.state.texts.find((t) => /sys\.partitions/.test(t))).toContain('SUM(p.[rows])');
+    expect(h.state.inputs).toContainEqual({ name: 't0', type: 'NVarChar(128)', value: 'Orders' });
+    expect(h.state.texts.some((t) => /sys\.partitions/.test(t) && !t.includes('Orders'))).toBe(true);
+  });
+
+  it('does not count temp tables or the worktable', async () => {
+    h.state.infos = [IO_TEMP];
+    const out = await executeMssql({ ...conn, trustServerCertificate: true }, { kind: 'batch', sql: 'SELECT 1' }, opts);
+    expect(out.stats.tableRows).toBeUndefined();
+    expect(h.state.texts.some((t) => /sys\.partitions/.test(t))).toBe(false);
   });
 });

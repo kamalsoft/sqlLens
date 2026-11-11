@@ -22,6 +22,8 @@ export interface ExecutionStats {
   rawOutput: string;
   /** XML or JSON plan text, when captured. */
   plan?: string | null;
+  /** D-039: row count per real table the run read (MSSQL only); absent when not counted. */
+  tableRows?: Record<string, number>;
   /** True when produced by the labeled simulation (D-004). */
   simulated: boolean;
 }

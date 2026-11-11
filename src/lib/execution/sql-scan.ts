@@ -66,26 +66,17 @@ export function splitStatements(sql: string, dialect: Dialect): string[] {
   return parts.map((p) => p.trim()).filter((p) => maskSql(p, dialect).trim().length > 0);
 }
 
+/**
+ * SSMS batch separators: split on lines holding only GO, which the driver cannot run.
+ * shortcut: a GO line inside a multi-line string or block comment also splits, a rare case, upgrade with a real tokenizer.
+ */
+export function splitGoBatches(sql: string): string[] {
+  return sql.split(/^[ \t]*GO[ \t]*\r?$/im).map((b) => b.trim()).filter((b) => b.length > 0);
+}
+
 export function firstKeyword(statement: string, dialect: Dialect): string {
   const m = /^\s*([A-Za-z]+)/.exec(maskSql(statement, dialect));
   return m ? m[1].toUpperCase() : '';
-}
-
-const PG_TX_CONTROL = new Set(['COMMIT', 'END', 'ROLLBACK', 'ABORT', 'BEGIN', 'START', 'SAVEPOINT', 'RELEASE', 'PREPARE']);
-
-/** Batches run inside a transaction we always roll back; a batch must not end it itself. */
-export function assertNoTransactionControl(sql: string, dialect: Dialect): void {
-  if (dialect === 'postgres') {
-    for (const s of splitStatements(sql, dialect)) {
-      if (PG_TX_CONTROL.has(firstKeyword(s, dialect))) {
-        throw new ExecRejectedError('Transaction control statements are not allowed in a batch');
-      }
-    }
-    return;
-  }
-  if (/\b(COMMIT|ROLLBACK)\b/i.test(maskSql(sql, dialect))) {
-    throw new ExecRejectedError('Transaction control statements are not allowed in a batch');
-  }
 }
 
 /**

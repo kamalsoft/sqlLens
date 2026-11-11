@@ -71,7 +71,7 @@ export async function POST(request: Request) {
         simulated: req.engine === 'simulation',
         warnings,
         execution: originalResult,
-        analysis: analyzeExecution(originalResult),
+        analysis: analyzeExecution(originalResult, { maxLogicalReads: cfg.maxLogicalReads, maxElapsedMs: cfg.maxElapsedMs, maxScanCount: cfg.maxScanCount }),
       };
     }
 

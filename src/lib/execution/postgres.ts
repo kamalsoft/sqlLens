@@ -1,7 +1,7 @@
 import pg from 'pg';
 import { parsePostgresPlan } from '../telemetry/postgres';
 import type { ExecutionStats } from '../telemetry/types';
-import { assertNoTransactionControl, firstKeyword, splitStatements } from './sql-scan';
+import { firstKeyword, splitStatements } from './sql-scan';
 import {
   coerceParam, ExecAbortError, ExecTimeoutError, isLocalHost, onAbort, TLS_WARNING,
   type DriverOutcome, type ExecConnection, type ExecOptions, type ExecTarget, type ParamType,
@@ -88,7 +88,6 @@ function timingOnly(ms: number, note: string): ExecutionStats {
 export async function executePostgres(
   conn: ExecConnection, target: ExecTarget, opts: ExecOptions,
 ): Promise<DriverOutcome> {
-  if (target.kind === 'batch') assertNoTransactionControl(target.sql, 'postgres');
   const { config, warnings } = buildPgConfig(conn, opts.timeoutMs);
   const client: PgClientLike = new pg.Client(config);
   let aborted = false;
@@ -139,7 +138,7 @@ export async function executePostgres(
     for (const stmt of splitStatements(target.sql, 'postgres')) {
       checkFlags();
       if (EXPLAINABLE.has(firstKeyword(stmt, 'postgres'))) {
-        // EXPLAIN ANALYZE executes the statement once, inside the transaction that is rolled back below.
+        // EXPLAIN ANALYZE executes the statement once, inside the batch transaction (rolled back unless the script committed).
         const r = await client.query(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${stmt}`);
         const text = planText(r.rows[0]);
         parts.push(parsePostgresPlan(text));
@@ -161,7 +160,7 @@ export async function executePostgres(
   } finally {
     clearTimeout(timer);
     disposeAbort();
-    // D-005: a batch never commits.
+    // D-036: the batch transaction is rolled back here unless the script committed it.
     if (inTx) { try { await client.query('ROLLBACK'); } catch { /* connection lost */ } }
     try { await client.end(); } catch { /* ignore */ }
   }
