@@ -18,6 +18,7 @@ const h = vi.hoisted(() => {
     trancount: 2,
     countRows: [] as unknown[],
     countFail: false,
+    definition: null as unknown,
   };
   return { state };
 });
@@ -44,6 +45,7 @@ vi.mock('mssql', () => {
       return { recordsets: s.recordsets };
     }
     batch(t: string) { return this.run(t); }
+    async query(t: string) { s.texts.push(t); return { recordset: [{ definition: s.definition }] }; }
     async execute(n: string) { return { ...(await this.run(`EXEC ${n}`)), output: s.procOutput }; }
   }
   class ConnectionPool {
@@ -71,7 +73,7 @@ vi.mock('mssql', () => {
   };
 });
 
-import { buildMssqlConfig, executeMssql, testMssqlConnection } from '@/lib/execution/mssql';
+import { buildMssqlConfig, executeMssql, getProcedureDefinition, testMssqlConnection } from '@/lib/execution/mssql';
 import { ExecAbortError, ExecTimeoutError, TLS_WARNING } from '@/lib/execution/types';
 
 const conn = { host: 'db.example.com', database: 'app', username: 'sa', password: 'Sup3rSecret!' };
@@ -81,7 +83,7 @@ const TIME = ' SQL Server Execution Times:\n   CPU time = 5 ms,  elapsed time = 
 const IO_TEMP = "Table '#StagedSales_000001'. Scan count 1, logical reads 0, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.\nTable 'Worktable'. Scan count 0, logical reads 0, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.";
 
 beforeEach(() => {
-  Object.assign(h.state, { calls: [], inputs: [], outputs: [], procOutput: {}, texts: [], infos: [], recordsets: [], failBatch: null, hang: false, cancelled: 0, release: null, trancount: 2, countRows: [], countFail: false });
+  Object.assign(h.state, { calls: [], inputs: [], outputs: [], procOutput: {}, texts: [], infos: [], recordsets: [], failBatch: null, hang: false, cancelled: 0, release: null, trancount: 2, countRows: [], countFail: false, definition: null });
 });
 
 describe('mssql TLS defaults (P6-08)', () => {
@@ -266,5 +268,21 @@ describe('row counts are advisory', () => {
     expect(out.stats.tableRows).toBeUndefined();
     expect(out.warnings).toContain('Row counts not captured: count query failed');
     expect(out.stats.io[0]).toMatchObject({ table: 'Orders' });
+  });
+});
+
+describe('getProcedureDefinition (RF-5)', () => {
+  it('binds the name as a parameter and returns the text, then closes', async () => {
+    h.state.definition = 'CREATE PROCEDURE dbo.p AS SELECT 1';
+    expect(await getProcedureDefinition(conn, 'dbo.p', 1000)).toBe('CREATE PROCEDURE dbo.p AS SELECT 1');
+    expect(h.state.inputs).toEqual([{ name: 'procName', type: 'NVarChar(256)', value: 'dbo.p' }]);
+    expect(h.state.texts[0]).toContain('OBJECT_DEFINITION(OBJECT_ID(@procName');
+    expect(h.state.texts[0]).not.toContain('dbo.p');
+    expect(h.state.calls).toEqual(['connect', 'close']);
+  });
+
+  it('returns null when the catalog has no readable definition', async () => {
+    h.state.definition = null;
+    expect(await getProcedureDefinition(conn, 'dbo.nope', 1000)).toBeNull();
   });
 });

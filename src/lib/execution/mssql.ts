@@ -237,6 +237,35 @@ export async function listProcedureParams(
   }
 }
 
+/**
+ * RF-5: the T-SQL text of a stored procedure, from the catalog, or null when there is no such
+ * procedure, it is encrypted, or the login lacks VIEW DEFINITION. The name is bound as a parameter,
+ * never spliced into the SQL text. Read-only.
+ */
+export async function getProcedureDefinition(
+  conn: ExecConnection, procName: string, timeoutMs: number,
+): Promise<string | null> {
+  const { config } = buildMssqlConfig(conn, timeoutMs);
+  const pool = new sql.ConnectionPool(config);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const run = (async () => {
+      await pool.connect();
+      const req = pool.request();
+      req.input('procName', sql.NVarChar(256), procName);
+      const r = await req.query(`SELECT OBJECT_DEFINITION(OBJECT_ID(@procName, N'P')) AS [definition]`);
+      const text = (r.recordset?.[0] as { definition?: unknown } | undefined)?.definition;
+      return typeof text === 'string' && text.trim() ? text : null;
+    })();
+    run.catch(() => {});
+    const limit = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new ExecTimeoutError()), timeoutMs); });
+    return await Promise.race([run, limit]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    try { await pool.close(); } catch { /* already closed */ }
+  }
+}
+
 export async function testMssqlConnection(
   conn: ExecConnection, timeoutMs: number,
 ): Promise<{ serverVersion: string | null; encrypted: boolean; warnings: string[] }> {

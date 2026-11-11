@@ -18,13 +18,14 @@ export function buildRefactorPrompt(template: string, sql: string, instructions:
   if (!template.includes("{{STORED_PROCEDURE}}") || !template.includes("{{USER_INSTRUCTIONS}}")) {
     throw new Error("Refactor prompt must contain {{STORED_PROCEDURE}} and {{USER_INSTRUCTIONS}}");
   }
-  const safeInstructions =
-    instructions.replace(/<\/?\s*(user_instructions|stored_procedure|rewritten_procedure)\s*>/gi, "[tag removed]").trim() ||
-    "(none)";
+  // Neither the instructions nor the SQL (which may be a procedure body read from the database) can
+  // open or close the prompt's tags. Only the prompt copy changes; the checks use the original SQL.
+  const untag = (text: string) => text.replace(/<\/?\s*(user_instructions|stored_procedure|rewritten_procedure)\s*>/gi, "[tag removed]");
+  const safeInstructions = untag(instructions).trim() || "(none)";
   const prompt = template.replace(PLACEHOLDER, (_m, name: string) =>
     name === "USER_INSTRUCTIONS"
       ? safeInstructions
-      : ["<stored_procedure>", sql, "</stored_procedure>"].join("\n"),
+      : ["<stored_procedure>", untag(sql), "</stored_procedure>"].join("\n"),
   );
   if (prompt.length > MAX_REFACTOR_PROMPT_CHARS) {
     throw new RefactorTooLargeError(`Refactor prompt is too large: ${prompt.length} characters`);
