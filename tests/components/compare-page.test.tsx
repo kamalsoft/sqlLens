@@ -36,6 +36,7 @@ describe("ComparePage", () => {
     const fetchMock = setup(() =>
       json({
         id: "audit1",
+        schemaVersion: "compare-v1",
         metrics: null,
         result: { winner: "optimized", summary: "Fewer passes over SalesOrders.", differences: ["Removed #StagedSales"], risks: ["Removed BEGIN TRANSACTION"], confidence: 0.4 },
       }),
@@ -53,6 +54,25 @@ describe("ComparePage", () => {
     expect(screen.getByText(/No execution metrics were captured/)).toBeInTheDocument();
     const body = JSON.parse(fetchMock.mock.calls.find(([u]) => u === "/api/compare")![1].body);
     expect(body).toEqual({ modelId: "m1", original: "SELECT 1", optimized: "SELECT 2" });
+  });
+
+  it("refuses a result with an unknown schema version instead of rendering it", async () => {
+    setup(() =>
+      json({
+        id: "audit2",
+        schemaVersion: "compare-v0",
+        metrics: null,
+        result: { winner: "original", summary: "Old format.", differences: [], risks: [], confidence: 0.1 },
+      }),
+    );
+    const user = userEvent.setup();
+    view();
+    expect(await screen.findByRole("option", { name: "Model One" })).toBeInTheDocument();
+    await fill("SELECT 1", "SELECT 2");
+    await user.click(screen.getByRole("button", { name: /Compare SPs/ }));
+
+    expect(await screen.findByText(/Unsupported comparison result version: compare-v0/)).toBeInTheDocument();
+    expect(screen.queryByTestId("compare-winner")).toBeNull();
   });
 
   it("blocks non-SQL input before calling the API", async () => {

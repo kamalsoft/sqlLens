@@ -4,13 +4,39 @@ import { useEffect, useState } from 'react';
 import { Box, Container, Heading, Text, Spinner, Flex, Badge } from '@chakra-ui/react';
 import { ReviewPanel } from '@/components/review/ReviewPanel';
 import { useApi } from '@/components/api-client';
+import { CompareVerdict } from '@/components/compare/CompareVerdict';
+import type { MetricComparison } from '@/lib/audit-analyzer';
+import type { CompareModelResult } from '@/lib/compare';
 import type { ReviewResult, CompareResult } from '@/lib/ai-transformer';
 
 type SharedData = (
   | { type: 'REVIEW'; result: ReviewResult }
-  | { type: 'COMPARE'; result: CompareResult }
+  | { type: 'COMPARE'; result: CompareSharePayload | CompareResult }
   | { type: string; result: unknown }
 ) & { expiresAt?: string | null };
+
+/** Stored compare-v1 audit payload: the verdict plus the metrics it was based on. */
+type CompareSharePayload = { result?: CompareModelResult; metrics?: MetricComparison | null };
+
+function CompareShare({ data }: { data: CompareSharePayload | CompareResult }) {
+  const payload = data as CompareSharePayload;
+  if (payload.result && 'winner' in payload.result) {
+    return <CompareVerdict result={payload.result} metrics={payload.metrics ?? null} />;
+  }
+  // Older shared comparisons stored the two reviews side by side.
+  const legacy = data as CompareResult;
+  if (legacy.original && legacy.optimized) {
+    return (
+      <Box display="flex" flexDirection="column" gap={6}>
+        <ReviewPanel result={legacy.original} title="🔴 Original SP" />
+        <ReviewPanel result={legacy.optimized} title="🟢 Optimized SP" />
+      </Box>
+    );
+  }
+  return (
+    <Text color="red.300" role="alert">This shared comparison uses a format this page cannot show.</Text>
+  );
+}
 
 export default function SharePage({ params }: { params: Promise<{ token: string }> }) {
   const api = useApi();
@@ -67,12 +93,7 @@ export default function SharePage({ params }: { params: Promise<{ token: string 
               </Text>
             )}
             {data.type === 'REVIEW' && <ReviewPanel result={data.result as ReviewResult} title="🔬 Shared SP Analysis" />}
-            {data.type === 'COMPARE' && (
-              <Box display="flex" flexDirection="column" gap={6}>
-                <ReviewPanel result={(data.result as CompareResult).original} title="🔴 Original SP" />
-                <ReviewPanel result={(data.result as CompareResult).optimized} title="🟢 Optimized SP" />
-              </Box>
-            )}
+            {data.type === 'COMPARE' && <CompareShare data={data.result as CompareSharePayload | CompareResult} />}
           </Box>
         )}
       </Container>

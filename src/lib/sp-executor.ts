@@ -33,7 +33,6 @@ export interface ExecutionResult {
   connectionEngine: string;
   executedAt: string;
   stats: ExecutionStats;
-  textFilePath: string;
   /** TLS or policy warnings (P6-08). */
   warnings?: string[];
   success: boolean;
@@ -252,8 +251,8 @@ export async function executeSP(
       io: [], messages: [message], rawOutput: message,
       plan: null, simulated: engine === 'simulation',
     };
-    const textFilePath = writeAuditLog(recordNumber, spLabel, text, failStats, engine, opts.logSqlText);
-    return { failStats, textFilePath, warnings };
+    writeAuditLog(recordNumber, spLabel, text, failStats, engine, opts.logSqlText);
+    return { failStats, warnings };
   };
 
   try {
@@ -271,15 +270,15 @@ export async function executeSP(
       stats = simulateExecution(text, spLabel);
     }
 
-    const textFilePath = writeAuditLog(recordNumber, spLabel, text, stats, engine, opts.logSqlText);
-    return { recordNumber, spLabel, connectionEngine: engine, executedAt, stats, textFilePath, warnings, success: true };
+    writeAuditLog(recordNumber, spLabel, text, stats, engine, opts.logSqlText);
+    return { recordNumber, spLabel, connectionEngine: engine, executedAt, stats, warnings, success: true };
   } catch (err) {
     if (err instanceof ExecTimeoutError || err instanceof ExecAbortError) {
       failed(err.message);
       throw err;
     }
     const safeMessage = scrubConnection(err instanceof Error ? err.message : 'Execution failed', connection ?? {});
-    const { failStats, textFilePath } = failed(safeMessage);
-    return { recordNumber, spLabel, connectionEngine: engine, executedAt, stats: failStats, textFilePath, success: false, error: safeMessage };
+    const { failStats } = failed(safeMessage);
+    return { recordNumber, spLabel, connectionEngine: engine, executedAt, stats: failStats, success: false, error: safeMessage };
   }
 }
