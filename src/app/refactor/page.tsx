@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useLeaveGuard } from "@/components/leave-guard";
 import { useApi } from "@/components/api-client";
 import {
   RefactorRawOutput, RefactorResultView, refactorFailure, type RefactorModel as Model, type RefactorResponse,
@@ -16,6 +17,10 @@ export default function RefactorPage() {
   const [sql, setSql] = useState("");
   const [instructions, setInstructions] = useState("");
   const [running, setRunning] = useState(false);
+  // UX-B: leaving while the model runs asks first, and cancels the request when the user agrees.
+  const abortRef = useRef<AbortController | null>(null);
+  useLeaveGuard(running, "A refactor", () => abortRef.current?.abort());
+  useEffect(() => () => abortRef.current?.abort(), []);
   const [error, setError] = useState("");
   const [rawOutput, setRawOutput] = useState("");
   const [validation, setValidation] = useState("");
@@ -52,10 +57,12 @@ export default function RefactorPage() {
     if (!looksLikeSql(procedure)) return setError(NOT_SQL_ERROR);
 
     setRunning(true);
+    abortRef.current = new AbortController();
     const res = await api<RefactorResponse>(
       "/api/refactor",
       {
         method: "POST",
+        signal: abortRef.current.signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ modelId, sql: procedure, ...(instructions.trim() ? { instructions: instructions.trim() } : {}) }),
       },
@@ -78,7 +85,7 @@ export default function RefactorPage() {
     <main className="review-page">
       <header className="review-hero">
         <div>
-          <span className="review-eyebrow">R003</span>
+          <span className="review-eyebrow">Rewrite</span>
           <h1>Refactor Stored Procedure</h1>
           <p>
             Generate an optimized version of a stored procedure or query with a local model, plus index and view

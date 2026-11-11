@@ -42,7 +42,7 @@ Each item is the former README checkbox, with its status and evidence. Items mar
 | :--- | :--- | :--- | :--- |
 | Connect the Settings form fields to controlled state | P1-01 | `[IN-PROGRESS]` | Not re-verified |
 | Wire the Settings save action to `handleSave` | P1-01 | `[IN-PROGRESS]` | Not re-verified |
-| Persist provider, model, API key, and execution preferences securely | P1-02, P6-01 | `[IN-PROGRESS]` | Validated `PUT`. `GET /api/appconfig` still returns `apiKey` (known issue) |
+| Persist provider, model, API key, and execution preferences securely | P1-02, P6-01 | `[IN-PROGRESS]` | Validated `PUT`. `GET /api/appconfig` returns only known fields, so no `apiKey` (verified by reading `sanitize`, 2026-11-11) |
 | Replace dashboard mock analysis with `/api/analysis` | P1-04, P1-05 | `[IN-PROGRESS]` | Overview null crash fixed; not re-verified |
 | Add loading, success, and error states to primary workflows | P1-07 | `[IN-PROGRESS]` | Component tests cover several pages |
 | Validate stored procedure input before execution or review | P1-06 | `[IN-PROGRESS]` | Shared validator in use; unit tests |
@@ -122,7 +122,7 @@ Ordered by risk first, then by what blocks a release. Each item names its plan t
 **Priority 1: Risk and security**
 1. Security sign-off on D-034 (mixed-batch guard) and the ai-models changes. (Section A, Task 1)
 2. Security sign-off on the admin password CLI. PR #5 was merged before this review. Follow-up needed.
-3. Remove `apiKey` from `GET /api/appconfig`. (P1-02, P6-01)
+3. ~~Remove `apiKey` from `GET /api/appconfig`.~~ `sanitize` already drops it (read 2026-11-11). Still open under P1-02/P1-03: where the download route gets its token. (P1-02, P6-01)
 4. Fix the Turbopack warnings in `src/lib/sp-executor.ts`: dynamic filesystem paths for the audit log. Needs Security review, since the file runs SQL.
 
 **Priority 2: Verification debt**
@@ -149,6 +149,11 @@ Ordered by risk first, then by what blocks a release. Each item names its plan t
 19. Backup and restore runbook for `sqllens.db`; dependency update policy; threat model for non-localhost use.
 20. Merge overlapping skills: `sqllens-api-route-patterns`, `sqllens-auth-sessions`, `sqllens-security-redaction`.
 21. Remove the PostgreSQL feature (decided 2026-11-10: the app will not ship PostgreSQL). Covers `src/lib/execution/postgres.ts`, `src/lib/telemetry/postgres*`, the `pg` dependency, the PostgreSQL engine option in the UI and API, its tests and docs. Until removed, PostgreSQL batches allow `PREPARE TRANSACTION`, which can leave locks on the server (D-036, Security condition 2). Needs a decision record and Security sign-off.
+
+**Priority 6: Refactor panel follow-ups (review of commit dd5276d, 2026-11-11)**
+22. Share the safety gates of `POST /api/execute/definition` and `POST /api/execute/parameters` (session, rate limit, engine, name, connection, live execution) in one function, so a change to one cannot miss the other.
+23. Share the connect, timeout and cleanup code of `listProcedureParams` and `getProcedureDefinition` in `src/lib/execution/mssql.ts`.
+24. ~~Add a component test that the refactor panel aborts its running `/api/refactor` request.~~ Done: `tests/components/refactor-panel.test.tsx` checks that closing the refactor dialog while it runs aborts the request (UX-D).
 
 ## Roadmap Overview Matrix
 

@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useLeaveGuard } from '@/components/leave-guard';
 import Link from 'next/link';
 import {
   Box, Container, Heading, Text, Textarea, Button, Flex,
@@ -34,6 +35,10 @@ export default function ComparePage() {
   const [original, setOriginal] = useState('');
   const [optimized, setOptimized] = useState('');
   const [loading, setLoading] = useState(false);
+  // UX-B: leaving while the model runs asks first, and cancels the request when the user agrees.
+  const abortRef = useRef<AbortController | null>(null);
+  useLeaveGuard(loading, 'A comparison', () => abortRef.current?.abort());
+  useEffect(() => () => abortRef.current?.abort(), []);
   const [response, setResponse] = useState<CompareResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [details, setDetails] = useState('');
@@ -71,10 +76,12 @@ export default function ComparePage() {
       return;
     }
     setLoading(true);
+    abortRef.current = new AbortController();
     const res = await api<CompareResponse>(
       '/api/compare',
       {
         method: 'POST',
+        signal: abortRef.current.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ modelId, original, optimized }),
       },

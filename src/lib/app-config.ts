@@ -31,6 +31,9 @@ export type AppConfig = {
   maxScanCount: number | null;
   /** P8-03: most runs one request may ask for (the first is a warm-up). */
   maxRuns: number;
+  /** UX-A: show the Compare and Refactor screens. Off by default; when off the pages say so and the menu hides them. */
+  showCompare: boolean;
+  showRefactor: boolean;
 };
 
 export const defaultAppConfig: AppConfig = {
@@ -55,6 +58,8 @@ export const defaultAppConfig: AppConfig = {
   maxElapsedMs: null,
   maxScanCount: null,
   maxRuns: 5,
+  showCompare: false,
+  showRefactor: false,
 };
 
 type Rule = (v: unknown) => boolean;
@@ -137,6 +142,8 @@ const rules: Record<keyof AppConfig, Rule> = {
   maxElapsedMs: optionalInt(1, 3_600_000),
   maxScanCount: optionalInt(1, 1e9),
   maxRuns: int(1, 20),
+  showCompare: bool,
+  showRefactor: bool,
 };
 
 /**

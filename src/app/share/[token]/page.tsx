@@ -28,8 +28,8 @@ function CompareShare({ data }: { data: CompareSharePayload | CompareResult }) {
   if (legacy.original && legacy.optimized) {
     return (
       <Box display="flex" flexDirection="column" gap={6}>
-        <ReviewPanel result={legacy.original} title="🔴 Original SP" />
-        <ReviewPanel result={legacy.optimized} title="🟢 Optimized SP" />
+        <ReviewPanel result={legacy.original} title="Original SP" />
+        <ReviewPanel result={legacy.optimized} title="Optimized SP" />
       </Box>
     );
   }

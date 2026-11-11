@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Compare and Refactor are off by default (`showCompare`, `showRefactor`); when off, the sidebar hides them and their pages say they are turned off in Settings (UX-A).
+- Leaving a screen while an execution, review, comparison or refactor runs asks to cancel the task and leave, or stay; closing or reloading the tab gets the browser warning (`src/components/leave-guard.tsx`) (UX-B).
+- Settings are grouped by category, and the prod-readiness targets and the maximum repeated runs can now be edited there (UX-C).
+- The refactor on Execute & Audit opens in a large dialog; closing it while the model runs asks first and cancels the request (UX-D).
+- One header, title, description and spacing style on every screen; section titles in one colour; requirement codes and colour-only emoji removed from titles (UX-E).
 - Execute page: after a successful single run, a "Refactor Stored Procedure" panel generates a refactored version and index, view and other recommendation scripts with a local model, each in its own section with a copy button. The run's verdict, hot tables and plan findings are sent to the model as instructions (`src/lib/refactor-evidence.ts`). For a procedure run by name, its text is read with the new read-only `POST /api/execute/definition`. A refactored batch can be put into the Optimized editor ("Use as Optimized"); nothing runs until Execute is pressed. The Refactor page and the panel share `src/components/refactor/RefactorResultView.tsx`.
 - The grade rationale names the metric that set the grade (for example "Graded D by logical reads 14,139 (grade C needs under 5,000)").
 - One colour system on every screen: all pages and `globals.css` take their colours from `src/lib/theme-tokens.ts`. The orange, blue and purple accents are now a single cyan accent, and status, grade and verdict colours use a colour-vision-safe palette with a symbol or letter beside the colour (`src/lib/status-tone.ts`; `tests/unit/theme-consistency.test.ts`).
