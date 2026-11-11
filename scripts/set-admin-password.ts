@@ -7,20 +7,33 @@ import readline from "node:readline";
 // Node strip-types needs explicit .ts extensions; tsconfig does not allow them (TS5097).
 import { hashPassword } from "../src/lib/password.ts";
 import { runMigrations } from "../src/db/migrate.ts";
+import { MIN_PASSWORD_LENGTH, applyKeys, mismatchProblem, passwordProblem } from "../src/lib/admin-password.ts";
 
-const MIN_LEN = 12;
+const MAX_ATTEMPTS = 3;
 
-function readHidden(prompt: string): Promise<string> {
-  return new Promise((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    const rlAny = rl as unknown as { _writeToOutput: (s: string) => void };
+/** Reads one line with each typed character shown as `*`. Ctrl+C cancels. */
+function readMasked(prompt: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const input = process.stdin;
+    let value = "";
+    const onData = (chunk: string) => {
+      const result = applyKeys(value, chunk);
+      value = result.value;
+      if (result.echo) process.stdout.write(result.echo);
+      if (result.done) {
+        input.removeListener("data", onData);
+        input.setRawMode(false);
+        input.pause();
+        process.stdout.write("\n");
+        if (result.cancelled) reject(new Error("Cancelled. No password was changed."));
+        else resolve(value);
+      }
+    };
     process.stdout.write(prompt);
-    rlAny._writeToOutput = () => {};
-    rl.question("", (answer) => {
-      rl.close();
-      process.stdout.write("\n");
-      resolve(answer);
-    });
+    input.setRawMode(true);
+    input.setEncoding("utf8");
+    input.on("data", onData);
+    input.resume();
   });
 }
 
@@ -33,21 +46,39 @@ async function readFirstLine(): Promise<string> {
   return "";
 }
 
+/** Asks for the new password twice. Each rejected entry counts as an attempt. */
+async function promptNewPassword(): Promise<string> {
+  console.log(`Set the admin password. It must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+  console.log("Type it, then type it again. Each character shows as *. Press Ctrl+C to cancel.");
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const first = await readMasked("New admin password: ");
+    const problem = passwordProblem(first);
+    if (problem) {
+      console.error(`${problem} (attempt ${attempt} of ${MAX_ATTEMPTS})`);
+      continue;
+    }
+    const repeat = await readMasked("Type it again:     ");
+    const mismatch = mismatchProblem(first, repeat);
+    if (mismatch) {
+      console.error(`${mismatch} Start again. (attempt ${attempt} of ${MAX_ATTEMPTS})`);
+      continue;
+    }
+    return first;
+  }
+  throw new Error("Too many attempts. No password was changed.");
+}
+
 async function main() {
   let password: string;
   if (process.stdin.isTTY) {
-    password = await readHidden("New admin password: ");
-    const again = await readHidden("Repeat password: ");
-    if (password !== again) {
-      console.error("Passwords do not match.");
-      process.exit(1);
-    }
+    password = await promptNewPassword();
   } else {
     password = await readFirstLine();
-  }
-  if (password.length < MIN_LEN) {
-    console.error(`Password must be at least ${MIN_LEN} characters.`);
-    process.exit(1);
+    const problem = passwordProblem(password);
+    if (problem) {
+      console.error(problem);
+      process.exit(1);
+    }
   }
 
   const dbDir = process.env.SQLLENS_DB_DIR
@@ -73,7 +104,11 @@ async function main() {
     );
   }
   db.close();
-  console.log("Admin password set for user 'admin'.");
+  console.log(
+    existing
+      ? "Admin password updated. Existing sessions were signed out."
+      : "Admin account created with the new password."
+  );
 }
 
 main().catch((err) => {

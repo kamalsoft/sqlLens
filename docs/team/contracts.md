@@ -31,7 +31,7 @@ Migrations auto-apply to the real DB at startup (backup: `../../sqllens_db/sqlle
 ## C4. Admin bootstrap (D-027)
 - `npm run admin:set-password` → `node --experimental-strip-types scripts/set-admin-password.ts`.
 - The script resolves the DB dir like `src/db/index.ts` (`SQLLENS_DB_DIR`, otherwise `../../sqllens_db`), runs migrations and upserts username `admin`.
-- Password input: an interactive prompt without echo when stdin is a TTY, otherwise the first line of stdin (used by E2E). Minimum 12 characters. It never prints the password.
+- Password input: when stdin is a TTY, the password is typed twice and each character shows as `*` (Backspace and Ctrl+C work). A short or mismatched entry is re-prompted, up to 3 attempts. Otherwise the first line of stdin is used (used by E2E). Minimum 12 characters. It never prints the password.
 
 ## C5. Proxy — `src/proxy.ts` (Next 16 convention; read `node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md`)
 - Page requests with no `session_token` cookie → redirect to `/login?next=<path>`.
