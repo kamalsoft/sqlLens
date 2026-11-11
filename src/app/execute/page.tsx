@@ -188,8 +188,8 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
           <Box>
             <Text fontSize="sm" fontWeight="semibold" color="purple.300" mb={3} textTransform="uppercase" letterSpacing="wider">Costliest plan operators</Text>
             <Box display="flex" flexDirection="column" gap={2}>
-              {analysis.planOperators.map((op) => (
-                <Box key={op.nodeId} p={4} bg="gray.800" borderRadius="lg" borderLeftWidth="3px" borderColor="purple.500">
+              {analysis.planOperators.map((op, i) => (
+                <Box key={i} p={4} bg="gray.800" borderRadius="lg" borderLeftWidth="3px" borderColor="purple.500">
                   <Text color="white" fontWeight="semibold" fontSize="sm">{op.physicalOp}{op.table ? ` on ${op.table}` : ''}</Text>
                   <Text color="gray.400" fontSize="xs" mt={1}>
                     {op.logicalReads === null ? 'reads not captured' : `${op.logicalReads.toLocaleString()} logical reads`}
