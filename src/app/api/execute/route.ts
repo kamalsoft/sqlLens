@@ -44,10 +44,14 @@ export async function POST(request: Request) {
     }
 
     // P8-03: repeated runs, single mode only. The first run is a warm-up and is dropped from the summary.
-    const runs = body.body.runs ?? 1;
-    if (typeof runs !== 'number' || !Number.isInteger(runs) || runs < 1 || runs > cfg.maxRuns) {
+    // Without an explicit `runs`, a real single-mode run uses the configured number; simulated numbers
+    // are random, so repeating them would only report noise.
+    const requested = body.body.runs;
+    if (requested !== undefined && (typeof requested !== 'number' || !Number.isInteger(requested) || requested < 1 || requested > cfg.maxRuns)) {
       return badRequest(`runs must be an integer from 1 to ${cfg.maxRuns}`, 'runs');
     }
+    // maxRuns caps the default too, so the two settings cannot disagree.
+    const runs = typeof requested === 'number' ? requested : req.mode === 'single' && req.engine !== 'simulation' ? Math.min(cfg.measuredRuns, cfg.maxRuns) : 1;
     if (runs > 1 && req.mode !== 'single') return badRequest('Repeated runs apply to single mode only', 'runs');
     const WARMUP_RUNS = 1;
     const total = runs > 1 ? WARMUP_RUNS + runs : 1;

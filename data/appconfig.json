@@ -8,7 +8,7 @@
   "temperature": 0.2,
   "contextWindow": 128000,
   "allowTelemetry": true,
-  "allowLiveExecution": false,
+  "allowLiveExecution": true,
   "queryTimeoutMs": 30000,
   "defaultEngine": "simulation",
   "maxSqlLength": 100000,
@@ -16,6 +16,10 @@
   "maxNewTokens": 3072,
   "logSqlText": true,
   "shareTtlHours": 24,
+  "maxLogicalReads": null,
+  "maxElapsedMs": null,
+  "maxScanCount": null,
+  "maxRuns": 5,
   "prompt": {
     "analysisSP": "~/dev/dbPro/sqlens/data/prompts/analysisSP.md",
     "explainStatistic": "~/dev/dbPro/sqlens/data/prompts/explainStatistic.md"

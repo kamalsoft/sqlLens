@@ -28,7 +28,7 @@ type AppSettings = {
   maxLogicalReads: number | null;
   maxElapsedMs: number | null;
   maxScanCount: number | null;
-  maxRuns: number;
+  measuredRuns: number;
   showCompare: boolean;
   showRefactor: boolean;
 };
@@ -55,7 +55,7 @@ const defaultSettings: AppSettings = {
   maxLogicalReads: null,
   maxElapsedMs: null,
   maxScanCount: null,
-  maxRuns: 5,
+  measuredRuns: 2,
   showCompare: false,
   showRefactor: false,
 };
@@ -270,8 +270,13 @@ export default function SettingsPage() {
           <Field label="Max SQL Length (characters)" name="maxSqlLength" error={error}>
             <input id="setting-maxSqlLength" className="input" type="number" value={settings.maxSqlLength} onChange={num("maxSqlLength")} disabled={disabled} />
           </Field>
-          <Field label="Max Repeated Runs" name="maxRuns" error={error}>
-            <input id="setting-maxRuns" className="input" type="number" min={1} max={20} value={settings.maxRuns} onChange={num("maxRuns")} disabled={disabled} />
+          <Field label="Measured Runs" name="measuredRuns" error={error}>
+            <input id="setting-measuredRuns" className="input" type="number" min={1} max={20}
+              value={settings.measuredRuns} onChange={num("measuredRuns")} disabled={disabled} />
+            <small className="field-hint">
+              Runs measured for each execution on a real database. Above 1, one warm-up run is added first and not
+              counted. Each run really executes the SQL, so a procedure that writes data writes once per run.
+            </small>
           </Field>
           <Field label="Target: Max Logical Reads" name="maxLogicalReads" error={error}>
             <input id="setting-maxLogicalReads" className="input" type="number" min={1} placeholder="Not set"

@@ -472,7 +472,6 @@ function RawStatsPanel({ execution }: { execution: ExecutionResult }) {
 export default function ExecutePage() {
   const api = useApi();
   const [mode, setMode] = useState<'single' | 'compare'>('single');
-  const [runs, setRuns] = useState(1);
   const [kind, setKind] = useState<'procedure' | 'batch'>('batch');
   const [original, setOriginal] = useState<TargetDraft>(emptyDraft());
   const [optimized, setOptimized] = useState<TargetDraft>(emptyDraft());
@@ -656,7 +655,6 @@ export default function ExecutePage() {
           ...(engine !== 'simulation' ? { connection: connection() } : {}),
           original: orig.target,
           ...(opt && opt.ok ? { optimized: opt.target } : {}),
-          ...(mode === 'single' && runs > 1 ? { runs } : {}),
         }),
       },
       'Execution failed'
@@ -701,16 +699,10 @@ export default function ExecutePage() {
           >
             Compare Original vs Optimized
           </Button>
-          {mode === 'single' && (
-            <Flex align="center" gap={2}>
-              <Text fontSize="xs" color="fg.muted">Runs</Text>
-              <Input
-                size="xs" type="number" min={1} max={20} w="72px" value={runs} aria-label="Runs"
-                onChange={(e) => setRuns(Math.min(20, Math.max(1, Math.trunc(Number(e.target.value) || 1))))}
-                bg="bg.canvas" borderColor="border.subtle" color="fg.default"
-              />
-              <Text fontSize="xs" color="fg.muted">1 = one run; more adds a warm-up and summary</Text>
-            </Flex>
+          {mode === 'single' && engine !== 'simulation' && (
+            <Text fontSize="xs" color="fg.muted">
+              Runs several times: a warm-up that is not counted, then the measured runs set in Settings (2 by default).
+            </Text>
           )}
         </Flex>
 

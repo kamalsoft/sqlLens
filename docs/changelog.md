@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The Execute screen no longer has a Runs field. Each single-mode run on a real database executes a warm-up plus `measuredRuns` measured runs (default 2, so 3 executions), set under Settings → SQL execution; simulation and compare run once.
+- `data/appconfig.json` is committed with `allowLiveExecution: true` at the user's request, so a fresh checkout can run procedures against a database.
 - Compare and Refactor are off by default (`showCompare`, `showRefactor`); when off, the sidebar hides them and their pages say they are turned off in Settings (UX-A).
 - Leaving a screen while an execution, review, comparison or refactor runs asks to cancel the task and leave, or stay; closing or reloading the tab gets the browser warning (`src/components/leave-guard.tsx`) (UX-B).
 - Settings are grouped by category, and the prod-readiness targets and the maximum repeated runs can now be edited there (UX-C).
