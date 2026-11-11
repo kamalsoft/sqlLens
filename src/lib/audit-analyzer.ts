@@ -123,9 +123,26 @@ function delta(original: number | null, optimized: number | null): MetricDelta {
  * Returns the reason, or null when the evidence is complete.
  */
 export interface EvidenceGap { reason: string; table: string | null }
+/**
+ * Real tables whose scans and seeks, summed over the run, returned no rows. The run then did not
+ * exercise that data, whatever the timing says. Temp tables are skipped: they fill during the run.
+ */
+export function unreadTables(stats: ExecutionStats): string[] {
+  const rowsByTable = new Map<string, number>();
+  for (const o of planOperators(stats.plan)) {
+    if (!o.table || o.table.startsWith('#') || !/(Scan|Seek)$/.test(o.physicalOp) || o.actualRows === null) continue;
+    rowsByTable.set(o.table, (rowsByTable.get(o.table) ?? 0) + o.actualRows);
+  }
+  return [...rowsByTable].filter(([, rows]) => rows === 0).map(([table]) => table);
+}
+
 export function evidenceGap(stats: ExecutionStats): EvidenceGap | null {
   for (const [table, rows] of Object.entries(stats.tableRows ?? {})) {
     if (rows === 0) return { reason: `${table} has 0 rows`, table };
+  }
+  const unread = unreadTables(stats);
+  if (unread.length > 0) {
+    return { reason: `no rows read from ${unread.join(', ')}: the run did not exercise the data`, table: unread[0] };
   }
   const { logicalReads, elapsed } = metricsOf(stats);
   if (logicalReads === null) return { reason: 'logical reads not captured', table: null };

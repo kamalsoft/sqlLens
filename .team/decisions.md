@@ -287,3 +287,7 @@ Not verified: no live MSSQL run of the count query or the GO edge cases.
 ### D-040 Row counts are advisory
 Status: APPROVED (user, 2026-11-11, reply "Yes" to: a failed row-count query should warn, not fail the run)
 Change: `src/lib/execution/mssql.ts` keeps the run's results when the count query fails and adds a warning `Row counts not captured: <reason>`. Timeouts and cancellations still stop the run. With no counts, the verdict is not blocked by the empty-table check.
+
+### D-041 Unread data withholds the verdict (P8-02 addendum)
+Status: APPROVED (user, 2026-11-11, "Proceed p8-02")
+Change: a real table whose scans and seeks all returned 0 rows (plan runtime counters, temp tables excluded) gives `INSUFFICIENT EVIDENCE` and withholds the grade. Evidence: run 2026-11-11 with 2024 dates and `@MinOrderValue` 1000 read 6 pages from SalesOrders, returned no rows, and graded C with "Excellent" time.

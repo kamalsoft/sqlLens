@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeExecution, compareExecutions, operatorRecommendations, planOperators, summarizeRuns, topOperators } from '@/lib/audit-analyzer';
+import { analyzeExecution, compareExecutions, operatorRecommendations, planOperators, summarizeRuns, topOperators, unreadTables } from '@/lib/audit-analyzer';
 import type { ExecutionResult, ExecutionStats } from '@/lib/sp-executor';
 
 function result(over: Partial<ExecutionStats> = {}, reads: number | null = 100): ExecutionResult {
@@ -222,5 +222,29 @@ describe('P8-03 repeated runs', () => {
 
   it('reports no multi-run summary for a single run', () => {
     expect(analyzeExecution(result({}, 100), TARGETS).multiRun).toBeNull();
+  });
+});
+
+describe('P8-02 unread data from the plan', () => {
+  const seek = (table: string, rows: number) =>
+    `<RelOp NodeId="4" PhysicalOp="Index Seek" LogicalOp="Index Seek" EstimateRows="1"><RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="${rows}" ActualLogicalReads="6" ActualExecutions="10"></RunTimeCountersPerThread></RunTimeInformation><IndexScan><Object Database="[TestDB]" Schema="[dbo]" Table="[${table}]"></Object></IndexScan></RelOp>`;
+
+  it('withholds the verdict when a real table was read and no rows came back', () => {
+    const a = analyzeExecution(result({ plan: seek('SalesOrders', 0) }, 100), { maxLogicalReads: 1000, maxElapsedMs: null, maxScanCount: null });
+    expect(a.prodVerdict).toEqual({ verdict: 'INSUFFICIENT EVIDENCE', reason: 'no rows read from SalesOrders: the run did not exercise the data', driver: 'SalesOrders' });
+    expect(a.performanceGrade).toBeNull();
+  });
+
+  it('does not flag a table that returned rows', () => {
+    expect(unreadTables(result({ plan: seek('SalesOrders', 5) }, 100).stats)).toEqual([]);
+  });
+
+  it('ignores temp tables and plans without runtime rows', () => {
+    expect(unreadTables(result({ plan: seek('#Staged', 0) }, 100).stats)).toEqual([]);
+    expect(unreadTables(result({ plan: seek('SalesOrders', 0).replace(/ActualRows="0"/, '') }, 100).stats)).toEqual([]);
+  });
+
+  it('adds the reads of every statement on the same table', () => {
+    expect(unreadTables(result({ plan: seek('SalesOrders', 0) + seek('SalesOrders', 7) }, 100).stats)).toEqual([]);
   });
 });
