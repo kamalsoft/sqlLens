@@ -147,11 +147,17 @@ export async function executeMssql(
     // Wall time is a real measurement, used only when the server reported no timing.
     if (stats.totalElapsedMs === null) stats.totalElapsedMs = Math.round(wallMs);
     // D-039: row counts for the real tables the run read. Read-only, same transaction, no user SQL.
+    // The count is advisory: if it fails, the run's results are kept and the gap is reported as a warning.
     const tables = realTables(stats.io);
     if (tables.length > 0) {
       const counter = mk();
       current = counter;
-      stats.tableRows = await countRows(counter, tables);
+      try {
+        stats.tableRows = await countRows(counter, tables);
+      } catch (err) {
+        if (err instanceof ExecAbortError || err instanceof ExecTimeoutError) throw err;
+        warnings.push(`Row counts not captured: ${err instanceof Error ? err.message : 'count failed'}`);
+      }
       checkFlags();
     }
     return { stats, warnings, outputs };
@@ -169,11 +175,11 @@ export async function executeMssql(
   }
 }
 
-/** Real tables the run read: no temp tables, system worktables, or names that are not plain identifiers. */
+/** Names the run read that could be user tables: temp tables and names that are not plain identifiers are left out. The count query matches only user tables, so system work tables simply return no count. */
 const COUNT_TABLE_LIMIT = 50;
 function realTables(io: { table: string }[]): string[] {
   const names = [...new Set(io.map((r) => r.table))]
-    .filter((t) => !t.startsWith('#') && t !== 'Worktable' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(t));
+    .filter((t) => !t.startsWith('#') && /^[A-Za-z_][A-Za-z0-9_]*$/.test(t));
   return names.slice(0, COUNT_TABLE_LIMIT);
 }
 
@@ -185,7 +191,7 @@ async function countRows(req: MssqlRequestLike, tables: string[]): Promise<Recor
   tables.forEach((t, i) => req.input(`t${i}`, sql.NVarChar(128), t));
   const names = tables.map((_, i) => `@t${i}`).join(', ');
   const r = await req.batch(
-    `SELECT o.name AS tableName, SUM(p.[rows]) AS rowCount FROM sys.objects AS o ` +
+    `SELECT o.name AS tableName, SUM(p.[rows]) AS [rowCount] FROM sys.objects AS o ` +
     `INNER JOIN sys.partitions AS p ON p.object_id = o.object_id AND p.index_id IN (0, 1) ` +
     `WHERE o.type = 'U' AND o.name IN (${names}) GROUP BY o.name`,
   );
@@ -194,6 +200,41 @@ async function countRows(req: MssqlRequestLike, tables: string[]): Promise<Recor
     if (row.rowCount !== null) out[row.tableName] = Number(row.rowCount);
   }
   return out;
+}
+
+/** One parameter of a stored procedure, from the catalog (UX-2). */
+export interface ProcedureParam { name: string; sqlType: string; isOutput: boolean; hasDefault: boolean }
+
+/**
+ * The parameters of a stored procedure, read from the catalog. The procedure name is bound as a
+ * parameter, never spliced into the SQL text. Read-only.
+ */
+export async function listProcedureParams(
+  conn: ExecConnection, procName: string, timeoutMs: number,
+): Promise<ProcedureParam[]> {
+  const { config } = buildMssqlConfig(conn, timeoutMs);
+  const pool = new sql.ConnectionPool(config);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const run = (async () => {
+      await pool.connect();
+      const req = pool.request();
+      req.input('procName', sql.NVarChar(256), procName);
+      const r = await req.query(
+        `SELECT p.name AS paramName, TYPE_NAME(p.user_type_id) AS typeName, p.is_output AS isOutput, p.has_default_value AS hasDefault ` +
+        `FROM sys.parameters AS p WHERE p.object_id = OBJECT_ID(@procName, N'P') ORDER BY p.parameter_id`,
+      );
+      return ((r.recordset ?? []) as { paramName: string; typeName: string; isOutput: boolean; hasDefault: boolean }[]).map((row) => ({
+        name: row.paramName, sqlType: row.typeName, isOutput: !!row.isOutput, hasDefault: !!row.hasDefault,
+      }));
+    })();
+    run.catch(() => {});
+    const limit = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new ExecTimeoutError()), timeoutMs); });
+    return await Promise.race([run, limit]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    try { await pool.close(); } catch { /* already closed */ }
+  }
 }
 
 export async function testMssqlConnection(

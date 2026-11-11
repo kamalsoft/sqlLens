@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeExecution, compareExecutions } from '@/lib/audit-analyzer';
+import { analyzeExecution, compareExecutions, operatorRecommendations, planFindings, planOperators, summarizeRuns, topOperators, unreadTables, unreachedTables } from '@/lib/audit-analyzer';
 import type { ExecutionResult, ExecutionStats } from '@/lib/sp-executor';
 
 function result(over: Partial<ExecutionStats> = {}, reads: number | null = 100): ExecutionResult {
@@ -123,5 +123,201 @@ describe('D-039 empty table from the row count', () => {
   it('does not block when the counted tables have rows', () => {
     const r = result({ tableRows: { Customers: 1000000 } }, 100);
     expect(analyzeExecution(r, { maxLogicalReads: 1000, maxElapsedMs: null, maxScanCount: null }).prodVerdict.verdict).toBe('READY');
+  });
+});
+
+describe('P8-04 grade and row counts', () => {
+  it('withholds the grade when a read table has 0 rows, and says why', () => {
+    const a = analyzeExecution(result({ tableRows: { Customers: 0 } }, 100));
+    expect(a.performanceGrade).toBeNull();
+    expect(a.gradeRationale).toBe('Not graded — Customers has 0 rows');
+  });
+  it('keeps the grade when every counted table has rows', () => {
+    const a = analyzeExecution(result({ tableRows: { Customers: 5 } }, 100));
+    expect(a.performanceGrade).toBe('A');
+    expect(a.ioAnalysis.rowCounts).toEqual({ Customers: 5 });
+  });
+  it('reports null row counts when none were counted', () => {
+    expect(analyzeExecution(result({}, 100)).ioAnalysis.rowCounts).toBeNull();
+  });
+});
+
+describe('P8-06 plan operator summary', () => {
+  const plan = [
+    '<RelOp NodeId="0" PhysicalOp="Clustered Index Insert" LogicalOp="Insert" EstimateRows="1">',
+    '<Update><Object Database="[TestDB]" Schema="[dbo]" Table="[Audit]"></Object></Update>',
+    '<RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="1" ActualLogicalReads="2" ActualExecutions="1"></RunTimeCountersPerThread></RunTimeInformation></RelOp>',
+    '<RelOp NodeId="8" PhysicalOp="Clustered Index Scan" LogicalOp="Clustered Index Scan" EstimateRows="1">',
+    '<RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="1000000" ActualLogicalReads="9185" ActualExecutions="1"></RunTimeCountersPerThread></RunTimeInformation>',
+    '<IndexScan><Object Database="[TestDB]" Schema="[dbo]" Table="[Customers]"></Object></IndexScan></RelOp>',
+    '<RelOp NodeId="7" PhysicalOp="Nested Loops" LogicalOp="Inner Join" EstimateRows="1">',
+    '<RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="12" ActualLogicalReads="0" ActualExecutions="1000000"></RunTimeCountersPerThread></RunTimeInformation></RelOp>',
+  ].join('\n');
+
+  it('parses operators with their runtime counters and table', () => {
+    const ops = planOperators(plan);
+    expect(ops.map((o) => o.physicalOp)).toEqual(['Clustered Index Insert', 'Clustered Index Scan', 'Nested Loops']);
+    expect(ops[1]).toMatchObject({ table: 'Customers', actualRows: 1000000, logicalReads: 9185, executions: 1 });
+    expect(ops[0].table).toBe('Audit');
+  });
+
+  it('ranks the costliest operators first and drops operators with no cost', () => {
+    const top = topOperators(planOperators(plan));
+    expect(top[0].physicalOp).toBe('Clustered Index Scan');
+    expect(top.some((o) => o.physicalOp === 'Nested Loops')).toBe(true);
+  });
+
+  it('keeps an inner seek that runs once per outer row, even with no reads or rows of its own', () => {
+    const inner = [
+      '<RelOp NodeId="4" PhysicalOp="Index Seek" LogicalOp="Index Seek" EstimateRows="1">',
+      '<RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="0" ActualLogicalReads="0" ActualExecutions="1000000"></RunTimeCountersPerThread></RunTimeInformation>',
+      '<IndexScan><Object Database="[tempdb]" Schema="[dbo]" Table="[#CustomerAggregates]"></Object></IndexScan></RelOp>',
+    ].join('\n');
+    const top = topOperators(planOperators(inner));
+    expect(top.map((o) => o.physicalOp)).toEqual(['Index Seek']);
+    expect(operatorRecommendations(top)[0]).toMatch(/Index Seek on #CustomerAggregates ran 1,000,000 times/);
+  });
+
+  it('names the costly scan and the row-by-row loop in the recommendations, keeping the mandatory three', () => {
+    const r = analyzeExecution(result({ plan }, 9195));
+    expect(r.recommendations.join('\n')).toMatch(/Clustered Index Scan on Customers: 9,185 logical reads/);
+    expect(r.recommendations.join('\n')).toMatch(/Nested Loops ran 1,000,000 times/);
+    expect(r.recommendations).toEqual(expect.arrayContaining([
+      'Run DBCC SHOW_STATISTICS([Table], [Index]) to validate index selectivity',
+      'Consider SET NOCOUNT ON to suppress row count messages and reduce network traffic',
+      'Review parameter sniffing: add OPTION (OPTIMIZE FOR UNKNOWN) if plans vary per parameter',
+    ]));
+    expect(r.planOperators[0].physicalOp).toBe('Clustered Index Scan');
+  });
+});
+
+describe('P8-03 repeated runs', () => {
+  const sample = (elapsedMs: number, logicalReads = 100) => ({ elapsedMs, logicalReads });
+  const TARGETS = { maxLogicalReads: 1000, maxElapsedMs: null, maxScanCount: null };
+
+  it('drops the warm-up and reports median, p95 and spread', () => {
+    const r = summarizeRuns([sample(900), sample(10), sample(20), sample(30), sample(40)], 1);
+    expect(r.runs).toBe(4);
+    expect(r.warmupRuns).toBe(1);
+    expect(r.elapsedMs).toEqual({ min: 10, median: 25, p95: 40, max: 40 });
+    expect(r.spreadPct).toBeCloseTo(120);
+  });
+
+  it('gives an UNSTABLE verdict instead of READY when timing varies too much', () => {
+    const runs = summarizeRuns([sample(0), sample(10), sample(50)], 1);
+    const a = analyzeExecution(result({}, 100), TARGETS, runs);
+    expect(a.prodVerdict.verdict).toBe('UNSTABLE');
+    expect(a.multiRun).toEqual(runs);
+  });
+
+  it('keeps READY when the runs agree', () => {
+    const runs = summarizeRuns([sample(0), sample(10), sample(11)], 1);
+    expect(analyzeExecution(result({}, 100), TARGETS, runs).prodVerdict.verdict).toBe('READY');
+  });
+
+  it('keeps OPTIMIZE over UNSTABLE when a metric is over target', () => {
+    const runs = summarizeRuns([sample(0), sample(10), sample(50)], 1);
+    expect(analyzeExecution(result({}, 5000), TARGETS, runs).prodVerdict.verdict).toBe('OPTIMIZE');
+  });
+
+  it('reports no multi-run summary for a single run', () => {
+    expect(analyzeExecution(result({}, 100), TARGETS).multiRun).toBeNull();
+  });
+});
+
+describe('P8-02 unread data from the plan', () => {
+  const seek = (table: string, rows: number) =>
+    `<RelOp NodeId="4" PhysicalOp="Index Seek" LogicalOp="Index Seek" EstimateRows="1"><RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="${rows}" ActualLogicalReads="6" ActualExecutions="10"></RunTimeCountersPerThread></RunTimeInformation><IndexScan><Object Database="[TestDB]" Schema="[dbo]" Table="[${table}]"></Object></IndexScan></RelOp>`;
+
+  it('withholds the verdict when a real table was read and no rows came back', () => {
+    const a = analyzeExecution(result({ plan: seek('SalesOrders', 0) }, 100), { maxLogicalReads: 1000, maxElapsedMs: null, maxScanCount: null });
+    expect(a.prodVerdict).toEqual({ verdict: 'INSUFFICIENT EVIDENCE', reason: 'SalesOrders: the seek matched no rows (6 pages read): the run did not exercise the data', driver: 'SalesOrders' });
+    expect(a.performanceGrade).toBeNull();
+  });
+
+  it('does not report a cost share on a handful of pages', () => {
+    const tiny = '<RelOp NodeId="4" PhysicalOp="Index Seek" LogicalOp="Index Seek" EstimateRows="1"><RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="0" ActualLogicalReads="4" ActualExecutions="1"></RunTimeCountersPerThread></RunTimeInformation><IndexScan><Object Database="[db]" Schema="[dbo]" Table="[SalesOrders]"></Object></IndexScan></RelOp>';
+    expect(planFindings(planOperators(tiny)).some((f) => f.kind === 'cost-concentration')).toBe(false);
+  });
+
+  it('does not flag a table that returned rows', () => {
+    expect(unreadTables(result({ plan: seek('SalesOrders', 5) }, 100).stats)).toEqual([]);
+  });
+
+  it('ignores temp tables and plans without runtime rows', () => {
+    expect(unreadTables(result({ plan: seek('#Staged', 0) }, 100).stats)).toEqual([]);
+    expect(unreadTables(result({ plan: seek('SalesOrders', 0).replace(/ActualRows="0"/, '') }, 100).stats)).toEqual([]);
+  });
+
+  it('adds the reads of every statement on the same table', () => {
+    expect(unreadTables(result({ plan: seek('SalesOrders', 0) + seek('SalesOrders', 7) }, 100).stats)).toEqual([]);
+  });
+});
+
+describe('P8-07 generic plan findings', () => {
+  // Object names are arbitrary on purpose: findings must not depend on them.
+  const plan = [
+    '<RelOp NodeId="1" PhysicalOp="Sequence Project" LogicalOp="Compute Scalar" EstimateRows="193.6">',
+    '<RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="333295" ActualExecutions="1"></RunTimeCountersPerThread></RunTimeInformation></RelOp>',
+    '<RelOp NodeId="2" PhysicalOp="Sort" LogicalOp="Sort" EstimateRows="193.6">',
+    '<Warnings><SpillToTempDb SpillLevel="1"></SpillToTempDb><SortSpillDetails WritesToTempDb="3671" ReadsFromTempDb="3671"></SortSpillDetails></Warnings>',
+    '<RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="10" ActualExecutions="1"></RunTimeCountersPerThread></RunTimeInformation></RelOp>',
+    '<RelOp NodeId="3" PhysicalOp="Clustered Index Seek" LogicalOp="Clustered Index Seek" EstimateRows="1">',
+    '<RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="333295" ActualLogicalReads="958207" ActualExecutions="333295"></RunTimeCountersPerThread></RunTimeInformation>',
+    '<IndexScan><Object Database="[db]" Schema="[dbo]" Table="[InnerTable]"></Object></IndexScan></RelOp>',
+  ].join('\n');
+
+  it('flags the operator that holds most of the logical reads', () => {
+    const f = planFindings(planOperators(plan));
+    expect(f.find((x) => x.kind === 'cost-concentration')).toMatchObject({ operator: 'Clustered Index Seek', table: 'InnerTable' });
+    expect(f.find((x) => x.kind === 'cost-concentration')?.message).toMatch(/accounts for 100% of logical reads/);
+  });
+
+  it('flags a row estimate far from the actual count, but not a per-execution match', () => {
+    const f = planFindings(planOperators(plan));
+    const estimates = f.filter((x) => x.kind === 'row-estimate');
+    expect(estimates.map((x) => x.operator)).toEqual(['Sequence Project']);
+    expect(estimates[0].message).toMatch(/estimated 194 rows per execution, actual 333,295/);
+  });
+
+  it('flags a tempdb spill with its writes', () => {
+    const f = planFindings(planOperators(plan));
+    expect(f.find((x) => x.kind === 'tempdb-spill')).toMatchObject({ operator: 'Sort', severity: 'medium' });
+    expect(f.find((x) => x.kind === 'tempdb-spill')?.message).toMatch(/spilled 3,671 pages/);
+  });
+
+  it('puts the findings into the recommendations and keeps the mandatory three', () => {
+    const r = analyzeExecution(result({ plan }, 9195));
+    expect(r.planFindings.length).toBeGreaterThan(0);
+    expect(r.recommendations.join('\n')).toMatch(/Refresh the statistics/);
+    expect(r.recommendations).toEqual(expect.arrayContaining([
+      'Run DBCC SHOW_STATISTICS([Table], [Index]) to validate index selectivity',
+      'Consider SET NOCOUNT ON to suppress row count messages and reduce network traffic',
+      'Review parameter sniffing: add OPTION (OPTIMIZE FOR UNKNOWN) if plans vary per parameter',
+    ]));
+  });
+
+  it('says a table was not reached when none of its scans or seeks executed', () => {
+    const notReached = '<RelOp NodeId="9" PhysicalOp="Clustered Index Seek" LogicalOp="Clustered Index Seek" EstimateRows="1"><RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="0" ActualLogicalReads="0" ActualExecutions="0"></RunTimeCountersPerThread></RunTimeInformation><IndexScan><Object Database="[db]" Schema="[dbo]" Table="[Later]"></Object></IndexScan></RelOp>';
+    const readNoRows = '<RelOp NodeId="4" PhysicalOp="Index Seek" LogicalOp="Index Seek" EstimateRows="1"><RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="0" ActualLogicalReads="6" ActualExecutions="10"></RunTimeCountersPerThread></RunTimeInformation><IndexScan><Object Database="[db]" Schema="[dbo]" Table="[SalesOrders]"></Object></IndexScan></RelOp>';
+    const a = analyzeExecution(result({ plan: readNoRows + notReached }, 100), { maxLogicalReads: 1000, maxElapsedMs: null, maxScanCount: null });
+    expect(a.prodVerdict.reason).toBe('SalesOrders: the seek matched no rows (6 pages read): the run did not exercise the data; Later not reached: the run stopped before reading it');
+    expect(unreachedTables(result({ plan: notReached }, 100).stats)).toEqual(['Later']);
+  });
+});
+
+describe('FIX-2 parallel plans', () => {
+  const threads = (rows: number[]) => rows.map((r, i) => `<RunTimeCountersPerThread Thread="${i}" ActualRows="${r}" ActualExecutions="1"></RunTimeCountersPerThread>`).join('');
+  const parallelSort = '<RelOp NodeId="2" PhysicalOp="Sort" LogicalOp="Sort" EstimateRows="333751">'
+    + `<RunTimeInformation>${threads([33375, 33375, 33375, 33375, 33376, 33375, 33375, 33375, 33376, 33375])}</RunTimeInformation></RelOp>`;
+
+  it('takes executions per operator as the largest thread count, not the sum', () => {
+    const [sort] = planOperators(parallelSort);
+    expect(sort.actualRows).toBe(333752); // the ten thread counts in the fixture
+    expect(sort.executions).toBe(1);
+  });
+
+  it('does not report a row estimate error for a parallel operator that matches its estimate', () => {
+    expect(planFindings(planOperators(parallelSort)).some((f) => f.kind === 'row-estimate')).toBe(false);
   });
 });

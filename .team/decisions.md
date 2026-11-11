@@ -275,4 +275,23 @@ Context (evidence): run 2026-11-11 (record 56) read 1,000,000 `Customers` rows (
 Options: 1 read-only `SELECT COUNT(*)` per real table on the same connection before the run / 2 runtime `ActualRows` only / 3 remove the check.
 User decision: 1 (2026-11-11, reply "1").
 Deviation: row counts come from `sys.partitions` (parameterized table names), not `COUNT(*)`, so no table name enters the SQL text. Exact for committed rows; in-transaction changes are not verified (see the shortcut comment in `src/lib/execution/mssql.ts`).
-Constraints: the query is fixed in code (table names validated against `IDENT_RE`, never taken from the user's SQL); it runs inside the existing connection and timeout; it is read-only; it is a new SQL execution path, so Security sign-off is required.
+Constraints: the query text is fixed in code. Table names come from the server's STATISTICS IO messages, which a script can fake with PRINT or RAISERROR; they must match an identifier pattern, are bound as parameters, and the count is schema-blind (same-name tables in two schemas are summed). Security review 2026-11-11: low risk, no injection path found; it runs inside the existing connection and timeout; it is read-only; it is a new SQL execution path, so Security sign-off is required.
+
+### Security review 2026-11-11 (commits 8ecdb20, 23b7b4f, 0a4b43b)
+Status: APPROVED WITH CONDITIONS (read-only review by the security agent; not a merge approval)
+- C1 ACCEPTED RISK (user, 2026-11-11, option B): OUTPUT values stay in the audit DB response and the audit log file, whatever `logSqlText` says. In mssql an OUTPUT parameter is INOUT, so a caller's input value can come back and be stored. Accepted because the audit record is the only place to see what a procedure returned; revisit if audit records are shared outside the team.
+- C2 done: D-039 wording corrected above.
+- C3: `data/appconfig.json` stays out of every commit.
+Not verified: no live MSSQL run of the count query or the GO edge cases.
+
+### D-040 Row counts are advisory
+Status: APPROVED (user, 2026-11-11, reply "Yes" to: a failed row-count query should warn, not fail the run)
+Change: `src/lib/execution/mssql.ts` keeps the run's results when the count query fails and adds a warning `Row counts not captured: <reason>`. Timeouts and cancellations still stop the run. With no counts, the verdict is not blocked by the empty-table check.
+
+### D-041 Unread data withholds the verdict (P8-02 addendum)
+Status: APPROVED (user, 2026-11-11, "Proceed p8-02")
+Change: a real table whose scans and seeks all returned 0 rows (plan runtime counters, temp tables excluded) gives `INSUFFICIENT EVIDENCE` and withholds the grade. Evidence: run 2026-11-11 with 2024 dates and `@MinOrderValue` 1000 read 6 pages from SalesOrders, returned no rows, and graded C with "Excellent" time.
+
+### D-042 Generic plan findings (P8-07)
+Status: APPROVED (user, 2026-11-11, "go ahead")
+Change: `planFindings` from the plan's operator counters and warnings: cost concentration, row-estimate error per execution, tempdb spills. No object or procedure name is used by the rules.

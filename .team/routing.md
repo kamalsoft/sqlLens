@@ -20,3 +20,5 @@
 4. Work starts only on `APPROVED: start <task ID>`. Agents never commit, push, or branch without an explicit user instruction.
 5. A task blocked by a PROPOSED decision stays blocked; the agent asks, never chooses.
 6. Subagents: only for independent, sizeable areas, max 3 in parallel.
+7. **Senior Architect review is mandatory** for every change before merge (agent `senior-architect`, read-only). A change is not merged without its verdict.
+8. **Tester run is mandatory at the end of every task or activity** (agent `tester`, read-only). Its verdict is reported with the task.

@@ -57,4 +57,10 @@ describe("shareTtlHours", () => {
     expect(validateConfigChanges({ maxLogicalReads: 0 }).ok).toBe(false);
     expect(validateConfigChanges({ maxElapsedMs: "200" }).ok).toBe(false);
   });
+
+  it("caps maxRuns at 1-20", () => {
+    expect(validateConfigChanges({ maxRuns: 20 }).ok).toBe(true);
+    expect(validateConfigChanges({ maxRuns: 21 }).ok).toBe(false);
+    expect(validateConfigChanges({ maxRuns: 0 }).ok).toBe(false);
+  });
 });

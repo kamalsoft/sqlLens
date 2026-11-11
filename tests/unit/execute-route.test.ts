@@ -162,3 +162,45 @@ describe('POST /api/execute', () => {
     expect((await res.json()).result.mode).toBe('compare');
   });
 });
+
+describe('POST /api/execute repeated runs (P8-03)', () => {
+  const ok = () => ({ stats: stats(10), warnings: [] });
+
+  it('runs a warm-up plus N measured runs and summarises the measured ones', async () => {
+    setLive(true);
+    ex.mssql.mockResolvedValue(ok());
+    const res = await execute(post(real({ runs: 4 }), cookie));
+    expect(res.status).toBe(200);
+    expect(ex.mssql).toHaveBeenCalledTimes(5);
+    const body = await res.json();
+    expect(body.result.analysis.multiRun).toMatchObject({ runs: 4, warmupRuns: 1 });
+  });
+
+  it('defaults to a single run with no summary', async () => {
+    setLive(true);
+    ex.mssql.mockResolvedValue(ok());
+    const body = await (await execute(post(real(), cookie))).json();
+    expect(ex.mssql).toHaveBeenCalledTimes(1);
+    expect(body.result.analysis.multiRun).toBeNull();
+  });
+
+  it('rejects runs outside 1..maxRuns, non-integers, and repeated compare runs', async () => {
+    setLive(true);
+    expect((await execute(post(real({ runs: 0 }), cookie))).status).toBe(400);
+    expect((await execute(post(real({ runs: 21 }), cookie))).status).toBe(400);
+    expect((await execute(post(real({ runs: 2.5 }), cookie))).status).toBe(400);
+    expect((await execute(post(real({ runs: 'two' }), cookie))).status).toBe(400);
+    const compare = { mode: 'compare', engine: 'mssql', connection, original: real().original, optimized: real().original, runs: 3 };
+    expect((await execute(post(compare, cookie))).status).toBe(400);
+    expect(ex.mssql).not.toHaveBeenCalled();
+  });
+
+  it('stops at the first failing run and reports it without a summary', async () => {
+    setLive(true);
+    ex.mssql.mockResolvedValueOnce(ok()).mockRejectedValueOnce(new Error('Incorrect syntax'));
+    const body = await (await execute(post(real({ runs: 4 }), cookie))).json();
+    expect(ex.mssql).toHaveBeenCalledTimes(2);
+    expect(body.result.execution.success).toBe(false);
+    expect(body.result.analysis.multiRun).toBeNull();
+  });
+});

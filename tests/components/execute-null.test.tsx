@@ -35,7 +35,9 @@ describe("ExecutePage null metrics", () => {
     await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
 
-    expect((await screen.findAllByText("Not captured")).length).toBe(5);
+    // P8-04: the grade badge reads "Not graded" when the grade is withheld, so one fewer "Not captured".
+    expect((await screen.findAllByText("Not captured")).length).toBe(4);
+    expect(screen.getByText("Not graded")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Show" }));
     expect(screen.getByText("Simulated")).toBeInTheDocument();
   });

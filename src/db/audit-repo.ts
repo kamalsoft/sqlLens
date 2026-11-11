@@ -30,6 +30,11 @@ export type AuditSummary = {
   shareExpiresAt: string | null;
   elapsedMs: number | null;
   logicalReads: number | null;
+  /** UX-4: procedure name from the request, or null for batches and reviews. */
+  procedure?: string | null;
+  /** UX-4: performance grade and prod-readiness verdict from the stored result, when present. */
+  grade?: string | null;
+  verdict?: string | null;
 };
 
 export type AuditRecord = AuditSummary & {
@@ -52,6 +57,9 @@ type Row = {
   share_revoked: number | null;
   elapsed_ms: number | null;
   logical_reads: number | null;
+  procedure?: string | null;
+  grade?: string | null;
+  verdict?: string | null;
 };
 
 function shareActive(r: Row, now = Date.now()): boolean {
@@ -75,6 +83,9 @@ function summary(r: Row): AuditSummary {
     shareExpiresAt: active ? r.share_expires_at : null,
     elapsedMs: r.elapsed_ms,
     logicalReads: r.logical_reads,
+    procedure: r.procedure ?? null,
+    grade: r.grade ?? null,
+    verdict: r.verdict ?? null,
   };
 }
 
@@ -148,9 +159,17 @@ export function getAudit(id: string, sessionId: string): AuditRecord | null {
 }
 
 export function listAudits(sessionId: string, limit = 100): AuditSummary[] {
+  // UX-4: the procedure, grade and verdict are read inside SQLite, so the large plan payloads never leave the database.
+  // A stored record that is not valid JSON gives NULL for these fields instead of failing the whole list.
   const rows = db
     .prepare(
-      `SELECT ${SUMMARY_COLS} FROM audit_requests WHERE session_id = ?
+      `SELECT ${SUMMARY_COLS},
+              CASE WHEN json_valid(request_payload) THEN json_extract(request_payload, '$.original.name') END AS procedure,
+              CASE WHEN json_valid(response_payload) THEN COALESCE(json_extract(response_payload, '$.analysis.performanceGrade'),
+                       json_extract(response_payload, '$.original.analysis.performanceGrade')) END AS grade,
+              CASE WHEN json_valid(response_payload) THEN COALESCE(json_extract(response_payload, '$.analysis.prodVerdict.verdict'),
+                       json_extract(response_payload, '$.original.analysis.prodVerdict.verdict')) END AS verdict
+       FROM audit_requests WHERE session_id = ?
        ORDER BY created_at DESC, rowid DESC LIMIT ?`
     )
     .all(sessionId, Math.max(1, Math.min(limit, 500))) as Row[];

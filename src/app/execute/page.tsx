@@ -1,16 +1,17 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Box, Container, Heading, Text, Button, Flex,
   Spinner, Badge, Grid, Input, Separator,
 } from '@chakra-ui/react';
-import type { AuditAnalysis } from '@/lib/audit-analyzer';
+import { GRADE_RULES, STANDARD_RECOMMENDATIONS, type AuditAnalysis, type Grade, type PlanFinding, type ProdVerdict } from '@/lib/audit-analyzer';
+import type { ExecParam } from '@/components/execute/target-editor';
 import type { ExecutionResult } from '@/lib/sp-executor';
 import { useApi } from '@/components/api-client';
+import { readParamSets, setNamesFor, withSet, withoutSet, writeParamSets, type ParamSetStore, type SavedParam } from '@/lib/param-sets';
 import {
-  TargetEditor, buildTarget, emptyDraft, isDraftEmpty,
-  type TargetDraft,
+  TargetEditor, buildTarget, emptyDraft, isDraftEmpty, targetError, newParamRow, type ParamType, type TargetDraft,
 } from '@/components/execute/target-editor';
 
 type ComparisonAnalysis = AuditAnalysis & {
@@ -38,7 +39,7 @@ type TestInfo = { ok: boolean; message: string };
 
 function GradeBadge({ grade }: { grade: string | null }) {
   if (grade === null) {
-    return <Badge colorPalette="gray" variant="subtle" px={3} py={2}>Not captured</Badge>;
+    return <Badge colorPalette="gray" variant="subtle" px={3} py={2}>Not graded</Badge>;
   }
   const colors: Record<string, string> = { A: 'green', B: 'blue', C: 'yellow', D: 'orange', F: 'red' };
   return (
@@ -54,6 +55,17 @@ function GradeBadge({ grade }: { grade: string | null }) {
   );
 }
 
+function VerdictCard({ verdict }: { verdict: ProdVerdict }) {
+  const color = verdict.verdict === 'READY' ? 'green' : verdict.verdict === 'OPTIMIZE' ? 'orange' : verdict.verdict === 'UNSTABLE' ? 'red' : 'yellow';
+  return (
+    <Box p={4} bg="gray.950" borderRadius="lg" borderLeftWidth="4px" borderColor={`${color}.500`} aria-label="Prod-readiness verdict">
+      <Text fontSize="xs" color="gray.500" textTransform="uppercase" letterSpacing="wider">Prod readiness</Text>
+      <Text fontSize="xl" fontWeight="bold" color={`${color}.300`}>{verdict.verdict}</Text>
+      <Text fontSize="sm" color="gray.300">{verdict.reason}{verdict.driver ? ` (${verdict.driver})` : ''}</Text>
+    </Box>
+  );
+}
+
 function StatCard({ label, value, unit = '', color = 'blue' }: { label: string; value: string | number | null; unit?: string; color?: string }) {
   return (
     <Box bg="gray.900" borderWidth="1px" borderColor="gray.700" borderRadius="xl" p={4} textAlign="center">
@@ -64,7 +76,143 @@ function StatCard({ label, value, unit = '', color = 'blue' }: { label: string; 
   );
 }
 
-function AnalysisPanel({ analysis, title }: { analysis: AuditAnalysis; title: string }) {
+const FINDING_WHY: Record<PlanFinding['kind'], string> = {
+  'cost-concentration': 'Most of the logical reads come from one operator, so changing it moves the total most.',
+  'row-estimate': 'The optimizer planned for far fewer rows than it read, so the chosen plan may not fit this data.',
+  'tempdb-spill': 'Work that did not fit in memory was written to tempdb, which is much slower than memory.',
+};
+
+function FindingCard({ finding }: { finding: PlanFinding }) {
+  return (
+    <Box p={4} bg="gray.950" borderRadius="lg" borderLeftWidth="3px" borderColor={finding.severity === 'high' ? 'red.500' : 'yellow.500'}>
+      <Text color="white" fontWeight="semibold" fontSize="sm">{finding.message}</Text>
+      <Text color="gray.200" fontSize="sm" mt={2}>{finding.recommendation}</Text>
+      <Text color="gray.500" fontSize="xs" mt={2}>Why: {FINDING_WHY[finding.kind]}</Text>
+    </Box>
+  );
+}
+
+/** P8-08: dedicated recommendations: findings by priority, other observations, and the standard checks. */
+function RecommendationsPanel({ analysis }: { analysis: AuditAnalysis }) {
+  const findings = analysis.planFindings ?? [];
+  const findingTexts = new Set(findings.map((f) => f.recommendation));
+  const standard = new Set<string>(STANDARD_RECOMMENDATIONS);
+  const other = analysis.recommendations.filter((r) => !findingTexts.has(r) && !standard.has(r));
+  const high = findings.filter((f) => f.severity === 'high');
+  const medium = findings.filter((f) => f.severity === 'medium');
+  return (
+    <Box borderWidth="1px" borderColor="gray.700" borderRadius="xl" bg="gray.900" p={5} aria-label="Recommendations" display="flex" flexDirection="column" gap={5}>
+      <Box>
+        <Heading size="sm" color="blue.300">💡 Recommendations</Heading>
+        <Text fontSize="xs" color="gray.400" mt={1}>
+          How to use: start with the verdict, take the first high-priority finding, change the SQL, then run the changed SQL in compare mode and check that the verdict and grade improve.
+        </Text>
+      </Box>
+      {findings.length === 0 && other.length === 0 && (
+        <Text fontSize="sm" color="gray.400">No plan findings for this run.</Text>
+      )}
+      {high.length > 0 && (
+        <Box>
+          <Text fontSize="xs" color="red.300" textTransform="uppercase" letterSpacing="wider" mb={2}>High priority</Text>
+          <Box display="flex" flexDirection="column" gap={2}>{high.map((f, i) => <FindingCard key={`h${i}`} finding={f} />)}</Box>
+        </Box>
+      )}
+      {medium.length > 0 && (
+        <Box>
+          <Text fontSize="xs" color="yellow.300" textTransform="uppercase" letterSpacing="wider" mb={2}>Medium priority</Text>
+          <Box display="flex" flexDirection="column" gap={2}>{medium.map((f, i) => <FindingCard key={`m${i}`} finding={f} />)}</Box>
+        </Box>
+      )}
+      {other.length > 0 && (
+        <Box>
+          <Text fontSize="xs" color="gray.400" textTransform="uppercase" letterSpacing="wider" mb={2}>Other observations</Text>
+          <Box as="ul" pl={5} display="flex" flexDirection="column" gap={1}>
+            {other.map((r, i) => <Box as="li" key={i} color="gray.200" fontSize="sm">{r}</Box>)}
+          </Box>
+        </Box>
+      )}
+      <Box>
+        <Text fontSize="xs" color="gray.400" textTransform="uppercase" letterSpacing="wider" mb={2}>Standard checks</Text>
+        <Box as="ul" pl={5} display="flex" flexDirection="column" gap={1}>
+          {STANDARD_RECOMMENDATIONS.map((r) => <Box as="li" key={r} color="gray.300" fontSize="sm">{r}</Box>)}
+        </Box>
+      </Box>
+    </Box>
+  );
+}
+
+/** P8-08: the grade scale, with the current run's grade marked. */
+function GradeLegend({ current }: { current: Grade | null }) {
+  const meaning: Record<Grade, string> = {
+    A: 'Excellent', B: 'Good', C: 'Moderate: investigate before scaling', D: 'Poor: refactor before scale', F: 'Critical: act now',
+  };
+  const grades: Grade[] = ['A', 'B', 'C', 'D', 'F'];
+  return (
+    <Box overflowX="auto" aria-label="Grade legend">
+      <Box as="table" fontSize="xs" color="gray.300" w="100%">
+        <thead>
+          <tr style={{ textAlign: 'left', color: '#718096' }}>
+            <th>Grade</th><th>Logical reads</th><th>Time</th><th>Scans</th><th>Meaning</th>
+          </tr>
+        </thead>
+        <tbody>
+          {grades.map((g) => {
+            const rule = g === 'F' ? null : GRADE_RULES[g];
+            const isCurrent = current === g;
+            return (
+              <tr key={g} style={{ background: isCurrent ? '#2d3748' : undefined }}>
+                <td><strong>{g}</strong>{isCurrent ? ' ◀' : ''}</td>
+                <td>{rule ? `under ${rule.reads.toLocaleString()}` : `not under D's limits`}</td>
+                <td>{rule ? `under ${rule.ms.toLocaleString()} ms` : 'not under D\'s limit'}</td>
+                <td>{rule?.scans != null ? `at most ${rule.scans}` : rule ? 'any' : '—'}</td>
+                <td>{meaning[g]}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </Box>
+      <Text fontSize="xs" color="gray.500" mt={2}>
+        A run must be under every limit of a grade. &quot;Not graded&quot; means the evidence is incomplete (see the verdict reason).
+      </Text>
+    </Box>
+  );
+}
+
+/** P8-08: the original and the optimized SQL with their measured metrics, side by side. */
+function OptimizedPanel({ original, optimized, originalText, optimizedText }: {
+  original: AuditAnalysis; optimized: AuditAnalysis; originalText: string; optimizedText: string;
+}) {
+  const sides = [
+    { label: 'Original', color: 'red', analysis: original, text: originalText },
+    { label: 'Optimized', color: 'green', analysis: optimized, text: optimizedText },
+  ];
+  return (
+    <Box borderWidth="1px" borderColor="gray.700" borderRadius="xl" bg="gray.900" p={5} aria-label="Original and optimized SQL">
+      <Heading size="sm" color="green.300" mb={4}>🟢 Original vs Optimized</Heading>
+      <Grid templateColumns={{ base: '1fr', md: '1fr 1fr' }} gap={4}>
+        {sides.map((side) => (
+          <Box key={side.label} p={4} bg="gray.950" borderRadius="lg" borderLeftWidth="3px" borderColor={`${side.color}.500`}>
+            <Text fontSize="xs" color={`${side.color}.300`} textTransform="uppercase" letterSpacing="wider">{side.label}</Text>
+            <Text fontSize="sm" color="gray.300" mt={1}>
+              Grade {side.analysis.performanceGrade ?? 'not graded'} · {side.analysis.ioAnalysis.totalLogicalReads === null ? 'reads not captured' : `${side.analysis.ioAnalysis.totalLogicalReads.toLocaleString()} logical reads`} · {side.analysis.timeAnalysis.totalMs === null ? 'time not captured' : `${side.analysis.timeAnalysis.totalMs} ms`}
+            </Text>
+            <Text fontSize="xs" color="gray.500" mt={1}>{side.analysis.prodVerdict?.verdict ?? ''}</Text>
+            <Box as="pre" mt={3} p={3} bg="black" borderRadius="md" fontSize="xs" color="gray.200" maxH="320px" overflow="auto" whiteSpace="pre-wrap">
+              {side.text || '(empty)'}
+            </Box>
+          </Box>
+        ))}
+      </Grid>
+      <Text fontSize="xs" color="gray.500" mt={3}>
+        Refactor output from the Refactor page is not run here. Paste it into Optimized SP and run it; SQL runs only when you press the button.
+      </Text>
+    </Box>
+  );
+}
+
+function AnalysisPanel({ analysis, title, params, outputs }: {
+  analysis: AuditAnalysis; title: string; params?: ExecParam[]; outputs?: Record<string, unknown>;
+}) {
   return (
     <Box borderWidth="1px" borderColor="gray.700" borderRadius="xl" overflow="hidden">
       <Box bg="gray.800" px={6} py={4} borderBottomWidth="1px" borderColor="gray.700">
@@ -75,16 +223,20 @@ function AnalysisPanel({ analysis, title }: { analysis: AuditAnalysis; title: st
             <Text fontSize="sm" color="gray.400">{analysis.gradeRationale}</Text>
           </Box>
         </Flex>
+        <Box mt={3}><GradeLegend current={analysis.performanceGrade} /></Box>
       </Box>
 
       <Box px={6} py={6} display="flex" flexDirection="column" gap={6}>
+        {/* Verdict first (P8-04) */}
+        {analysis.prodVerdict && <VerdictCard verdict={analysis.prodVerdict} />}
+
         {/* Summary */}
         <Text color="gray.200" lineHeight="tall">{analysis.summary}</Text>
 
         <Separator borderColor="gray.700" />
 
         {/* Stats */}
-        <Grid templateColumns="repeat(4, 1fr)" gap={4}>
+        <Grid templateColumns={{ base: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' }} gap={4}>
           <StatCard label="Total Logical Reads" value={analysis.ioAnalysis.totalLogicalReads} color="blue" />
           <StatCard label="Physical Reads" value={analysis.ioAnalysis.totalPhysicalReads} color={analysis.ioAnalysis.totalPhysicalReads === null ? 'gray' : analysis.ioAnalysis.totalPhysicalReads > 0 ? 'orange' : 'green'} />
           <StatCard label="Scan Count" value={analysis.ioAnalysis.totalScanCount} color={analysis.ioAnalysis.totalScanCount === null ? 'gray' : analysis.ioAnalysis.totalScanCount > 3 ? 'red' : 'green'} />
@@ -92,6 +244,58 @@ function AnalysisPanel({ analysis, title }: { analysis: AuditAnalysis; title: st
         </Grid>
 
         <Separator borderColor="gray.700" />
+
+        {/* Row counts for the real tables the run read (D-039) */}
+        {analysis.ioAnalysis.rowCounts && (
+          <Box>
+            <Text fontSize="sm" fontWeight="semibold" color="blue.300" mb={3} textTransform="uppercase" letterSpacing="wider">Row counts (tables read)</Text>
+            <Grid templateColumns={{ base: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' }} gap={3}>
+              {Object.entries(analysis.ioAnalysis.rowCounts).map(([table, rows]) => (
+                <StatCard key={table} label={table} value={rows} color={rows === 0 ? 'red' : 'blue'} />
+              ))}
+            </Grid>
+          </Box>
+        )}
+
+        {/* Repeated runs (P8-03) */}
+        {analysis.multiRun && (
+          <Box p={4} bg="gray.950" borderRadius="lg" borderLeftWidth="3px" borderColor="teal.500" aria-label="Repeated runs summary">
+            <Text fontSize="xs" color="gray.500" textTransform="uppercase" letterSpacing="wider">
+              {analysis.multiRun.runs} measured runs (warm-up of {analysis.multiRun.warmupRuns} dropped)
+            </Text>
+            <Text color="gray.200" fontSize="sm">
+              Elapsed median {analysis.multiRun.elapsedMs?.median ?? 'n/a'} ms, p95 {analysis.multiRun.elapsedMs?.p95 ?? 'n/a'} ms,
+              spread {analysis.multiRun.spreadPct === null ? 'n/a' : `${Math.round(analysis.multiRun.spreadPct)}%`}.
+              Logical reads median {analysis.multiRun.logicalReads?.median ?? 'n/a'}.
+            </Text>
+          </Box>
+        )}
+
+        {/* Parameters used (P8-04) */}
+        {params && params.length > 0 && (
+          <Box>
+            <Text fontSize="sm" fontWeight="semibold" color="gray.300" mb={3} textTransform="uppercase" letterSpacing="wider">Parameters used</Text>
+            <Box as="dl" display="grid" gridTemplateColumns={{ base: '1fr', md: 'auto 1fr' }} gap={2} fontSize="sm">
+              {params.map((p, i) => (
+                <Flex key={i} gap={2} align="baseline" wrap="wrap" gridColumn="1 / -1">
+                  <Text as="dt" color="gray.400" fontFamily="mono">{p.name}</Text>
+                  <Text as="dd" color="white" fontFamily="mono">{p.value === null ? 'NULL' : String(p.value)} <Text as="span" color="gray.500">({p.type})</Text></Text>
+                  {p.output && <Badge colorPalette="purple" size="sm">OUTPUT</Badge>}
+                </Flex>
+              ))}
+            </Box>
+          </Box>
+        )}
+
+        {/* OUTPUT parameter values returned by the run */}
+        {outputs && Object.keys(outputs).length > 0 && (
+          <Box>
+            <Text fontSize="sm" fontWeight="semibold" color="cyan.300" mb={3} textTransform="uppercase" letterSpacing="wider">OUTPUT parameters</Text>
+            <Box as="pre" fontSize="xs" color="cyan.300" bg="gray.950" p={3} borderRadius="lg" overflowX="auto" fontFamily="mono">
+              {JSON.stringify(outputs, null, 2)}
+            </Box>
+          </Box>
+        )}
 
         {/* Time breakdown */}
         <Box>
@@ -113,6 +317,25 @@ function AnalysisPanel({ analysis, title }: { analysis: AuditAnalysis; title: st
         </Box>
 
         <Separator borderColor="gray.700" />
+
+        {/* Costliest plan operators (P8-06) */}
+        {analysis.planOperators && analysis.planOperators.length > 0 && (
+          <Box>
+            <Text fontSize="sm" fontWeight="semibold" color="purple.300" mb={3} textTransform="uppercase" letterSpacing="wider">Costliest plan operators</Text>
+            <Box display="flex" flexDirection="column" gap={2}>
+              {analysis.planOperators.map((op, i) => (
+                <Box key={i} p={4} bg="gray.800" borderRadius="lg" borderLeftWidth="3px" borderColor="purple.500">
+                  <Text color="white" fontWeight="semibold" fontSize="sm">{op.physicalOp}{op.table ? ` on ${op.table}` : ''}</Text>
+                  <Text color="gray.400" fontSize="xs" mt={1}>
+                    {op.logicalReads === null ? 'reads not captured' : `${op.logicalReads.toLocaleString()} logical reads`}
+                    {' · '}{op.actualRows === null ? 'rows not captured' : `${op.actualRows.toLocaleString()} rows`}
+                    {op.executions !== null && op.executions > 1 ? ` · ${op.executions.toLocaleString()} executions` : ''}
+                  </Text>
+                </Box>
+              ))}
+            </Box>
+          </Box>
+        )}
 
         {/* Hot tables */}
         {analysis.ioAnalysis.hotTables.length > 0 && (
@@ -170,16 +393,7 @@ function AnalysisPanel({ analysis, title }: { analysis: AuditAnalysis; title: st
 
         <Separator borderColor="gray.700" />
 
-        {/* Recommendations */}
-        <Box>
-          <Text fontSize="sm" fontWeight="semibold" color="blue.400" mb={3} textTransform="uppercase" letterSpacing="wider">💡 Recommendations</Text>
-          {analysis.recommendations.map((r, i) => (
-            <Flex key={i} gap={2} mb={2} align="flex-start">
-              <Badge colorPalette="blue" variant="subtle" mt="1px" flexShrink={0}>{i + 1}</Badge>
-              <Text color="gray.200" fontSize="sm">{r}</Text>
-            </Flex>
-          ))}
-        </Box>
+        <RecommendationsPanel analysis={analysis} />
       </Box>
     </Box>
   );
@@ -187,13 +401,32 @@ function AnalysisPanel({ analysis, title }: { analysis: AuditAnalysis; title: st
 
 function RawStatsPanel({ execution }: { execution: ExecutionResult }) {
   const [show, setShow] = useState(false);
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const raw = execution.stats.rawOutput;
+  const copyRaw = async () => {
+    try {
+      await navigator.clipboard.writeText(raw);
+      setCopyState('copied');
+    } catch {
+      // Clipboard can be blocked (permissions, insecure page): the text stays selectable in the panel.
+      setCopyState('failed');
+    }
+  };
   return (
     <Box bg="gray.900" borderWidth="1px" borderColor="gray.700" borderRadius="xl" overflow="hidden">
       <Flex justify="space-between" align="center" px={5} py={3} borderBottomWidth="1px" borderColor="gray.700">
-        <Text fontSize="sm" fontWeight="semibold" color="gray.300">📄 Raw Execution Output</Text>
-        <Button size="xs" variant="ghost" colorPalette="gray" onClick={() => setShow(!show)}>
-          {show ? 'Hide' : 'Show'}
-        </Button>
+        <Box>
+          <Text fontSize="sm" fontWeight="semibold" color="gray.300">📄 Raw Execution Output</Text>
+          <Text fontSize="xs" color="gray.500">The server&apos;s messages for this run: the STATISTICS IO and TIME lines and the plan XML. Every number on this page is parsed from this text.</Text>
+        </Box>
+        <Flex gap={2} align="center">
+          <Button size="xs" variant="outline" colorPalette="cyan" aria-label="Copy raw output" onClick={copyRaw} disabled={!raw}>
+            {copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : 'Copy'}
+          </Button>
+          <Button size="xs" variant="ghost" colorPalette="gray" onClick={() => setShow(!show)}>
+            {show ? 'Hide' : 'Show'}
+          </Button>
+        </Flex>
       </Flex>
       {show && (
         <Box p={5}>
@@ -207,14 +440,6 @@ function RawStatsPanel({ execution }: { execution: ExecutionResult }) {
             overflowX="auto" fontFamily="mono" whiteSpace="pre-wrap" lineHeight="tall">
             {execution.stats.rawOutput}
           </Box>
-          {execution.outputs && Object.keys(execution.outputs).length > 0 && (
-            <Box mb={4}>
-              <Text fontSize="xs" color="gray.400" mb={1}>OUTPUT parameters</Text>
-              <Box as="pre" fontSize="xs" color="cyan.300" bg="gray.950" p={3} borderRadius="lg" overflowX="auto" fontFamily="mono">
-                {JSON.stringify(execution.outputs, null, 2)}
-              </Box>
-            </Box>
-          )}
           {execution.recordNumber && (
             <Text fontSize="xs" color="gray.500" mt={3}>📁 Audit log saved</Text>
           )}
@@ -231,6 +456,7 @@ function RawStatsPanel({ execution }: { execution: ExecutionResult }) {
 export default function ExecutePage() {
   const api = useApi();
   const [mode, setMode] = useState<'single' | 'compare'>('single');
+  const [runs, setRuns] = useState(1);
   const [kind, setKind] = useState<'procedure' | 'batch'>('batch');
   const [original, setOriginal] = useState<TargetDraft>(emptyDraft());
   const [optimized, setOptimized] = useState<TargetDraft>(emptyDraft());
@@ -247,6 +473,12 @@ export default function ExecutePage() {
   const [testing, setTesting] = useState(false);
   const [testInfo, setTestInfo] = useState<TestInfo | null>(null);
   const [result, setResult] = useState<ExecuteResult | null>(null);
+  const [usedParams, setUsedParams] = useState<ExecParam[]>([]);
+  const [submittedSql, setSubmittedSql] = useState<{ original: string; optimized: string } | null>(null);
+  // UX-1: the first problem in the inputs, shown next to the Execute button and used to block the run.
+  const inputProblem = (kind === 'procedure' && !isDraftEmpty(kind, original) && targetError(kind, original))
+    || (mode === 'compare' && kind === 'procedure' && !isDraftEmpty(kind, optimized) && targetError(kind, optimized))
+    || null;
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'compare' | 'original' | 'optimized'>('compare');
   const abortRef = useRef<AbortController | null>(null);
@@ -263,6 +495,67 @@ export default function ExecutePage() {
     setPortError(null);
     return true;
   }
+
+  // UX-2: the parameters of the named procedure, read from the database into the rows.
+  const [loadNote, setLoadNote] = useState<{ original: string | null; optimized: string | null }>({ original: null, optimized: null });
+  const loadParams = async (which: 'original' | 'optimized') => {
+    const draft = which === 'original' ? original : optimized;
+    const set = which === 'original' ? setOriginal : setOptimized;
+    const res = await api<{ parameters: { name: string; type: ParamType | null; isOutput: boolean; supported: boolean }[] }>(
+      '/api/execute/parameters',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ engine, name: draft.name.trim(), connection: connection() }),
+      },
+      'Could not read the parameters',
+    );
+    if (!res.ok || !res.data) {
+      setLoadNote((n) => ({ ...n, [which]: res.error ?? 'Could not read the parameters' }));
+      return;
+    }
+    const found = res.data.parameters;
+    const skipped = found.filter((p) => !p.supported).map((p) => p.name);
+    set({
+      ...draft,
+      params: found.map((p) => ({ ...newParamRow(), name: p.name, type: p.type ?? 'nvarchar', output: p.isOutput })),
+    });
+    setLoadNote((n) => ({
+      ...n,
+      [which]: skipped.length ? `Loaded ${found.length}. These types are not supported in the editor, so set them by hand: ${skipped.join(', ')}` : null,
+    }));
+  };
+
+  // UX-3: named parameter sets per procedure, kept in this browser only.
+  const [paramStore, setParamStore] = useState<ParamSetStore>({});
+  useEffect(() => {
+    // Read after mount: browser storage is not available during the server render, so reading it earlier would mismatch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    try { setParamStore(readParamSets(window.localStorage)); } catch { /* storage blocked */ }
+  }, []);
+  const draftOf = (which: 'original' | 'optimized') => (which === 'original' ? original : optimized);
+  const setDraftOf = (which: 'original' | 'optimized') => (which === 'original' ? setOriginal : setOptimized);
+  const saveSet = (which: 'original' | 'optimized', setName: string) => {
+    const d = draftOf(which);
+    const rows: SavedParam[] = d.params.map((p) => ({ name: p.name, type: p.type, value: p.value, isNull: p.isNull, output: p.output }));
+    const next = withSet(paramStore, d.name.trim(), setName, rows);
+    const ok = writeParamSets(window.localStorage, next);
+    setParamStore(next);
+    setLoadNote((n) => ({ ...n, [which]: ok ? `Saved set “${setName}” in this browser.` : 'Could not save the set in this browser (storage is full or blocked).' }));
+  };
+  const loadSet = (which: 'original' | 'optimized', setName: string) => {
+    const d = draftOf(which);
+    const saved = paramStore[d.name.trim()]?.[setName] ?? [];
+    setDraftOf(which)({ ...d, params: saved.map((p) => ({ ...newParamRow(), ...p, type: p.type as ParamType })) });
+    setLoadNote((n) => ({ ...n, [which]: `Loaded set “${setName}”.` }));
+  };
+  const deleteSet = (which: 'original' | 'optimized', setName: string) => {
+    const d = draftOf(which);
+    const next = withoutSet(paramStore, d.name.trim(), setName);
+    writeParamSets(window.localStorage, next);
+    setParamStore(next);
+    setLoadNote((n) => ({ ...n, [which]: `Deleted set “${setName}”.` }));
+  };
 
   const connection = () => ({
     host, port: Number(port), database, username, password,
@@ -310,6 +603,11 @@ export default function ExecutePage() {
     setLoading(true);
     setError(null);
     setResult(null);
+    setUsedParams(orig.target.kind === 'procedure' ? orig.target.params : []);
+    const textOf = (d: TargetDraft) => kind === 'batch'
+      ? d.sql
+      : `${d.name}\n${d.params.map((p) => `  ${p.name} ${p.type} = ${p.isNull ? 'NULL' : p.value}`).join('\n')}`;
+    setSubmittedSql({ original: textOf(original), optimized: textOf(optimized) });
 
     const res = await api<{ result: ExecuteResult }>(
       '/api/execute',
@@ -323,6 +621,7 @@ export default function ExecutePage() {
           ...(engine !== 'simulation' ? { connection: connection() } : {}),
           original: orig.target,
           ...(opt && opt.ok ? { optimized: opt.target } : {}),
+          ...(mode === 'single' && runs > 1 ? { runs } : {}),
         }),
       },
       'Execution failed'
@@ -371,6 +670,17 @@ export default function ExecutePage() {
           >
             Compare Original vs Optimized
           </Button>
+          {mode === 'single' && (
+            <Flex align="center" gap={2}>
+              <Text fontSize="xs" color="gray.400">Runs</Text>
+              <Input
+                size="xs" type="number" min={1} max={20} w="72px" value={runs} aria-label="Runs"
+                onChange={(e) => setRuns(Math.min(20, Math.max(1, Math.trunc(Number(e.target.value) || 1))))}
+                bg="gray.950" borderColor="gray.600" color="white"
+              />
+              <Text fontSize="xs" color="gray.500">1 = one run; more adds a warm-up and summary</Text>
+            </Flex>
+          )}
         </Flex>
 
         {/* Target kind toggle */}
@@ -497,6 +807,12 @@ export default function ExecutePage() {
             <TargetEditor
               kind={kind} draft={original} onChange={setOriginal} color={mode === 'compare' ? 'red.200' : 'cyan.100'}
               placeholder="-- Paste your Stored Procedure here..."
+              onLoadParams={engine === 'mssql' ? () => void loadParams('original') : undefined}
+              loadNote={loadNote.original}
+              setNames={setNamesFor(paramStore, original.name.trim())}
+              onSaveSet={(n) => saveSet('original', n)}
+              onLoadSet={(n) => loadSet('original', n)}
+              onDeleteSet={(n) => deleteSet('original', n)}
             />
           </Box>
 
@@ -509,6 +825,12 @@ export default function ExecutePage() {
               <TargetEditor
                 kind={kind} draft={optimized} onChange={setOptimized} color="green.200"
                 placeholder="-- Paste your Optimized SP here..."
+                onLoadParams={engine === 'mssql' ? () => void loadParams('optimized') : undefined}
+                loadNote={loadNote.optimized}
+                setNames={setNamesFor(paramStore, optimized.name.trim())}
+                onSaveSet={(n) => saveSet('optimized', n)}
+                onLoadSet={(n) => loadSet('optimized', n)}
+                onDeleteSet={(n) => deleteSet('optimized', n)}
               />
             </Box>
           )}
@@ -526,10 +848,13 @@ export default function ExecutePage() {
             onClick={handleExecute}
             loading={loading}
             loadingText="Executing..."
-            disabled={isDraftEmpty(kind, original) || (mode === 'compare' && isDraftEmpty(kind, optimized)) || loading}
+            disabled={isDraftEmpty(kind, original) || (mode === 'compare' && isDraftEmpty(kind, optimized)) || !!inputProblem || loading}
           >
             ▶ Execute & Audit
           </Button>
+          {inputProblem && (
+            <Text fontSize="sm" color="red.300" w="100%" textAlign="right">Fix before running: {inputProblem}</Text>
+          )}
         </Flex>
 
         {/* Loading */}
@@ -566,7 +891,7 @@ export default function ExecutePage() {
 
             {result.mode === 'single' ? (
               <>
-                <AnalysisPanel analysis={result.analysis} title={`📊 Execution Analysis — ${result.execution.spLabel}`} />
+                <AnalysisPanel analysis={result.analysis} title={`📊 Execution Analysis — ${result.execution.spLabel}`} params={usedParams} outputs={result.execution.outputs} />
                 <RawStatsPanel execution={result.execution} />
               </>
             ) : (
@@ -603,16 +928,22 @@ export default function ExecutePage() {
                   ))}
                 </Flex>
 
+                {activeTab === 'compare' && submittedSql && (
+                  <OptimizedPanel
+                    original={result.original.analysis} optimized={result.optimized.analysis}
+                    originalText={submittedSql.original} optimizedText={submittedSql.optimized}
+                  />
+                )}
                 {activeTab === 'compare' && <AnalysisPanel analysis={result.comparison} title="📊 Comparative Audit" />}
                 {activeTab === 'original' && (
                   <>
-                    <AnalysisPanel analysis={result.original.analysis} title="🔴 Original SP Audit" />
+                    <AnalysisPanel analysis={result.original.analysis} title="🔴 Original SP Audit" outputs={result.original.execution.outputs} />
                     <RawStatsPanel execution={result.original.execution} />
                   </>
                 )}
                 {activeTab === 'optimized' && (
                   <>
-                    <AnalysisPanel analysis={result.optimized.analysis} title="🟢 Optimized SP Audit" />
+                    <AnalysisPanel analysis={result.optimized.analysis} title="🟢 Optimized SP Audit" outputs={result.optimized.execution.outputs} />
                     <RawStatsPanel execution={result.optimized.execution} />
                   </>
                 )}
