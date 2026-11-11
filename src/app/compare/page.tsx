@@ -21,10 +21,10 @@ type CompareResponse = {
   result: CompareModelResult;
 };
 
-const WINNER_LABEL: Record<CompareModelResult['winner'], { text: string; palette: string }> = {
-  original: { text: 'Original SP is better', palette: 'red' },
-  optimized: { text: 'Optimized SP is better', palette: 'green' },
-  inconclusive: { text: 'Inconclusive', palette: 'gray' },
+const WINNER_LABEL: Record<CompareModelResult['winner'], { text: string; tone: string }> = {
+  original: { text: 'Original SP is better', tone: 'status.warn' },
+  optimized: { text: 'Optimized SP is better', tone: 'status.ok' },
+  inconclusive: { text: 'Inconclusive', tone: 'fg.muted' },
 };
 
 export default function ComparePage() {
@@ -102,25 +102,21 @@ export default function ComparePage() {
   );
 
   return (
-    <Box minH="100vh" bg="gray.950" color="white">
-      <Container maxW="container.xl" py={10}>
+    <Box color="fg.default">
+      <Container maxW="container.xl" p={0}>
 
         {/* Page Header */}
-        <Box mb={8}>
-          <Flex align="center" gap={3} mb={2}>
-            <Badge colorPalette="purple" size="lg" px={3} py={1} borderRadius="full">R002</Badge>
-            <Heading as="h1" size="2xl" bgGradient="to-r" gradientFrom="purple.400" gradientTo="pink.400" bgClip="text">
-              Compare Stored Procedures
-            </Heading>
-          </Flex>
-          <Text color="gray.400" fontSize="lg">
-            Compare the current and optimized SP side by side with a local model: a verdict, the differences, and the risks of the change. Performance claims need execution metrics.
-          </Text>
-        </Box>
+        <header className="page-header">
+          <div>
+            <p className="page-kicker">Comparison</p>
+            <h2 className="page-title">Compare Stored Procedures</h2>
+            <p className="analysis-note">Compare the current and optimized SP side by side with a local model: a verdict, the differences, and the risks of the change. Performance claims need execution metrics.</p>
+          </div>
+        </header>
 
         {/* Model */}
         <Box mb={5}>
-          <label htmlFor="compare-model" style={{ display: 'block', marginBottom: 8, color: '#cbd5e1', fontSize: 14, fontWeight: 600 }}>
+          <label htmlFor="compare-model" style={{ display: 'block', marginBottom: 8, color: 'var(--text)', fontSize: 14, fontWeight: 600 }}>
             Model
           </label>
           <select
@@ -128,7 +124,7 @@ export default function ComparePage() {
             value={modelId}
             onChange={(e) => setModelId(e.target.value)}
             disabled={models.length === 0}
-            style={{ width: '100%', maxWidth: 520, padding: '8px 10px', borderRadius: 8, background: '#020617', color: '#e5e7eb', border: '1px solid #475569' }}
+            style={{ width: '100%', maxWidth: 520, padding: '8px 10px', borderRadius: 8, background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--panel-border)' }}
           >
             {models.length === 0 ? (
               <option value="">No compatible model installed</option>
@@ -143,10 +139,10 @@ export default function ComparePage() {
         {/* Input Grid */}
         <Grid templateColumns={{ base: '1fr', lg: '1fr 1fr' }} gap={5} mb={6}>
           <GridItem>
-            <Box bg="gray.900" borderWidth="1px" borderColor="gray.700" borderRadius="xl" p={5} h="full">
+            <Box bg="bg.panel" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" p={5} h="full">
               <Flex align="center" gap={2} mb={3}>
-                <Badge colorPalette="red" variant="subtle">ORIGINAL</Badge>
-                <Text color="gray.300" fontSize="sm" fontWeight="semibold" textTransform="uppercase" letterSpacing="wider">
+                <Badge variant="outline" color="accent.default" borderColor="accent.default">ORIGINAL</Badge>
+                <Text color="fg.default" fontSize="sm" fontWeight="semibold" textTransform="uppercase" letterSpacing="wider">
                   Current SP
                 </Text>
               </Flex>
@@ -170,22 +166,22 @@ END`}
                 minH="260px"
                 fontFamily="mono"
                 fontSize="sm"
-                bg="gray.950"
-                color="red.200"
-                borderColor="gray.600"
-                _focus={{ borderColor: 'red.500', boxShadow: '0 0 0 1px var(--chakra-colors-red-500)' }}
-                _placeholder={{ color: 'gray.600' }}
+                bg="bg.canvas"
+                color="fg.default"
+                borderColor="border.subtle"
+                _focus={{ borderColor: 'accent.default', boxShadow: '0 0 0 1px var(--chakra-colors-accent-default)' }}
+                _placeholder={{ color: 'fg.muted' }}
                 resize="vertical"
               />
-              <Text fontSize="xs" color="gray.500" mt={2}>{original.length} characters</Text>
+              <Text fontSize="xs" color="fg.muted" mt={2}>{original.length} characters</Text>
             </Box>
           </GridItem>
 
           <GridItem>
-            <Box bg="gray.900" borderWidth="1px" borderColor="gray.700" borderRadius="xl" p={5} h="full">
+            <Box bg="bg.panel" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" p={5} h="full">
               <Flex align="center" gap={2} mb={3}>
-                <Badge colorPalette="green" variant="subtle">OPTIMIZED</Badge>
-                <Text color="gray.300" fontSize="sm" fontWeight="semibold" textTransform="uppercase" letterSpacing="wider">
+                <Badge variant="outline" color="status.ok" borderColor="status.ok">OPTIMIZED</Badge>
+                <Text color="fg.default" fontSize="sm" fontWeight="semibold" textTransform="uppercase" letterSpacing="wider">
                   Optimized SP
                 </Text>
               </Flex>
@@ -204,14 +200,14 @@ END`}
                 minH="260px"
                 fontFamily="mono"
                 fontSize="sm"
-                bg="gray.950"
-                color="green.200"
-                borderColor="gray.600"
-                _focus={{ borderColor: 'green.500', boxShadow: '0 0 0 1px var(--chakra-colors-green-500)' }}
-                _placeholder={{ color: 'gray.600' }}
+                bg="bg.canvas"
+                color="fg.default"
+                borderColor="border.subtle"
+                _focus={{ borderColor: 'accent.default', boxShadow: '0 0 0 1px var(--chakra-colors-accent-default)' }}
+                _placeholder={{ color: 'fg.muted' }}
                 resize="vertical"
               />
-              <Text fontSize="xs" color="gray.500" mt={2}>{optimized.length} characters</Text>
+              <Text fontSize="xs" color="fg.muted" mt={2}>{optimized.length} characters</Text>
             </Box>
           </GridItem>
         </Grid>
@@ -219,7 +215,7 @@ END`}
         {/* Action */}
         <Flex justify="flex-end" mb={8}>
           <Button
-            colorPalette="purple"
+            colorPalette="brand"
             size="lg"
             px={10}
             onClick={handleCompare}
@@ -234,18 +230,18 @@ END`}
         {/* Loading */}
         {loading && (
           <Flex justify="center" align="center" py={16} gap={4} direction="column" role="status">
-            <Spinner size="xl" color="purple.400" borderWidth="3px" />
-            <Text color="gray.400">Running comparative deep analysis on both Stored Procedures...</Text>
+            <Spinner size="xl" color="accent.default" borderWidth="3px" />
+            <Text color="fg.muted">Running comparative deep analysis on both Stored Procedures...</Text>
           </Flex>
         )}
 
         {/* Error */}
         {error && (
-          <Box bg="red.950" borderWidth="1px" borderColor="red.700" borderRadius="xl" p={5} mb={6} role="alert">
-            <Text color="red.300" fontWeight="semibold">⚠️ Comparison Failed</Text>
-            <Text color="red.400" fontSize="sm" mt={1}>{error}</Text>
+          <Box bg="bg.raised" borderWidth="1px" borderColor="status.bad" borderRadius="xl" p={5} mb={6} role="alert">
+            <Text color="status.bad" fontWeight="semibold">⚠️ Comparison Failed</Text>
+            <Text color="status.bad" fontSize="sm" mt={1}>{error}</Text>
             {details && (
-              <Box as="pre" aria-label="Response preview" mt={3} p={3} bg="gray.950" borderRadius="md" fontSize="xs" color="gray.300" whiteSpace="pre-wrap" overflowWrap="anywhere" maxH="320px" overflow="auto">
+              <Box as="pre" aria-label="Response preview" mt={3} p={3} bg="bg.canvas" borderRadius="md" fontSize="xs" color="fg.default" whiteSpace="pre-wrap" overflowWrap="anywhere" maxH="320px" overflow="auto">
                 {details}
               </Box>
             )}
@@ -256,59 +252,59 @@ END`}
         {result && !loading && (
           <Box>
             {response?.id && (
-              <Box bg="gray.900" borderWidth="1px" borderColor="gray.700" borderRadius="xl" p={4} mb={6}>
-                <Text color="gray.400" fontSize="sm">
+              <Box bg="bg.panel" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" p={4} mb={6}>
+                <Text color="fg.muted" fontSize="sm">
                   To share this result, open it from the{' '}
                   <Link href={`/audit/${response.id}`} style={{ textDecoration: 'underline' }}>audit record</Link>.
                 </Text>
               </Box>
             )}
 
-            <Box bg="gray.900" borderWidth="1px" borderColor="gray.700" borderRadius="xl" p={5} mb={5}>
+            <Box bg="bg.panel" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" p={5} mb={5}>
               <Flex align="center" gap={3} wrap="wrap" mb={3}>
-                <Text fontSize="xs" color="gray.400" fontWeight="semibold" textTransform="uppercase" letterSpacing="wider">Verdict</Text>
-                <Badge colorPalette={WINNER_LABEL[result.winner].palette} size="lg" data-testid="compare-winner">
+                <Text fontSize="xs" color="fg.muted" fontWeight="semibold" textTransform="uppercase" letterSpacing="wider">Verdict</Text>
+                <Badge variant="outline" color={WINNER_LABEL[result.winner].tone} borderColor={WINNER_LABEL[result.winner].tone} size="lg" data-testid="compare-winner">
                   {WINNER_LABEL[result.winner].text}
                 </Badge>
-                <Text fontSize="sm" color="gray.400">Confidence {Math.round(result.confidence * 100)}%</Text>
+                <Text fontSize="sm" color="fg.muted">Confidence {Math.round(result.confidence * 100)}%</Text>
               </Flex>
-              <Text color="gray.100" overflowWrap="anywhere">{result.summary}</Text>
+              <Text color="fg.default" overflowWrap="anywhere">{result.summary}</Text>
             </Box>
 
             <Grid templateColumns={{ base: '1fr', md: '1fr 1fr' }} gap={5} mb={5}>
-              <Box bg="gray.900" borderWidth="1px" borderColor="gray.700" borderRadius="xl" p={5}>
-                <Heading as="h3" size="sm" color="gray.300" mb={3}>Differences ({result.differences.length})</Heading>
+              <Box bg="bg.panel" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" p={5}>
+                <Heading as="h3" size="sm" color="fg.default" mb={3}>Differences ({result.differences.length})</Heading>
                 {result.differences.length === 0 ? (
-                  <Text color="gray.500" fontSize="sm">None reported.</Text>
+                  <Text color="fg.muted" fontSize="sm">None reported.</Text>
                 ) : (
-                  <Box as="ul" pl={5} color="gray.200" fontSize="sm" overflowWrap="anywhere">
+                  <Box as="ul" pl={5} color="fg.default" fontSize="sm" overflowWrap="anywhere">
                     {result.differences.map((d, i) => <li key={i}>{d}</li>)}
                   </Box>
                 )}
               </Box>
-              <Box bg="gray.900" borderWidth="1px" borderColor="gray.700" borderRadius="xl" p={5}>
-                <Heading as="h3" size="sm" color="gray.300" mb={3}>Risks of the change ({result.risks.length})</Heading>
+              <Box bg="bg.panel" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" p={5}>
+                <Heading as="h3" size="sm" color="fg.default" mb={3}>Risks of the change ({result.risks.length})</Heading>
                 {result.risks.length === 0 ? (
-                  <Text color="gray.500" fontSize="sm">None reported.</Text>
+                  <Text color="fg.muted" fontSize="sm">None reported.</Text>
                 ) : (
-                  <Box as="ul" pl={5} color="gray.200" fontSize="sm" overflowWrap="anywhere">
+                  <Box as="ul" pl={5} color="fg.default" fontSize="sm" overflowWrap="anywhere">
                     {result.risks.map((r, i) => <li key={i}>{r}</li>)}
                   </Box>
                 )}
               </Box>
             </Grid>
 
-            <Box bg="gray.900" borderWidth="1px" borderColor="gray.700" borderRadius="xl" p={5}>
-              <Heading as="h3" size="sm" color="gray.300" mb={3}>Execution metrics</Heading>
+            <Box bg="bg.panel" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" p={5}>
+              <Heading as="h3" size="sm" color="fg.default" mb={3}>Execution metrics</Heading>
               {metricRows.length === 0 ? (
-                <Text color="gray.500" fontSize="sm">
+                <Text color="fg.muted" fontSize="sm">
                   No execution metrics were captured, so the verdict is based on the code only. Run both procedures on the Execute page and compare their audit records for measured results.
                 </Text>
               ) : (
                 <Box overflowX="auto">
                   <table aria-label="Execution metrics" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                     <thead>
-                      <tr>{['Metric', 'Original', 'Optimized', 'Change'].map((h) => <th key={h} style={{ textAlign: 'left', padding: '6px 8px', color: '#94a3b8' }}>{h}</th>)}</tr>
+                      <tr>{['Metric', 'Original', 'Optimized', 'Change'].map((h) => <th key={h} style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--muted)' }}>{h}</th>)}</tr>
                     </thead>
                     <tbody>
                       {metricRows.map(([name, m]) => (

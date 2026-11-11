@@ -53,10 +53,12 @@ export async function POST(request: Request) {
     const total = runs > 1 ? WARMUP_RUNS + runs : 1;
 
     const opts = { timeoutMs: cfg.queryTimeoutMs, signal: request.signal, logSqlText: cfg.logSqlText };
+    // "Original" only means something when there is an optimized version to compare it with.
+    const label = req.mode === 'compare' ? 'Original SP' : req.original.kind === 'procedure' ? 'Stored Procedure' : 'SQL Batch';
     const results: ExecutionResult[] = [];
     const samples: RunSample[] = [];
     for (let i = 0; i < total; i++) {
-      const run = await executeSP(req.original, 'Original_SP', req.engine, req.connection, { ...opts, audit: i === total - 1 });
+      const run = await executeSP(req.original, label, req.engine, req.connection, { ...opts, audit: i === total - 1 });
       results.push(run);
       samples.push({ elapsedMs: run.stats.totalElapsedMs, logicalReads: sumReads(run) });
       if (!run.success) break;
@@ -71,7 +73,7 @@ export async function POST(request: Request) {
     let warnings = originalResult.warnings ?? [];
 
     if (req.mode === 'compare' && req.optimized) {
-      const optimizedResult = await executeSP(req.optimized, 'Optimized_SP', req.engine, req.connection, opts);
+      const optimizedResult = await executeSP(req.optimized, 'Optimized SP', req.engine, req.connection, opts);
       allOk = allOk && optimizedResult.success;
       warnings = [...new Set([...warnings, ...(optimizedResult.warnings ?? [])])];
       const { original, optimized, comparison } = compareExecutions(originalResult, optimizedResult);

@@ -516,6 +516,10 @@ Keep API result types synchronized between the route and the client.
 - Keep the response schema stable.
 - Validate generated JSON before returning it to the client.
 
+### Theme
+
+The app is dark-only for now. Each verdict and grade has a colour and a symbol (see `src/lib/status-tone.ts`), and the Execute page shows a verdict key under the verdict card. Colour tokens live in `src/lib/theme-tokens.ts` (`TOKENS.dark`), the Chakra theme in `src/lib/theme.ts` is built from them, and `<html>` carries `class="dark"`. `globals.css` repeats the dark values in its `:root` variables. Every screen uses this one set: Chakra pages use the semantic tokens and `colorPalette="brand"`, and the plain-CSS pages use the `:root` variables. `tests/unit/theme-consistency.test.ts` fails when a page or the stylesheet adds its own colour. A light theme needs a `:root` light block and a toggle.
+
 ### Error handling
 
 API errors should provide an appropriate HTTP status and a concise safe message. Diagnostic model output may be logged locally, but SQL and secrets must not be written to logs unnecessarily.

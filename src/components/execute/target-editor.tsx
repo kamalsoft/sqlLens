@@ -129,10 +129,10 @@ function inputTypeFor(type: ParamType): string {
 function Field({ caption, error, hint, children }: { caption: string; error?: string | null; hint?: string; children: ReactNode }) {
   return (
     <Box flex="1" minW={{ md: '120px' }}>
-      <Text fontSize="xs" color="gray.400" mb={1}>{caption}</Text>
+      <Text fontSize="xs" color="fg.muted" mb={1}>{caption}</Text>
       {children}
-      {error && <Text fontSize="xs" color="red.300" mt={1}>{error}</Text>}
-      {!error && hint && <Text fontSize="xs" color="gray.500" mt={1}>{hint}</Text>}
+      {error && <Text fontSize="xs" color="status.bad" mt={1}>{error}</Text>}
+      {!error && hint && <Text fontSize="xs" color="fg.muted" mt={1}>{hint}</Text>}
     </Box>
   );
 }
@@ -162,8 +162,8 @@ export function TargetEditor({
         value={draft.sql}
         onChange={(e) => onChange({ ...draft, sql: e.target.value })}
         placeholder={placeholder}
-        minH="240px" fontFamily="mono" fontSize="sm" bg="gray.950" color={color}
-        borderColor="gray.600" _placeholder={{ color: 'gray.600' }} resize="vertical"
+        minH="240px" fontFamily="mono" fontSize="sm" bg="bg.canvas" color={color}
+        borderColor="border.subtle" _placeholder={{ color: 'fg.muted' }} resize="vertical"
       />
     );
   }
@@ -176,41 +176,41 @@ export function TargetEditor({
         <Input
           size="md" value={draft.name} aria-label="Procedure name" aria-invalid={!!procError}
           onChange={(e) => onChange({ ...draft, name: e.target.value })}
-          placeholder="dbo.MyProcedure" bg="gray.950" borderColor="gray.600" color="white" mb={4}
+          placeholder="dbo.MyProcedure" bg="bg.canvas" borderColor="border.subtle" color="fg.default" mb={4}
         />
       </Field>
       <Flex align="center" justify="space-between" gap={3} mb={2} wrap="wrap">
-        <Text fontSize="xs" color="gray.400">Parameters</Text>
+        <Text fontSize="xs" color="fg.muted">Parameters</Text>
         {onLoadParams && (
-          <Button size="sm" variant="outline" colorPalette="cyan" onClick={onLoadParams} disabled={!draft.name.trim()}>
+          <Button size="sm" variant="outline" colorPalette="brand" onClick={onLoadParams} disabled={!draft.name.trim()}>
             Load parameters from database
           </Button>
         )}
       </Flex>
-      {loadNote && <Text fontSize="xs" color="yellow.300" mb={2}>{loadNote}</Text>}
+      {loadNote && <Text fontSize="xs" color="status.warn" mb={2}>{loadNote}</Text>}
       {onSaveSet && onLoadSet && onDeleteSet && (
         <Flex gap={2} wrap="wrap" align="center" mb={3}>
           <select
             aria-label="Saved parameter sets" value={chosen} onChange={(e) => setChosen(e.target.value)}
-            className="rounded-md border border-gray-600 bg-gray-800 px-3 py-2 text-white" style={{ minHeight: 40 }}
+            className="rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-2 text-[var(--text)]" style={{ minHeight: 40 }}
           >
             <option value="">Saved sets</option>
             {(setNames ?? []).map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
           <Button size="sm" variant="outline" disabled={!chosen} onClick={() => onLoadSet(chosen)}>Load set</Button>
-          <Button size="sm" variant="ghost" colorPalette="red" disabled={!chosen} onClick={() => { onDeleteSet(chosen); setChosen(''); }}>Delete set</Button>
+          <Button size="sm" variant="ghost" color="status.bad" disabled={!chosen} onClick={() => { onDeleteSet(chosen); setChosen(''); }}>Delete set</Button>
           <Input
             size="md" aria-label="New set name" placeholder="Name this set" value={newSetName}
-            onChange={(e) => setNewSetName(e.target.value)} bg="gray.950" borderColor="gray.600" color="white" w={{ base: '100%', md: '200px' }}
+            onChange={(e) => setNewSetName(e.target.value)} bg="bg.canvas" borderColor="border.subtle" color="fg.default" w={{ base: '100%', md: '200px' }}
           />
           <Button
-            size="sm" variant="outline" colorPalette="green"
+            size="sm" variant="outline" color="accent.default"
             disabled={!newSetName.trim() || draft.params.length === 0}
             onClick={() => { onSaveSet(newSetName.trim()); setChosen(newSetName.trim()); setNewSetName(''); }}
           >
             Save set
           </Button>
-          <Text fontSize="xs" color="gray.500" w="100%">Saved in this browser only. Passwords and connection details are never saved.</Text>
+          <Text fontSize="xs" color="fg.muted" w="100%">Saved in this browser only. Passwords and connection details are never saved.</Text>
         </Flex>
       )}
       <Box display="flex" flexDirection="column" gap={3} mb={3}>
@@ -220,22 +220,22 @@ export function TargetEditor({
           return (
             <Flex
               key={row.id} direction={{ base: 'column', md: 'row' }} gap={3}
-              align={{ base: 'stretch', md: 'flex-end' }} wrap="wrap" p={3} bg="gray.900" borderRadius="lg"
-              borderWidth="1px" borderColor={valueError || nameError ? 'red.700' : 'gray.700'}
+              align={{ base: 'stretch', md: 'flex-end' }} wrap="wrap" p={3} bg="bg.panel" borderRadius="lg"
+              borderWidth="1px" borderColor={valueError || nameError ? 'status.bad' : 'border.subtle'}
             >
               <Field caption="Name" error={nameError}>
                 <Input
                   size="md" value={row.name} aria-label={`Parameter ${i + 1} name`} placeholder="@StartDate"
                   aria-invalid={!!nameError}
                   onChange={(e) => setRow(row.id, { name: e.target.value })}
-                  bg="gray.950" borderColor="gray.600" color="white"
+                  bg="bg.canvas" borderColor="border.subtle" color="fg.default"
                 />
               </Field>
               <Field caption="Type">
                 <select
                   aria-label={`Parameter ${i + 1} type`} value={row.type}
                   onChange={(e) => setRow(row.id, { type: e.target.value as ParamType })}
-                  className="w-full rounded-md border border-gray-600 bg-gray-800 px-3 py-2 text-white"
+                  className="w-full rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-2 text-[var(--text)]"
                   style={{ minHeight: 40 }}
                 >
                   {PARAM_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -249,11 +249,11 @@ export function TargetEditor({
                   inputMode={row.type === 'int' || row.type === 'bigint' || row.type === 'decimal' ? 'decimal' : undefined}
                   disabled={row.isNull}
                   onChange={(e) => setRow(row.id, { value: e.target.value })}
-                  bg="gray.950" borderColor="gray.600" color="white"
+                  bg="bg.canvas" borderColor="border.subtle" color="fg.default"
                 />
               </Field>
               <Flex gap={4} align="center" minH="40px">
-                <label className="flex items-center gap-2 text-sm text-gray-300">
+                <label className="flex items-center gap-2 text-sm text-[var(--text)]">
                   <input
                     type="checkbox" checked={row.isNull} aria-label={`Parameter ${i + 1} is NULL`}
                     onChange={(e) => setRow(row.id, { isNull: e.target.checked })}
@@ -261,7 +261,7 @@ export function TargetEditor({
                   />
                   NULL
                 </label>
-                <label className="flex items-center gap-2 text-sm text-gray-300">
+                <label className="flex items-center gap-2 text-sm text-[var(--text)]">
                   <input
                     type="checkbox" checked={row.output} aria-label={`Parameter ${i + 1} is OUTPUT`}
                     onChange={(e) => setRow(row.id, { output: e.target.checked })}
@@ -271,7 +271,7 @@ export function TargetEditor({
                 </label>
               </Flex>
               <Button
-                size="md" variant="ghost" colorPalette="red" aria-label={`Remove parameter ${i + 1}`}
+                size="md" variant="ghost" color="status.bad" aria-label={`Remove parameter ${i + 1}`}
                 onClick={() => onChange({ ...draft, params: draft.params.filter((r) => r.id !== row.id) })}
               >
                 Remove
