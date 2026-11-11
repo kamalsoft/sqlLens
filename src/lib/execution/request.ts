@@ -72,7 +72,9 @@ function parseTarget(raw: unknown, field: string, engine: EngineName, maxSqlLeng
       const v = p.value;
       if (!(v === null || isString(v) || isNumber(v) || isBoolean(v))) return fail('Invalid parameter value', `${f}.value`);
       try { coerceParam(p.type as ParamType, v); } catch { return fail(`Value does not match type ${p.type}`, `${f}.value`); }
-      params.push({ name: p.name, type: p.type as ParamType, value: v });
+      if (p.output !== undefined && !isBoolean(p.output)) return fail('Invalid parameter output flag', `${f}.output`);
+      if (p.output === true && engine !== 'mssql') return fail('OUTPUT parameters are supported for MSSQL only', `${f}.output`);
+      params.push({ name: p.name, type: p.type as ParamType, value: v, ...(p.output === true ? { output: true } : {}) });
     }
     return { ok: true, value: { kind: 'procedure', name: raw.name, params } };
   }

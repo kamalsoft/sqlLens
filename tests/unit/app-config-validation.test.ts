@@ -50,4 +50,11 @@ describe("shareTtlHours", () => {
     expect(validateConfigChanges({ shareTtlHours: 720 }).ok).toBe(true);
     expect(validateConfigChanges({ shareTtlHours: 721 }).ok).toBe(false);
   });
+
+  it("accepts null (not set) and positive integers for the P8-02 targets", () => {
+    expect(validateConfigChanges({ maxLogicalReads: null, maxElapsedMs: null, maxScanCount: null }).ok).toBe(true);
+    expect(validateConfigChanges({ maxLogicalReads: 5000, maxElapsedMs: 200, maxScanCount: 3 }).ok).toBe(true);
+    expect(validateConfigChanges({ maxLogicalReads: 0 }).ok).toBe(false);
+    expect(validateConfigChanges({ maxElapsedMs: "200" }).ok).toBe(false);
+  });
 });

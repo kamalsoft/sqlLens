@@ -66,6 +66,14 @@ export function splitStatements(sql: string, dialect: Dialect): string[] {
   return parts.map((p) => p.trim()).filter((p) => maskSql(p, dialect).trim().length > 0);
 }
 
+/**
+ * SSMS batch separators: split on lines holding only GO, which the driver cannot run.
+ * shortcut: a GO line inside a multi-line string or block comment also splits, a rare case, upgrade with a real tokenizer.
+ */
+export function splitGoBatches(sql: string): string[] {
+  return sql.split(/^[ \t]*GO[ \t]*\r?$/im).map((b) => b.trim()).filter((b) => b.length > 0);
+}
+
 export function firstKeyword(statement: string, dialect: Dialect): string {
   const m = /^\s*([A-Za-z]+)/.exec(maskSql(statement, dialect));
   return m ? m[1].toUpperCase() : '';

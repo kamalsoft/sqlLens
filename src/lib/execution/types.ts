@@ -10,7 +10,8 @@ export const PARAM_TYPES = [
 export type ParamType = (typeof PARAM_TYPES)[number];
 
 export type ParamValue = string | number | boolean | null;
-export interface ExecParam { name: string; type: ParamType; value: ParamValue }
+/** `output`: MSSQL OUTPUT parameter; its value is returned in `DriverOutcome.outputs`. */
+export interface ExecParam { name: string; type: ParamType; value: ParamValue; output?: boolean }
 
 export type ExecTarget =
   | { kind: 'procedure'; name: string; params: ExecParam[] }
@@ -31,7 +32,7 @@ export interface ExecConnection {
 
 export interface ExecOptions { timeoutMs: number; signal?: AbortSignal }
 
-export interface DriverOutcome { stats: ExecutionStats; warnings: string[] }
+export interface DriverOutcome { stats: ExecutionStats; warnings: string[]; outputs?: Record<string, unknown> }
 
 export const TLS_WARNING = 'TLS verification disabled';
 

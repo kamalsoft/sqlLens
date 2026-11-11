@@ -35,6 +35,8 @@ export interface ExecutionResult {
   stats: ExecutionStats;
   /** TLS or policy warnings (P6-08). */
   warnings?: string[];
+  /** Values of OUTPUT parameters (MSSQL procedure mode only). */
+  outputs?: Record<string, unknown>;
   success: boolean;
   error?: string;
 }
@@ -85,6 +87,7 @@ function writeAuditLog(
   stats: ExecutionStats,
   engine: string,
   logSqlText: boolean,
+  outputs?: Record<string, unknown>,
 ): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const filename = `${recordNumber}_${spLabel.replace(/\s+/g, '_')}_${timestamp}.txt`;
@@ -116,6 +119,7 @@ function writeAuditLog(
       `lob read-ahead reads ${row.lobReadAheadReads}.`
     ).join('\n'),
     '',
+    ...(outputs ? ['--- OUTPUT PARAMETERS ---', JSON.stringify(outputs, null, 2), ''] : []),
     '--- MESSAGES ---',
     stats.messages.join('\n'),
     '',
@@ -258,6 +262,7 @@ export async function executeSP(
   try {
     let stats: ExecutionStats;
     let warnings: string[] = [];
+    let outputs: Record<string, unknown> | undefined;
 
     if (engine === 'mssql' || engine === 'postgres') {
       if (!connection) throw new Error('connection is required');
@@ -266,12 +271,13 @@ export async function executeSP(
         : await executePostgres(connection, target, opts);
       stats = out.stats;
       warnings = out.warnings;
+      outputs = out.outputs;
     } else {
       stats = simulateExecution(text, spLabel);
     }
 
-    writeAuditLog(recordNumber, spLabel, text, stats, engine, opts.logSqlText);
-    return { recordNumber, spLabel, connectionEngine: engine, executedAt, stats, warnings, success: true };
+    writeAuditLog(recordNumber, spLabel, text, stats, engine, opts.logSqlText, outputs);
+    return { recordNumber, spLabel, connectionEngine: engine, executedAt, stats, warnings, outputs, success: true };
   } catch (err) {
     if (err instanceof ExecTimeoutError || err instanceof ExecAbortError) {
       failed(err.message);

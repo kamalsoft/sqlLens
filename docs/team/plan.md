@@ -393,6 +393,58 @@ Blocked tasks: none — all decisions D-016–D-032 APPROVED 2026-10-24. Live DB
 
 ---
 
+## Phase 8 — Prod-readiness analysis of stored procedure runs (PROPOSED, blocked by D-037)
+
+Goal: from measured I/O, time and statistics, tell the user whether a stored procedure is ready for production or needs optimization. The user makes the deployment decision; the app gives the evidence and a verdict.
+
+Contingent flow (each step has a branch):
+1. **Evidence gate.** Logical reads, elapsed time and the plan must all be captured. If any is missing, the verdict is `INSUFFICIENT EVIDENCE` and names what is missing and how to get it (e.g. "procedure reads no tables: run with representative parameters", or "STATISTICS IO not in output: re-run"). No grade.
+2. **Threshold gate.** Compare against user-set targets (max logical reads, max elapsed, max scans, per table). All within target → `READY`. Any over → `OPTIMIZE`, with the operator and table that drove the cost.
+3. **Variance gate** (only if P8-03 is authorized). If the spread between runs is high, the verdict is `UNSTABLE`, not `READY`.
+4. **Optimize loop.** On `OPTIMIZE`, the user submits a candidate in compare mode. The app re-runs both and gives `IMPROVED` / `NO CHANGE` / `REGRESSED`. Only `READY` on the candidate closes the loop.
+
+#### P8-01 Evidence gate; no grade from time alone
+- Owner/Reviewer: sql-engine / qa · Deps: — · Risk: L
+- Files: `src/lib/audit-analyzer.ts`, `tests/unit/audit-analyzer.test.ts`, `src/app/execute/page.tsx`
+- AC: (1) A run that captured no I/O is not graded; the grade is `Not graded` and the text says why. (2) The analysis never says "Excellent" when reads or scans are "Not captured". (3) Test covers a time-only run, an I/O-only run and a full run.
+- Tests: unit (analyzer) · Docs: `docs/api.md` if the response shape changes
+
+#### P8-02 Prod-readiness verdict with configurable thresholds
+- Owner/Reviewer: backend / qa · Deps: P8-01, D-037 · Risk: M (config and API contract)
+- Files: `src/lib/app-config.ts`, `src/app/api/appconfig/route.ts`, `src/lib/audit-analyzer.ts`, `src/app/execute/page.tsx`
+- AC: (1) New config fields, default unset: `maxLogicalReads`, `maxElapsedMs`, `maxScanCount`. (2) PUT validates them and merges on the current config. (3) The verdict is `READY`, `OPTIMIZE`, or `INSUFFICIENT EVIDENCE`, with the reason and the operator or table that drove it. (4) With no thresholds set, the verdict is `INSUFFICIENT EVIDENCE: no targets set`. (5) IMPLEMENTED 2026-11-11 per D-039 (row counts from `sys.partitions`, not `COUNT(*)`). Earlier note: the plan's `TableCardinality` was removed because it is stale compile-time metadata. the `TableCardinality` check was removed; plan cardinality is compile-time metadata and gave a false `0 rows` on a run that read 1,000,000 Customers rows. Replacement is a read-only COUNT per table, pending D-039.
+- Tests: API (PUT validation) and analyzer (each verdict) · Docs: `docs/configuration.md`, `docs/api.md`
+
+#### P8-03 Multi-run statistics (needs live authorization per run)
+- Owner/Reviewer: sql-engine / security · Deps: P8-02 · Risk: H (executes the procedure repeatedly against a real database)
+- Files: `src/lib/sp-executor.ts`, `src/app/api/execute/route.ts`, `src/lib/execution/mssql.ts`
+- AC: (1) Runs N times (default 5, max set in config); the first run is a warm-up and is discarded. (2) Reports median and p95 for elapsed and logical reads, and the spread. (3) Each run keeps the same cancel and timeout behaviour. (4) Stops on the first error and reports it. (5) Security sign-off before merge.
+- Tests: mocked driver (N runs, warm-up dropped, stop on error) · Docs: `docs/api.md`
+- Fallback if not authorized: the verdict uses one run and says `single run, variance unknown`.
+
+#### P8-04 Deep analysis report
+- Owner/Reviewer: frontend / qa · Deps: P8-02 · Risk: L
+- Files: `src/app/execute/page.tsx`, `src/components/compare/CompareVerdict.tsx`
+- AC: (1) Shows the verdict first, then I/O per table, scan count, the time breakdown (parse, execute, elapsed), the plan operators with the largest cost, and the parameter values used. (2) Shows "Not captured" only where the data is missing, with the reason. (3) Works at phone width with no horizontal page scroll.
+- Tests: component tests for each verdict · Docs: none beyond the page help text
+
+#### P8-05 Record the verdict
+- Owner/Reviewer: backend / qa · Deps: P8-02 · Risk: L
+- Files: `src/lib/sp-executor.ts` (audit log), `src/app/api/audit/`
+- AC: (1) The audit log stores the verdict, the thresholds used, and the run count. (2) The verdict is visible on the audit record and the share link. (3) Thresholds are stored with the verdict, so a later change does not rewrite old verdicts.
+- Tests: audit write and read · Docs: `docs/api.md`
+
+Not in this phase: automatic deployment, changing the procedure, or any write to the target database beyond the existing rolled-back run.
+
+## Phase 9 — Windows authentication for MSSQL (PROPOSED, blocked by D-038)
+
+#### P9-01 NTLM (Windows) login for MSSQL connections
+- Owner/Reviewer: backend / security · Deps: D-038 · Risk: H (credentials and auth on the SQL connection)
+- Files: `src/lib/execution/types.ts`, `src/lib/execution/request.ts`, `src/lib/execution/mssql.ts`, `src/app/execute/page.tsx`
+- AC: (1) A connection may set `authType: "sql" | "windows"` (default `sql`). With `windows`, `domain` is required and `username` and `password` are sent as NTLM credentials. (2) The password is never stored, logged, or echoed in errors (`scrubConnection` covers the new fields). (3) Connection test and execution both support it. (4) The UI shows a Domain field only for Windows auth. (5) Security sign-off before merge.
+- Tests: request validation (missing domain → 400), driver config built with `authentication.type: 'ntlm'`, password scrubbing.
+- Not in scope: SSPI/Integrated Security (D-038 B) and Kerberos.
+
 ## DoD traceability (9/9)
 
 | DoD criterion | Tasks |

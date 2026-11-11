@@ -25,6 +25,10 @@ export type AppConfig = {
   maxNewTokens: number;
   logSqlText: boolean;
   shareTtlHours: number;
+  /** P8-02 targets for the prod-readiness verdict. null = not set. */
+  maxLogicalReads: number | null;
+  maxElapsedMs: number | null;
+  maxScanCount: number | null;
 };
 
 export const defaultAppConfig: AppConfig = {
@@ -45,6 +49,9 @@ export const defaultAppConfig: AppConfig = {
   maxNewTokens: 1536,
   logSqlText: true,
   shareTtlHours: 24,
+  maxLogicalReads: null,
+  maxElapsedMs: null,
+  maxScanCount: null,
 };
 
 type Rule = (v: unknown) => boolean;
@@ -92,6 +99,7 @@ const safeDirectory: Rule = (v) => {
 
 const str: Rule = (v) => typeof v === "string" && v.length > 0 && v.length <= 1024;
 const bool: Rule = (v) => typeof v === "boolean";
+const optionalInt = (min: number, max: number): Rule => (v) => v === null || int(min, max)(v);
 const int =
   (min: number, max: number): Rule =>
   (v) => typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
@@ -122,6 +130,9 @@ const rules: Record<keyof AppConfig, Rule> = {
   maxNewTokens: int(64, 8192),
   logSqlText: bool,
   shareTtlHours: int(1, 720),
+  maxLogicalReads: optionalInt(1, 1e12),
+  maxElapsedMs: optionalInt(1, 3_600_000),
+  maxScanCount: optionalInt(1, 1e9),
 };
 
 /**

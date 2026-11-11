@@ -1,6 +1,6 @@
 import sql from 'mssql';
 import { parseMssqlStatistics } from '../telemetry/mssql';
-import { assertNoDynamicExec } from './sql-scan';
+import { assertNoDynamicExec, splitGoBatches } from './sql-scan';
 import {
   coerceParam, ExecAbortError, ExecTimeoutError, onAbort, TLS_WARNING,
   type DriverOutcome, type ExecConnection, type ExecOptions, type ExecTarget, type ParamType,
@@ -10,7 +10,8 @@ interface InfoMessage { message?: string }
 interface MssqlRequestLike {
   on(event: 'info', cb: (m: InfoMessage) => void): void;
   input(name: string, type: unknown, value: unknown): void;
-  execute(name: string): Promise<{ recordsets?: unknown[] }>;
+  output(name: string, type: unknown, value: unknown): void;
+  execute(name: string): Promise<{ recordsets?: unknown[]; output?: Record<string, unknown> }>;
   batch(text: string): Promise<{ recordsets?: unknown[] }>;
   cancel(): void;
 }
@@ -111,29 +112,49 @@ export async function executeMssql(
     checkFlags();
 
     const infos: string[] = [];
-    const req = mk();
-    current = req;
-    req.on('info', (m) => { if (m?.message) infos.push(String(m.message)); });
+    const recordsets: unknown[] = [];
+    let outputs: Record<string, unknown> | undefined;
+    const newRequest = (): MssqlRequestLike => {
+      const r = mk();
+      current = r;
+      r.on('info', (m) => { if (m?.message) infos.push(String(m.message)); });
+      return r;
+    };
 
     const started = performance.now();
-    let result: { recordsets?: unknown[] };
     if (target.kind === 'procedure') {
+      const req = newRequest();
       for (const p of target.params) {
-        req.input(p.name.replace(/^@/, ''), sqlType(p.type), coerceParam(p.type, p.value));
+        const bind = p.output ? req.output.bind(req) : req.input.bind(req);
+        bind(p.name.replace(/^@/, ''), sqlType(p.type), coerceParam(p.type, p.value));
       }
-      result = await req.execute(target.name);
+      const called = await req.execute(target.name);
+      recordsets.push(...(called.recordsets ?? []));
+      outputs = called.output ?? {};
     } else {
-      result = await req.batch(target.sql);
+      // D-036: GO separators run as separate batches inside the same transaction.
+      for (const part of splitGoBatches(target.sql)) {
+        recordsets.push(...((await newRequest().batch(part)).recordsets ?? []));
+        checkFlags();
+      }
     }
     const wallMs = performance.now() - started;
     checkFlags();
 
     const stats = parseMssqlStatistics(infos.join('\n'));
-    stats.plan = extractPlans(result.recordsets);
+    stats.plan = extractPlans(recordsets);
     stats.messages = infos.filter((m) => !NOISE.test(m));
     // Wall time is a real measurement, used only when the server reported no timing.
     if (stats.totalElapsedMs === null) stats.totalElapsedMs = Math.round(wallMs);
-    return { stats, warnings };
+    // D-039: row counts for the real tables the run read. Read-only, same transaction, no user SQL.
+    const tables = realTables(stats.io);
+    if (tables.length > 0) {
+      const counter = mk();
+      current = counter;
+      stats.tableRows = await countRows(counter, tables);
+      checkFlags();
+    }
+    return { stats, warnings, outputs };
   } catch (err) {
     if (err instanceof ExecAbortError || err instanceof ExecTimeoutError) throw err;
     if (aborted) throw new ExecAbortError();
@@ -146,6 +167,33 @@ export async function executeMssql(
     if (tx && txAttempted) { try { await tx.rollback(); } catch { /* no active transaction */ } }
     try { await pool.close(); } catch { /* already closed */ }
   }
+}
+
+/** Real tables the run read: no temp tables, system worktables, or names that are not plain identifiers. */
+const COUNT_TABLE_LIMIT = 50;
+function realTables(io: { table: string }[]): string[] {
+  const names = [...new Set(io.map((r) => r.table))]
+    .filter((t) => !t.startsWith('#') && t !== 'Worktable' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(t));
+  return names.slice(0, COUNT_TABLE_LIMIT);
+}
+
+/**
+ * Row counts from catalog metadata (sys.partitions). Table names are bound as parameters, never
+ * spliced into SQL. shortcut: a count from partition metadata, not COUNT_BIG(*); exact for committed rows.
+ */
+async function countRows(req: MssqlRequestLike, tables: string[]): Promise<Record<string, number>> {
+  tables.forEach((t, i) => req.input(`t${i}`, sql.NVarChar(128), t));
+  const names = tables.map((_, i) => `@t${i}`).join(', ');
+  const r = await req.batch(
+    `SELECT o.name AS tableName, SUM(p.[rows]) AS rowCount FROM sys.objects AS o ` +
+    `INNER JOIN sys.partitions AS p ON p.object_id = o.object_id AND p.index_id IN (0, 1) ` +
+    `WHERE o.type = 'U' AND o.name IN (${names}) GROUP BY o.name`,
+  );
+  const out: Record<string, number> = {};
+  for (const row of (r.recordsets?.[0] ?? []) as { tableName: string; rowCount: number | string | null }[]) {
+    if (row.rowCount !== null) out[row.tableName] = Number(row.rowCount);
+  }
+  return out;
 }
 
 export async function testMssqlConnection(

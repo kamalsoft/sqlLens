@@ -7,18 +7,18 @@ export const PARAM_TYPES = [
 ] as const;
 export type ParamType = (typeof PARAM_TYPES)[number];
 export type ParamValue = string | number | boolean | null;
-export type ExecParam = { name: string; type: ParamType; value: ParamValue };
+export type ExecParam = { name: string; type: ParamType; value: ParamValue; output?: boolean };
 export type ExecTarget =
   | { kind: 'procedure'; name: string; params: ExecParam[] }
   | { kind: 'batch'; sql: string };
 
-export type ParamRow = { id: number; name: string; type: ParamType; value: string; isNull: boolean };
+export type ParamRow = { id: number; name: string; type: ParamType; value: string; isNull: boolean; output: boolean };
 export type TargetDraft = { name: string; params: ParamRow[]; sql: string };
 
 export const emptyDraft = (): TargetDraft => ({ name: '', params: [], sql: '' });
 
 let nextId = 1;
-export const newParamRow = (): ParamRow => ({ id: nextId++, name: '', type: 'nvarchar', value: '', isNull: false });
+export const newParamRow = (): ParamRow => ({ id: nextId++, name: '', type: 'nvarchar', value: '', isNull: false, output: false });
 
 function coerce(row: ParamRow): { ok: true; value: ParamValue } | { ok: false; error: string } {
   if (row.isNull) return { ok: true, value: null };
@@ -51,7 +51,7 @@ export function buildTarget(
   for (const row of draft.params) {
     const c = coerce(row);
     if (!c.ok) return c;
-    params.push({ name: row.name.trim(), type: row.type, value: c.value });
+    params.push({ name: row.name.trim(), type: row.type, value: c.value, ...(row.output ? { output: true } : {}) });
   }
   return { ok: true, target: { kind, name: draft.name.trim(), params } };
 }
@@ -116,6 +116,13 @@ export function TargetEditor({
               onChange={(e) => setRow(row.id, { isNull: e.target.checked })}
             />
             NULL
+          </label>
+          <label className="flex items-center gap-1 text-xs text-gray-400">
+            <input
+              type="checkbox" checked={row.output} aria-label={`Parameter ${i + 1} is OUTPUT`}
+              onChange={(e) => setRow(row.id, { output: e.target.checked })}
+            />
+            OUTPUT
           </label>
           <Button
             size="xs" variant="ghost" colorPalette="red" aria-label={`Remove parameter ${i + 1}`}

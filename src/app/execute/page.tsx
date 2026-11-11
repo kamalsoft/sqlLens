@@ -207,6 +207,14 @@ function RawStatsPanel({ execution }: { execution: ExecutionResult }) {
             overflowX="auto" fontFamily="mono" whiteSpace="pre-wrap" lineHeight="tall">
             {execution.stats.rawOutput}
           </Box>
+          {execution.outputs && Object.keys(execution.outputs).length > 0 && (
+            <Box mb={4}>
+              <Text fontSize="xs" color="gray.400" mb={1}>OUTPUT parameters</Text>
+              <Box as="pre" fontSize="xs" color="cyan.300" bg="gray.950" p={3} borderRadius="lg" overflowX="auto" fontFamily="mono">
+                {JSON.stringify(execution.outputs, null, 2)}
+              </Box>
+            </Box>
+          )}
           {execution.recordNumber && (
             <Text fontSize="xs" color="gray.500" mt={3}>📁 Audit log saved</Text>
           )}
@@ -232,6 +240,7 @@ export default function ExecutePage() {
   const [database, setDatabase] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [trustCert, setTrustCert] = useState(true);
 
   const [loading, setLoading] = useState(false);
@@ -418,7 +427,29 @@ export default function ExecutePage() {
                 </Box>
                 <Box>
                   <Text fontSize="xs" color="gray.400" mb={1}>Password</Text>
-                  <Input size="sm" type="password" value={password} onChange={e => setPassword(e.target.value)} bg="gray.800" borderColor="gray.600" color="white" placeholder="••••••••" />
+                  <Box position="relative">
+                    <Input size="sm" type={showPassword ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} bg="gray.800" borderColor="gray.600" color="white" placeholder="••••••••" pr={9} />
+                    <Button
+                      type="button"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      aria-pressed={showPassword}
+                      onClick={() => setShowPassword(!showPassword)}
+                      position="absolute"
+                      right={1}
+                      top="50%"
+                      transform="translateY(-50%)"
+                      size="xs"
+                      variant="ghost"
+                      colorPalette="gray"
+                      px={1}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" />
+                        <circle cx="12" cy="12" r="3" />
+                        {showPassword && <line x1="3" y1="3" x2="21" y2="21" />}
+                      </svg>
+                    </Button>
+                  </Box>
                 </Box>
                 {engine === 'mssql' && (
                   <Flex align="center" gap={3} pt={4}>
