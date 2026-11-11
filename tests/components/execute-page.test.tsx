@@ -47,11 +47,13 @@ describe("ExecutePage", () => {
     await user.click(screen.getByRole("button", { name: "Procedure" }));
     await user.type(screen.getByLabelText("Procedure name"), "p");
     await user.click(screen.getByRole("button", { name: "Add parameter" }));
+    await user.type(screen.getByLabelText("Parameter 1 name"), "@id");
     fireEvent.change(screen.getByLabelText("Parameter 1 type"), { target: { value: "int" } });
     await user.type(screen.getByLabelText("Parameter 1 value"), "abc");
-    await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
+    // UX-1: the run is blocked while the input is invalid, and the reason is shown next to the button.
+    expect(screen.getByRole("button", { name: /Execute & Audit/ })).toBeDisabled();
+    expect(screen.getByText(/Fix before running: Parameter @id must be a number/)).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(await screen.findByRole("alert")).toHaveTextContent("must be a number");
   });
 
   it("tests a live connection via /api/connections/test", async () => {

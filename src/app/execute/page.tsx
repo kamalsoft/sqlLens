@@ -10,7 +10,7 @@ import type { ExecParam } from '@/components/execute/target-editor';
 import type { ExecutionResult } from '@/lib/sp-executor';
 import { useApi } from '@/components/api-client';
 import {
-  TargetEditor, buildTarget, emptyDraft, isDraftEmpty,
+  TargetEditor, buildTarget, emptyDraft, isDraftEmpty, targetError,
   type TargetDraft,
 } from '@/components/execute/target-editor';
 
@@ -459,6 +459,10 @@ export default function ExecutePage() {
   const [result, setResult] = useState<ExecuteResult | null>(null);
   const [usedParams, setUsedParams] = useState<ExecParam[]>([]);
   const [submittedSql, setSubmittedSql] = useState<{ original: string; optimized: string } | null>(null);
+  // UX-1: the first problem in the inputs, shown next to the Execute button and used to block the run.
+  const inputProblem = (kind === 'procedure' && !isDraftEmpty(kind, original) && targetError(kind, original))
+    || (mode === 'compare' && kind === 'procedure' && !isDraftEmpty(kind, optimized) && targetError(kind, optimized))
+    || null;
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'compare' | 'original' | 'optimized'>('compare');
   const abortRef = useRef<AbortController | null>(null);
@@ -755,10 +759,13 @@ export default function ExecutePage() {
             onClick={handleExecute}
             loading={loading}
             loadingText="Executing..."
-            disabled={isDraftEmpty(kind, original) || (mode === 'compare' && isDraftEmpty(kind, optimized)) || loading}
+            disabled={isDraftEmpty(kind, original) || (mode === 'compare' && isDraftEmpty(kind, optimized)) || !!inputProblem || loading}
           >
             ▶ Execute & Audit
           </Button>
+          {inputProblem && (
+            <Text fontSize="sm" color="red.300" w="100%" textAlign="right">Fix before running: {inputProblem}</Text>
+          )}
         </Flex>
 
         {/* Loading */}

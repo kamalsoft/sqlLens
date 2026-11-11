@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { Box, Button, Flex, Input, Text, Textarea } from '@chakra-ui/react';
 
 export const PARAM_TYPES = [
@@ -20,25 +21,83 @@ export const emptyDraft = (): TargetDraft => ({ name: '', params: [], sql: '' })
 let nextId = 1;
 export const newParamRow = (): ParamRow => ({ id: nextId++, name: '', type: 'nvarchar', value: '', isNull: false, output: false });
 
-function coerce(row: ParamRow): { ok: true; value: ParamValue } | { ok: false; error: string } {
-  if (row.isNull) return { ok: true, value: null };
+const NAME_RE = /^@?[A-Za-z_][A-Za-z0-9_]*$/;
+const PROC_RE = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$/;
+const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/;
+const INT_MIN = -2147483648;
+const INT_MAX = 2147483647;
+
+const label = (row: ParamRow) => `Parameter ${row.name.trim() || '(unnamed)'}`;
+
+/** The first problem with one parameter row, or null. Shown under the field and used to block the run. */
+export function rowError(row: ParamRow): string | null {
+  if (!row.name.trim()) return 'Enter the parameter name, for example @StartDate';
+  if (!NAME_RE.test(row.name.trim())) return 'Name must look like @StartDate: a letter or underscore, then letters, digits or underscores';
+  if (row.isNull) return null;
+  const text = row.value.trim();
+  switch (row.type) {
+    case 'int':
+    case 'bigint': {
+      const n = Number(text);
+      if (text === '' || !Number.isFinite(n)) return `${label(row)} must be a number`;
+      if (!Number.isInteger(n)) return `${label(row)} must be a whole number`;
+      if (row.type === 'int' && (n < INT_MIN || n > INT_MAX)) return `${label(row)} is outside the int range`;
+      return null;
+    }
+    case 'decimal':
+      return text === '' || !Number.isFinite(Number(text)) ? `${label(row)} must be a number` : null;
+    case 'bit': {
+      const v = text.toLowerCase();
+      return v === '1' || v === '0' || v === 'true' || v === 'false' ? null : `${label(row)} must be true/false or 1/0`;
+    }
+    case 'date':
+    case 'datetime': {
+      const hint = row.type === 'date' ? 'YYYY-MM-DD' : 'YYYY-MM-DD HH:MM or YYYY-MM-DD HH:MM:SS';
+      const m = DATE_RE.exec(text);
+      if (!m || (row.type === 'date' && text.length !== 10)) return `${label(row)} must be a date: ${hint}`;
+      const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+      const [hh, mm, ss] = [Number(m[4] ?? 0), Number(m[5] ?? 0), Number(m[6] ?? 0)];
+      const real = new Date(Date.UTC(y, mo - 1, d));
+      const calendarOk = real.getUTCFullYear() === y && real.getUTCMonth() === mo - 1 && real.getUTCDate() === d;
+      if (!calendarOk || hh > 23 || mm > 59 || ss > 59) return `${label(row)} must be a real date: ${hint}`;
+      return null;
+    }
+    default:
+      return null;
+  }
+}
+
+/** The value as sent to the server: dates in SQL form, numbers and bits converted. Call after rowError is null. */
+function normalise(row: ParamRow): ParamValue {
+  if (row.isNull) return null;
+  const text = row.value.trim();
   switch (row.type) {
     case 'int':
     case 'bigint':
-    case 'decimal': {
-      const n = Number(row.value);
-      if (row.value.trim() === '' || !Number.isFinite(n)) return { ok: false, error: `Parameter ${row.name || '(unnamed)'} must be a number` };
-      return { ok: true, value: n };
-    }
-    case 'bit': {
-      const v = row.value.trim().toLowerCase();
-      if (v === '1' || v === 'true') return { ok: true, value: true };
-      if (v === '0' || v === 'false') return { ok: true, value: false };
-      return { ok: false, error: `Parameter ${row.name || '(unnamed)'} must be true/false or 1/0` };
+    case 'decimal':
+      return Number(text);
+    case 'bit':
+      return text.toLowerCase() === '1' || text.toLowerCase() === 'true';
+    case 'datetime': {
+      const m = DATE_RE.exec(text);
+      if (!m) return text;
+      return `${m[1]}-${m[2]}-${m[3]} ${m[4] ?? '00'}:${m[5] ?? '00'}:${m[6] ?? '00'}`;
     }
     default:
-      return { ok: true, value: row.value };
+      return text;
   }
+}
+
+/** The first problem with the whole target, or null. Empty drafts are handled by the caller. */
+export function targetError(kind: 'procedure' | 'batch', draft: TargetDraft): string | null {
+  if (kind === 'batch') return null;
+  if (!draft.name.trim()) return null;
+  if (!PROC_RE.test(draft.name.trim())) return 'Procedure name must look like dbo.MyProcedure';
+  for (const row of draft.params) {
+    const e = rowError(row);
+    if (e) return e;
+  }
+  return null;
 }
 
 /** Build the C12 ExecTarget from a draft, or return a user-facing error. */
@@ -47,17 +106,33 @@ export function buildTarget(
   draft: TargetDraft
 ): { ok: true; target: ExecTarget } | { ok: false; error: string } {
   if (kind === 'batch') return { ok: true, target: { kind, sql: draft.sql } };
-  const params: ExecParam[] = [];
-  for (const row of draft.params) {
-    const c = coerce(row);
-    if (!c.ok) return c;
-    params.push({ name: row.name.trim(), type: row.type, value: c.value, ...(row.output ? { output: true } : {}) });
-  }
+  const error = targetError(kind, draft);
+  if (error) return { ok: false, error };
+  const params: ExecParam[] = draft.params.map((row) => ({
+    name: row.name.trim(), type: row.type, value: normalise(row), ...(row.output ? { output: true } : {}),
+  }));
   return { ok: true, target: { kind, name: draft.name.trim(), params } };
 }
 
 export function isDraftEmpty(kind: 'procedure' | 'batch', draft: TargetDraft): boolean {
   return kind === 'batch' ? !draft.sql.trim() : !draft.name.trim();
+}
+
+/** The HTML input type for a parameter's value box. */
+function inputTypeFor(type: ParamType): string {
+  if (type === 'date') return 'date';
+  if (type === 'datetime') return 'datetime-local';
+  return 'text';
+}
+
+function Field({ caption, error, children }: { caption: string; error?: string | null; children: ReactNode }) {
+  return (
+    <Box flex="1" minW={{ md: '120px' }}>
+      <Text fontSize="xs" color="gray.400" mb={1}>{caption}</Text>
+      {children}
+      {error && <Text fontSize="xs" color="red.300" mt={1}>{error}</Text>}
+    </Box>
+  );
 }
 
 export function TargetEditor({
@@ -82,57 +157,85 @@ export function TargetEditor({
   }
   const setRow = (id: number, patch: Partial<ParamRow>) =>
     onChange({ ...draft, params: draft.params.map((r) => (r.id === id ? { ...r, ...patch } : r)) });
+  const procError = draft.name.trim() && !PROC_RE.test(draft.name.trim()) ? 'Use a name such as dbo.MyProcedure' : null;
   return (
     <Box>
-      <Input
-        size="sm" value={draft.name} aria-label="Procedure name"
-        onChange={(e) => onChange({ ...draft, name: e.target.value })}
-        placeholder="dbo.MyProcedure" bg="gray.950" borderColor="gray.600" color="white" mb={3}
-      />
+      <Field caption="Procedure name" error={procError}>
+        <Input
+          size="md" value={draft.name} aria-label="Procedure name" aria-invalid={!!procError}
+          onChange={(e) => onChange({ ...draft, name: e.target.value })}
+          placeholder="dbo.MyProcedure" bg="gray.950" borderColor="gray.600" color="white" mb={4}
+        />
+      </Field>
       <Text fontSize="xs" color="gray.400" mb={2}>Parameters</Text>
-      {draft.params.map((row, i) => (
-        <Flex key={row.id} gap={2} mb={2} align="center">
-          <Input
-            size="xs" value={row.name} aria-label={`Parameter ${i + 1} name`} placeholder="@name"
-            onChange={(e) => setRow(row.id, { name: e.target.value })}
-            bg="gray.950" borderColor="gray.600" color="white"
-          />
-          <select
-            aria-label={`Parameter ${i + 1} type`} value={row.type}
-            onChange={(e) => setRow(row.id, { type: e.target.value as ParamType })}
-            className="rounded-md border border-gray-600 bg-gray-800 px-2 py-1 text-white"
-          >
-            {PARAM_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
-          <Input
-            size="xs" value={row.value} aria-label={`Parameter ${i + 1} value`} placeholder="value"
-            disabled={row.isNull}
-            onChange={(e) => setRow(row.id, { value: e.target.value })}
-            bg="gray.950" borderColor="gray.600" color="white"
-          />
-          <label className="flex items-center gap-1 text-xs text-gray-400">
-            <input
-              type="checkbox" checked={row.isNull} aria-label={`Parameter ${i + 1} is NULL`}
-              onChange={(e) => setRow(row.id, { isNull: e.target.checked })}
-            />
-            NULL
-          </label>
-          <label className="flex items-center gap-1 text-xs text-gray-400">
-            <input
-              type="checkbox" checked={row.output} aria-label={`Parameter ${i + 1} is OUTPUT`}
-              onChange={(e) => setRow(row.id, { output: e.target.checked })}
-            />
-            OUTPUT
-          </label>
-          <Button
-            size="xs" variant="ghost" colorPalette="red" aria-label={`Remove parameter ${i + 1}`}
-            onClick={() => onChange({ ...draft, params: draft.params.filter((r) => r.id !== row.id) })}
-          >
-            Remove
-          </Button>
-        </Flex>
-      ))}
-      <Button size="xs" variant="outline" onClick={() => onChange({ ...draft, params: [...draft.params, newParamRow()] })}>
+      <Box display="flex" flexDirection="column" gap={3} mb={3}>
+        {draft.params.map((row, i) => {
+          const nameError = row.name.trim() && !NAME_RE.test(row.name.trim()) ? 'Use a name such as @StartDate' : null;
+          const valueError = row.name.trim() && !nameError ? rowError(row) : null;
+          return (
+            <Flex
+              key={row.id} direction={{ base: 'column', md: 'row' }} gap={3}
+              align={{ base: 'stretch', md: 'flex-end' }} wrap="wrap" p={3} bg="gray.900" borderRadius="lg"
+              borderWidth="1px" borderColor={valueError || nameError ? 'red.700' : 'gray.700'}
+            >
+              <Field caption="Name" error={nameError}>
+                <Input
+                  size="md" value={row.name} aria-label={`Parameter ${i + 1} name`} placeholder="@StartDate"
+                  aria-invalid={!!nameError}
+                  onChange={(e) => setRow(row.id, { name: e.target.value })}
+                  bg="gray.950" borderColor="gray.600" color="white"
+                />
+              </Field>
+              <Field caption="Type">
+                <select
+                  aria-label={`Parameter ${i + 1} type`} value={row.type}
+                  onChange={(e) => setRow(row.id, { type: e.target.value as ParamType })}
+                  className="w-full rounded-md border border-gray-600 bg-gray-800 px-3 py-2 text-white"
+                  style={{ minHeight: 40 }}
+                >
+                  {PARAM_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </Field>
+              <Field caption="Value" error={valueError}>
+                <Input
+                  size="md" type={inputTypeFor(row.type)} value={row.value}
+                  aria-label={`Parameter ${i + 1} value`} aria-invalid={!!valueError}
+                  placeholder={row.type === 'date' ? 'YYYY-MM-DD' : row.type === 'datetime' ? 'YYYY-MM-DD HH:MM' : row.type === 'bit' ? 'true or false' : 'value'}
+                  inputMode={row.type === 'int' || row.type === 'bigint' || row.type === 'decimal' ? 'decimal' : undefined}
+                  disabled={row.isNull}
+                  onChange={(e) => setRow(row.id, { value: e.target.value })}
+                  bg="gray.950" borderColor="gray.600" color="white"
+                />
+              </Field>
+              <Flex gap={4} align="center" minH="40px">
+                <label className="flex items-center gap-2 text-sm text-gray-300">
+                  <input
+                    type="checkbox" checked={row.isNull} aria-label={`Parameter ${i + 1} is NULL`}
+                    onChange={(e) => setRow(row.id, { isNull: e.target.checked })}
+                    style={{ width: 18, height: 18 }}
+                  />
+                  NULL
+                </label>
+                <label className="flex items-center gap-2 text-sm text-gray-300">
+                  <input
+                    type="checkbox" checked={row.output} aria-label={`Parameter ${i + 1} is OUTPUT`}
+                    onChange={(e) => setRow(row.id, { output: e.target.checked })}
+                    style={{ width: 18, height: 18 }}
+                  />
+                  OUTPUT
+                </label>
+              </Flex>
+              <Button
+                size="md" variant="ghost" colorPalette="red" aria-label={`Remove parameter ${i + 1}`}
+                onClick={() => onChange({ ...draft, params: draft.params.filter((r) => r.id !== row.id) })}
+              >
+                Remove
+              </Button>
+            </Flex>
+          );
+        })}
+      </Box>
+      <Button size="md" variant="outline" w={{ base: '100%', md: 'auto' }} onClick={() => onChange({ ...draft, params: [...draft.params, newParamRow()] })}>
         Add parameter
       </Button>
     </Box>
