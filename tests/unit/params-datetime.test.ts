@@ -47,6 +47,12 @@ describe('datetime parameters (DT-1)', () => {
     expect((coerceParam('datetime', '2024-01-01T00:00:00.5') as Date).getTime()).toBe(Date.UTC(2024, 0, 1, 0, 0, 0, 500));
   });
 
+  it('keeps the exact milliseconds for each fraction length', () => {
+    expect((coerceParam('datetime', '2024-01-01 00:00:00.1') as Date).getUTCMilliseconds()).toBe(100);
+    expect((coerceParam('datetime', '2024-01-01 00:00:00.29') as Date).getUTCMilliseconds()).toBe(290);
+    expect((coerceParam('datetime', '2024-01-01 00:00:00.123456') as Date).getUTCMilliseconds()).toBe(123);
+  });
+
   it('applies an explicit offset to the instant it names', () => {
     expect((coerceParam('datetime', '2024-01-01T00:00:00+02:00') as Date).getTime()).toBe(Date.UTC(2023, 11, 31, 22, 0, 0));
   });

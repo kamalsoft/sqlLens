@@ -59,7 +59,8 @@ const OFFSET_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2
 
 /** The UTC instant for literal components, or null when the calendar or the clock does not exist. */
 function instantFrom(y: number, mo: number, d: number, hh: number, mi: number, ss: number, frac: string | undefined): Date | null {
-  const ms = frac ? Math.floor(Number(`0.${frac}`) * 1000) : 0;
+  // Exact: the first three digits are the milliseconds (no floating-point rounding).
+  const ms = frac ? Number(frac.padEnd(3, '0').slice(0, 3)) : 0;
   const utc = new Date(Date.UTC(y, mo - 1, d, hh, mi, ss, ms));
   const real = utc.getUTCFullYear() === y && utc.getUTCMonth() === mo - 1 && utc.getUTCDate() === d;
   return real && hh <= 23 && mi <= 59 && ss <= 59 ? utc : null;

@@ -160,14 +160,15 @@ export function getAudit(id: string, sessionId: string): AuditRecord | null {
 
 export function listAudits(sessionId: string, limit = 100): AuditSummary[] {
   // UX-4: the procedure, grade and verdict are read inside SQLite, so the large plan payloads never leave the database.
+  // A stored record that is not valid JSON gives NULL for these fields instead of failing the whole list.
   const rows = db
     .prepare(
       `SELECT ${SUMMARY_COLS},
-              json_extract(request_payload, '$.original.name') AS procedure,
-              COALESCE(json_extract(response_payload, '$.analysis.performanceGrade'),
-                       json_extract(response_payload, '$.original.analysis.performanceGrade')) AS grade,
-              COALESCE(json_extract(response_payload, '$.analysis.prodVerdict.verdict'),
-                       json_extract(response_payload, '$.original.analysis.prodVerdict.verdict')) AS verdict
+              CASE WHEN json_valid(request_payload) THEN json_extract(request_payload, '$.original.name') END AS procedure,
+              CASE WHEN json_valid(response_payload) THEN COALESCE(json_extract(response_payload, '$.analysis.performanceGrade'),
+                       json_extract(response_payload, '$.original.analysis.performanceGrade')) END AS grade,
+              CASE WHEN json_valid(response_payload) THEN COALESCE(json_extract(response_payload, '$.analysis.prodVerdict.verdict'),
+                       json_extract(response_payload, '$.original.analysis.prodVerdict.verdict')) END AS verdict
        FROM audit_requests WHERE session_id = ?
        ORDER BY created_at DESC, rowid DESC LIMIT ?`
     )

@@ -10,6 +10,16 @@ function sessionId(): string {
 }
 
 describe("audit list facts (UX-4)", () => {
+  it("keeps the list working when one stored record is not valid JSON", () => {
+    const sid = sessionId();
+    insertAudit({ sessionId: sid, type: "REVIEW", request: { sql: "select 1" }, response: { verdict: "ok" } });
+    const bad = insertAudit({ sessionId: sid, type: "EXECUTE", request: {}, response: {} });
+    db.prepare("UPDATE audit_requests SET response_payload = '{not json' WHERE id = ?").run(bad.id);
+    const rows = listAudits(sid, 10);
+    expect(rows).toHaveLength(2);
+    expect(rows.find((r) => r.id === bad.id)).toMatchObject({ grade: null, verdict: null });
+  });
+
   it("reads the procedure, grade and verdict from the stored single and compare results", () => {
     const sid = sessionId();
     insertAudit({

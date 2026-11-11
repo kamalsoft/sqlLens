@@ -134,15 +134,7 @@ function delta(original: number | null, optimized: number | null): MetricDelta {
 // Grade thresholds. Metrics that were not captured are skipped, not treated as 0.
 // ---------------------------------------------------------------------------
 
-/**
- * What stops a grade or READY: a real table with zero rows (D-039), or missing reads or time.
- * Returns the reason, or null when the evidence is complete.
- */
 export interface EvidenceGap { reason: string; table: string | null }
-/**
- * Real tables whose scans and seeks, summed over the run, returned no rows. The run then did not
- * exercise that data, whatever the timing says. Temp tables are skipped: they fill during the run.
- */
 /**
  * Per real table: rows returned, executions, pages read (logical reads) and whether a seek or a scan did the reading.
  * Pages read are index and data pages; they are not rows, so a seek can read pages and still return no rows.
@@ -162,7 +154,10 @@ function readCounters(stats: ExecutionStats): Map<string, { rows: number; execut
   return byTable;
 }
 
-/** Tables read by a scan or seek that returned no rows, and that the run did reach. */
+/**
+ * Real tables whose scans and seeks, summed over the run, returned no rows. The run then did not
+ * exercise that data, whatever the timing says. Temp tables are skipped: they fill during the run.
+ */
 export function unreadTables(stats: ExecutionStats): string[] {
   return [...readCounters(stats)].filter(([, c]) => c.rows === 0 && c.executions > 0).map(([table]) => table);
 }
@@ -172,6 +167,10 @@ export function unreachedTables(stats: ExecutionStats): string[] {
   return [...readCounters(stats)].filter(([, c]) => c.executions === 0).map(([table]) => table);
 }
 
+/**
+ * What stops a grade or READY: a real table with zero rows (D-039), a read table that returned no rows,
+ * or missing reads or time. Returns the reason, or null when the evidence is complete.
+ */
 export function evidenceGap(stats: ExecutionStats): EvidenceGap | null {
   for (const [table, rows] of Object.entries(stats.tableRows ?? {})) {
     if (rows === 0) return { reason: `${table} has 0 rows`, table };
