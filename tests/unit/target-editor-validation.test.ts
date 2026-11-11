@@ -47,3 +47,12 @@ describe('targetError and buildTarget', () => {
     if (!r.ok) expect(r.error).toMatch(/must be a real date/);
   });
 });
+
+describe('FIX-3 end time stays as typed', () => {
+  it('keeps 23:59 as 23:59 in the value sent to the server, in each text form', () => {
+    for (const v of ['2026-12-31 23:59', '2026-12-31T23:59', '2026-12-31 23:59:00']) {
+      const r = buildTarget('procedure', draftWith(row({ name: '@EndDate', type: 'datetime', value: v })));
+      expect(r.ok && r.target.kind === 'procedure' && r.target.params[0].value).toBe('2026-12-31 23:59:00');
+    }
+  });
+});

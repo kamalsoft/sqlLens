@@ -120,17 +120,19 @@ export function isDraftEmpty(kind: 'procedure' | 'batch', draft: TargetDraft): b
 
 /** The HTML input type for a parameter's value box. */
 function inputTypeFor(type: ParamType): string {
+  // FIX-3: a date-time is typed as text in 24-hour form. The native datetime-local box follows the
+  // browser's clock, and in a 12-hour setting typing 23 can come out as 02.
   if (type === 'date') return 'date';
-  if (type === 'datetime') return 'datetime-local';
   return 'text';
 }
 
-function Field({ caption, error, children }: { caption: string; error?: string | null; children: ReactNode }) {
+function Field({ caption, error, hint, children }: { caption: string; error?: string | null; hint?: string; children: ReactNode }) {
   return (
     <Box flex="1" minW={{ md: '120px' }}>
       <Text fontSize="xs" color="gray.400" mb={1}>{caption}</Text>
       {children}
       {error && <Text fontSize="xs" color="red.300" mt={1}>{error}</Text>}
+      {!error && hint && <Text fontSize="xs" color="gray.500" mt={1}>{hint}</Text>}
     </Box>
   );
 }
@@ -239,11 +241,11 @@ export function TargetEditor({
                   {PARAM_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
               </Field>
-              <Field caption="Value" error={valueError}>
+              <Field caption="Value" error={valueError} hint={row.type === 'datetime' ? '24-hour time, for example 23:59' : undefined}>
                 <Input
                   size="md" type={inputTypeFor(row.type)} value={row.value}
                   aria-label={`Parameter ${i + 1} value`} aria-invalid={!!valueError}
-                  placeholder={row.type === 'date' ? 'YYYY-MM-DD' : row.type === 'datetime' ? 'YYYY-MM-DD HH:MM' : row.type === 'bit' ? 'true or false' : 'value'}
+                  placeholder={row.type === 'date' ? 'YYYY-MM-DD' : row.type === 'datetime' ? 'YYYY-MM-DD HH:MM or HH:MM:SS' : row.type === 'bit' ? 'true or false' : 'value'}
                   inputMode={row.type === 'int' || row.type === 'bigint' || row.type === 'decimal' ? 'decimal' : undefined}
                   disabled={row.isNull}
                   onChange={(e) => setRow(row.id, { value: e.target.value })}
