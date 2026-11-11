@@ -283,3 +283,7 @@ Status: APPROVED WITH CONDITIONS (read-only review by the security agent; not a 
 - C2 done: D-039 wording corrected above.
 - C3: `data/appconfig.json` stays out of every commit.
 Not verified: no live MSSQL run of the count query or the GO edge cases.
+
+### D-040 Row counts are advisory
+Status: APPROVED (user, 2026-11-11, reply "Yes" to: a failed row-count query should warn, not fail the run)
+Change: `src/lib/execution/mssql.ts` keeps the run's results when the count query fails and adds a warning `Row counts not captured: <reason>`. Timeouts and cancellations still stop the run. With no counts, the verdict is not blocked by the empty-table check.

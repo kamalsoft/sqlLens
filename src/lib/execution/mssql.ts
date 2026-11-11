@@ -147,11 +147,17 @@ export async function executeMssql(
     // Wall time is a real measurement, used only when the server reported no timing.
     if (stats.totalElapsedMs === null) stats.totalElapsedMs = Math.round(wallMs);
     // D-039: row counts for the real tables the run read. Read-only, same transaction, no user SQL.
+    // The count is advisory: if it fails, the run's results are kept and the gap is reported as a warning.
     const tables = realTables(stats.io);
     if (tables.length > 0) {
       const counter = mk();
       current = counter;
-      stats.tableRows = await countRows(counter, tables);
+      try {
+        stats.tableRows = await countRows(counter, tables);
+      } catch (err) {
+        if (err instanceof ExecAbortError || err instanceof ExecTimeoutError) throw err;
+        warnings.push(`Row counts not captured: ${err instanceof Error ? err.message : 'count failed'}`);
+      }
       checkFlags();
     }
     return { stats, warnings, outputs };

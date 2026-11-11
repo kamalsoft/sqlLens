@@ -17,6 +17,7 @@ const h = vi.hoisted(() => {
     release: null as null | (() => void),
     trancount: 2,
     countRows: [] as unknown[],
+    countFail: false,
   };
   return { state };
 });
@@ -35,7 +36,10 @@ vi.mock('mssql', () => {
       if (/@@TRANCOUNT/.test(text)) return { recordsets: [[{ tc: s.trancount }]] };
       if (s.hang) await new Promise<void>((_, rej) => { s.release = () => rej(Object.assign(new Error('Canceled.'), { code: 'ECANCEL' })); });
       if (s.failBatch) throw s.failBatch;
-      if (/sys\.partitions/.test(text)) return { recordsets: [s.countRows] };
+      if (/sys\.partitions/.test(text)) {
+        if (s.countFail) throw new Error('count query failed');
+        return { recordsets: [s.countRows] };
+      }
       for (const m of s.infos) this.handlers.forEach((cb) => cb({ message: m }));
       return { recordsets: s.recordsets };
     }
@@ -77,7 +81,7 @@ const TIME = ' SQL Server Execution Times:\n   CPU time = 5 ms,  elapsed time = 
 const IO_TEMP = "Table '#StagedSales_000001'. Scan count 1, logical reads 0, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.\nTable 'Worktable'. Scan count 0, logical reads 0, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.";
 
 beforeEach(() => {
-  Object.assign(h.state, { calls: [], inputs: [], outputs: [], procOutput: {}, texts: [], infos: [], recordsets: [], failBatch: null, hang: false, cancelled: 0, release: null, trancount: 2, countRows: [] });
+  Object.assign(h.state, { calls: [], inputs: [], outputs: [], procOutput: {}, texts: [], infos: [], recordsets: [], failBatch: null, hang: false, cancelled: 0, release: null, trancount: 2, countRows: [], countFail: false });
 });
 
 describe('mssql TLS defaults (P6-08)', () => {
@@ -251,5 +255,16 @@ describe('D-039 row counts for tables the run read', () => {
     const out = await executeMssql({ ...conn, trustServerCertificate: true }, { kind: 'batch', sql: 'SELECT 1' }, opts);
     expect(out.stats.tableRows).toBeUndefined();
     expect(h.state.texts.some((t) => /sys\.partitions/.test(t))).toBe(false);
+  });
+});
+
+describe('row counts are advisory', () => {
+  it('keeps the run and reports a warning when the count query fails', async () => {
+    h.state.infos = [IO];
+    h.state.countFail = true;
+    const out = await executeMssql({ ...conn, trustServerCertificate: true }, { kind: 'batch', sql: 'SELECT 1' }, opts);
+    expect(out.stats.tableRows).toBeUndefined();
+    expect(out.warnings).toContain('Row counts not captured: count query failed');
+    expect(out.stats.io[0]).toMatchObject({ table: 'Orders' });
   });
 });
