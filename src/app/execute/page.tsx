@@ -207,7 +207,7 @@ function RawStatsPanel({ execution }: { execution: ExecutionResult }) {
             overflowX="auto" fontFamily="mono" whiteSpace="pre-wrap" lineHeight="tall">
             {execution.stats.rawOutput}
           </Box>
-          {(execution as { textFilePath?: string }).textFilePath && (
+          {execution.recordNumber && (
             <Text fontSize="xs" color="gray.500" mt={3}>📁 Audit log saved</Text>
           )}
         </Box>

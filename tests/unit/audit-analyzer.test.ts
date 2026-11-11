@@ -11,7 +11,7 @@ function result(over: Partial<ExecutionStats> = {}, reads: number | null = 100):
     }],
     messages: [], rawOutput: '', plan: null, simulated: false, ...over,
   };
-  return { recordNumber: '1', spLabel: 'sp', connectionEngine: 'mssql', executedAt: '', stats, textFilePath: '', success: true };
+  return { recordNumber: '1', spLabel: 'sp', connectionEngine: 'mssql', executedAt: '', stats, success: true };
 }
 
 describe('compareExecutions', () => {

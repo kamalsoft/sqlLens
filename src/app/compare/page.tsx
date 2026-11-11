@@ -8,7 +8,7 @@ import {
 } from '@chakra-ui/react';
 import { useApi } from '@/components/api-client';
 import type { MetricComparison } from '@/lib/audit-analyzer';
-import type { CompareModelResult } from '@/lib/compare';
+import { COMPARE_SCHEMA_VERSION, type CompareModelResult } from '@/lib/compare';
 import { NOT_SQL_ERROR, looksLikeSql } from '@/lib/validation/sql-input';
 
 type Model = { id: string; name: string; compatible: boolean };
@@ -16,6 +16,7 @@ type Model = { id: string; name: string; compatible: boolean };
 type CompareResponse = {
   id?: string;
   model?: string;
+  schemaVersion?: string;
   metrics?: MetricComparison | null;
   result: CompareModelResult;
 };
@@ -79,8 +80,10 @@ export default function ComparePage() {
       },
       'Comparison failed'
     );
-    if (res.ok && res.data?.result) {
+    if (res.ok && res.data?.result && res.data.schemaVersion === COMPARE_SCHEMA_VERSION) {
       setResponse(res.data);
+    } else if (res.ok && res.data?.result) {
+      setError(`Unsupported comparison result version: ${res.data.schemaVersion ?? 'unknown'}`);
     } else if (res.status !== 401) {
       setError(res.error ?? 'Comparison failed');
       const d = res.details as { responsePreview?: unknown; message?: unknown } | null;
