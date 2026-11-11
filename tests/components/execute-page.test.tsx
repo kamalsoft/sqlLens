@@ -159,6 +159,52 @@ describe("ExecutePage null handling and validation", () => {
     expect(screen.getByLabelText("Prod-readiness verdict")).toHaveTextContent("UNSTABLE");
   });
 
+  it("shows the recommendations by priority, the grade legend, and the raw-output help (P8-08)", async () => {
+    const single = {
+      mode: "single", simulated: true, warnings: [], execution: exec,
+      analysis: analysis({
+        planFindings: [
+          { kind: "cost-concentration", severity: "high", operator: "Seek", table: "T", message: "Seek on T accounts for 90% of logical reads", recommendation: "Seek on T accounts for 90% of logical reads. Review it." },
+          { kind: "tempdb-spill", severity: "medium", operator: "Sort", table: null, message: "Sort spilled 10 pages to tempdb", recommendation: "Sort spilled 10 pages to tempdb. Fix the estimate." },
+        ],
+        recommendations: ["Seek on T accounts for 90% of logical reads. Review it.", "Sort spilled 10 pages to tempdb. Fix the estimate.", "Other observation here"],
+      }),
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ result: single })));
+    const user = userEvent.setup();
+    view();
+    await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
+    await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
+    const panel = await screen.findByLabelText("Recommendations");
+    expect(panel).toHaveTextContent("High priority");
+    expect(panel).toHaveTextContent("Medium priority");
+    expect(panel).toHaveTextContent("Other observations");
+    expect(panel).toHaveTextContent("Standard checks");
+    expect(panel).toHaveTextContent("Other observation here");
+    expect(screen.getByLabelText("Grade legend")).toBeInTheDocument();
+    expect(screen.getByText(/parsed from this text/)).toBeInTheDocument();
+  });
+
+  it("shows the original and optimized SQL side by side after a compare run (P8-08)", async () => {
+    const result = {
+      mode: "compare", simulated: true, warnings: [],
+      original: { execution: exec, analysis: analysis() },
+      optimized: { execution: exec, analysis: analysis({ performanceGrade: "B" }) },
+      comparison: analysis({ improvementPercent: 10 }),
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ result })));
+    const user = userEvent.setup();
+    view();
+    await user.click(screen.getByRole("button", { name: "Compare Original vs Optimized" }));
+    await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
+    await user.type(screen.getByPlaceholderText(/Paste your Optimized SP/), "select 2");
+    await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
+    const panel = await screen.findByLabelText("Original and optimized SQL");
+    expect(panel).toHaveTextContent("select 1");
+    expect(panel).toHaveTextContent("select 2");
+    expect(panel).toHaveTextContent("Grade B");
+  });
+
   it("blocks an empty port without fetching", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

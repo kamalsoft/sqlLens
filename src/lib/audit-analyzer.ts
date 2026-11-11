@@ -256,6 +256,13 @@ export function planFindings(ops: PlanOperator[]): PlanFinding[] {
   return findings;
 }
 
+/** P8-08: standard checks that every execution's analysis includes. */
+export const STANDARD_RECOMMENDATIONS: readonly string[] = [
+  'Run DBCC SHOW_STATISTICS([Table], [Index]) to validate index selectivity',
+  'Consider SET NOCOUNT ON to suppress row count messages and reduce network traffic',
+  'Review parameter sniffing: add OPTION (OPTIMIZE FOR UNKNOWN) if plans vary per parameter',
+];
+
 /** P8-06: recommendations that name the operator and table that cost the most. */
 export function operatorRecommendations(ops: PlanOperator[]): string[] {
   const recs: string[] = [];
@@ -323,6 +330,14 @@ function hottest(stats: ExecutionStats, key: 'logicalReads' | 'scanCount'): stri
   return top && top[key] > 0 ? top.table : null;
 }
 
+/** P8-08: grade limits (a run must be under every limit of a grade). Shown in the grade legend. */
+export const GRADE_RULES: Record<Exclude<Grade, 'F'>, { reads: number; ms: number; scans: number | null }> = {
+  A: { reads: 200, ms: 50, scans: 1 },
+  B: { reads: 1000, ms: 200, scans: 3 },
+  C: { reads: 5000, ms: 1000, scans: null },
+  D: { reads: 20000, ms: 5000, scans: null },
+};
+
 function gradeFromStats(stats: ExecutionStats): Grade | null {
   const { logicalReads: reads, elapsed: ms } = metricsOf(stats);
   const maxScan = stats.io.length ? Math.max(...stats.io.map(r => r.scanCount)) : null;
@@ -330,12 +345,12 @@ function gradeFromStats(stats: ExecutionStats): Grade | null {
   if (reads === null || ms === null) return null;
 
   const ok = (v: number | null, limit: number) => v === null || v < limit;
-  const scanOk = (limit: number) => maxScan === null || maxScan <= limit;
+  const scanOk = (limit: number | null) => limit === null || maxScan === null || maxScan <= limit;
 
-  if (ok(reads, 200) && ok(ms, 50) && scanOk(1)) return 'A';
-  if (ok(reads, 1000) && ok(ms, 200) && scanOk(3)) return 'B';
-  if (ok(reads, 5000) && ok(ms, 1000)) return 'C';
-  if (ok(reads, 20000) && ok(ms, 5000)) return 'D';
+  for (const grade of ['A', 'B', 'C', 'D'] as const) {
+    const rule = GRADE_RULES[grade];
+    if (ok(reads, rule.reads) && ok(ms, rule.ms) && scanOk(rule.scans)) return grade;
+  }
   return 'F';
 }
 
@@ -418,11 +433,7 @@ export function analyzeExecution(result: ExecutionResult, targets: Targets = NO_
   if (totalPhysical !== null && totalPhysical > 0) {
     recommendations.push('Increase SQL Server max server memory or add frequently accessed tables to memory-optimized structures');
   }
-  recommendations.push(
-    'Run DBCC SHOW_STATISTICS([Table], [Index]) to validate index selectivity',
-    'Consider SET NOCOUNT ON to suppress row count messages and reduce network traffic',
-    'Review parameter sniffing: add OPTION (OPTIMIZE FOR UNKNOWN) if plans vary per parameter',
-  );
+  recommendations.push(...STANDARD_RECOMMENDATIONS);
 
   const rationales: Record<Grade, string> = {
     A: 'Excellent — minimal I/O, fast execution, optimal index usage',

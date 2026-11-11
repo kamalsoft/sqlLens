@@ -5,7 +5,7 @@ import {
   Box, Container, Heading, Text, Button, Flex,
   Spinner, Badge, Grid, Input, Separator,
 } from '@chakra-ui/react';
-import type { AuditAnalysis, ProdVerdict } from '@/lib/audit-analyzer';
+import { GRADE_RULES, STANDARD_RECOMMENDATIONS, type AuditAnalysis, type Grade, type PlanFinding, type ProdVerdict } from '@/lib/audit-analyzer';
 import type { ExecParam } from '@/components/execute/target-editor';
 import type { ExecutionResult } from '@/lib/sp-executor';
 import { useApi } from '@/components/api-client';
@@ -76,6 +76,140 @@ function StatCard({ label, value, unit = '', color = 'blue' }: { label: string; 
   );
 }
 
+const FINDING_WHY: Record<PlanFinding['kind'], string> = {
+  'cost-concentration': 'Most of the logical reads come from one operator, so changing it moves the total most.',
+  'row-estimate': 'The optimizer planned for far fewer rows than it read, so the chosen plan may not fit this data.',
+  'tempdb-spill': 'Work that did not fit in memory was written to tempdb, which is much slower than memory.',
+};
+
+function FindingCard({ finding }: { finding: PlanFinding }) {
+  return (
+    <Box p={4} bg="gray.950" borderRadius="lg" borderLeftWidth="3px" borderColor={finding.severity === 'high' ? 'red.500' : 'yellow.500'}>
+      <Text color="white" fontWeight="semibold" fontSize="sm">{finding.message}</Text>
+      <Text color="gray.200" fontSize="sm" mt={2}>{finding.recommendation}</Text>
+      <Text color="gray.500" fontSize="xs" mt={2}>Why: {FINDING_WHY[finding.kind]}</Text>
+    </Box>
+  );
+}
+
+/** P8-08: dedicated recommendations: findings by priority, other observations, and the standard checks. */
+function RecommendationsPanel({ analysis }: { analysis: AuditAnalysis }) {
+  const findings = analysis.planFindings ?? [];
+  const findingTexts = new Set(findings.map((f) => f.recommendation));
+  const standard = new Set<string>(STANDARD_RECOMMENDATIONS);
+  const other = analysis.recommendations.filter((r) => !findingTexts.has(r) && !standard.has(r));
+  const high = findings.filter((f) => f.severity === 'high');
+  const medium = findings.filter((f) => f.severity === 'medium');
+  return (
+    <Box borderWidth="1px" borderColor="gray.700" borderRadius="xl" bg="gray.900" p={5} aria-label="Recommendations" display="flex" flexDirection="column" gap={5}>
+      <Box>
+        <Heading size="sm" color="blue.300">💡 Recommendations</Heading>
+        <Text fontSize="xs" color="gray.400" mt={1}>
+          How to use: start with the verdict, take the first high-priority finding, change the SQL, then run the changed SQL in compare mode and check that the verdict and grade improve.
+        </Text>
+      </Box>
+      {findings.length === 0 && other.length === 0 && (
+        <Text fontSize="sm" color="gray.400">No plan findings for this run.</Text>
+      )}
+      {high.length > 0 && (
+        <Box>
+          <Text fontSize="xs" color="red.300" textTransform="uppercase" letterSpacing="wider" mb={2}>High priority</Text>
+          <Box display="flex" flexDirection="column" gap={2}>{high.map((f, i) => <FindingCard key={`h${i}`} finding={f} />)}</Box>
+        </Box>
+      )}
+      {medium.length > 0 && (
+        <Box>
+          <Text fontSize="xs" color="yellow.300" textTransform="uppercase" letterSpacing="wider" mb={2}>Medium priority</Text>
+          <Box display="flex" flexDirection="column" gap={2}>{medium.map((f, i) => <FindingCard key={`m${i}`} finding={f} />)}</Box>
+        </Box>
+      )}
+      {other.length > 0 && (
+        <Box>
+          <Text fontSize="xs" color="gray.400" textTransform="uppercase" letterSpacing="wider" mb={2}>Other observations</Text>
+          <Box as="ul" pl={5} display="flex" flexDirection="column" gap={1}>
+            {other.map((r, i) => <Box as="li" key={i} color="gray.200" fontSize="sm">{r}</Box>)}
+          </Box>
+        </Box>
+      )}
+      <Box>
+        <Text fontSize="xs" color="gray.400" textTransform="uppercase" letterSpacing="wider" mb={2}>Standard checks</Text>
+        <Box as="ul" pl={5} display="flex" flexDirection="column" gap={1}>
+          {STANDARD_RECOMMENDATIONS.map((r) => <Box as="li" key={r} color="gray.300" fontSize="sm">{r}</Box>)}
+        </Box>
+      </Box>
+    </Box>
+  );
+}
+
+/** P8-08: the grade scale, with the current run's grade marked. */
+function GradeLegend({ current }: { current: Grade | null }) {
+  const meaning: Record<Grade, string> = {
+    A: 'Excellent', B: 'Good', C: 'Moderate: investigate before scaling', D: 'Poor: refactor before scale', F: 'Critical: act now',
+  };
+  const grades: Grade[] = ['A', 'B', 'C', 'D', 'F'];
+  return (
+    <Box overflowX="auto" aria-label="Grade legend">
+      <Box as="table" fontSize="xs" color="gray.300" w="100%">
+        <thead>
+          <tr style={{ textAlign: 'left', color: '#718096' }}>
+            <th>Grade</th><th>Logical reads</th><th>Time</th><th>Scans</th><th>Meaning</th>
+          </tr>
+        </thead>
+        <tbody>
+          {grades.map((g) => {
+            const rule = g === 'F' ? null : GRADE_RULES[g];
+            const isCurrent = current === g;
+            return (
+              <tr key={g} style={{ background: isCurrent ? '#2d3748' : undefined }}>
+                <td><strong>{g}</strong>{isCurrent ? ' ◀' : ''}</td>
+                <td>{rule ? `under ${rule.reads.toLocaleString()}` : `not under D's limits`}</td>
+                <td>{rule ? `under ${rule.ms.toLocaleString()} ms` : 'not under D\'s limit'}</td>
+                <td>{rule?.scans != null ? `at most ${rule.scans}` : rule ? 'any' : '—'}</td>
+                <td>{meaning[g]}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </Box>
+      <Text fontSize="xs" color="gray.500" mt={2}>
+        A run must be under every limit of a grade. &quot;Not graded&quot; means the evidence is incomplete (see the verdict reason).
+      </Text>
+    </Box>
+  );
+}
+
+/** P8-08: the original and the optimized SQL with their measured metrics, side by side. */
+function OptimizedPanel({ original, optimized, originalText, optimizedText }: {
+  original: AuditAnalysis; optimized: AuditAnalysis; originalText: string; optimizedText: string;
+}) {
+  const sides = [
+    { label: 'Original', color: 'red', analysis: original, text: originalText },
+    { label: 'Optimized', color: 'green', analysis: optimized, text: optimizedText },
+  ];
+  return (
+    <Box borderWidth="1px" borderColor="gray.700" borderRadius="xl" bg="gray.900" p={5} aria-label="Original and optimized SQL">
+      <Heading size="sm" color="green.300" mb={4}>🟢 Original vs Optimized</Heading>
+      <Grid templateColumns={{ base: '1fr', md: '1fr 1fr' }} gap={4}>
+        {sides.map((side) => (
+          <Box key={side.label} p={4} bg="gray.950" borderRadius="lg" borderLeftWidth="3px" borderColor={`${side.color}.500`}>
+            <Text fontSize="xs" color={`${side.color}.300`} textTransform="uppercase" letterSpacing="wider">{side.label}</Text>
+            <Text fontSize="sm" color="gray.300" mt={1}>
+              Grade {side.analysis.performanceGrade ?? 'not graded'} · {side.analysis.ioAnalysis.totalLogicalReads === null ? 'reads not captured' : `${side.analysis.ioAnalysis.totalLogicalReads.toLocaleString()} logical reads`} · {side.analysis.timeAnalysis.totalMs === null ? 'time not captured' : `${side.analysis.timeAnalysis.totalMs} ms`}
+            </Text>
+            <Text fontSize="xs" color="gray.500" mt={1}>{side.analysis.prodVerdict?.verdict ?? ''}</Text>
+            <Box as="pre" mt={3} p={3} bg="black" borderRadius="md" fontSize="xs" color="gray.200" maxH="320px" overflow="auto" whiteSpace="pre-wrap">
+              {side.text || '(empty)'}
+            </Box>
+          </Box>
+        ))}
+      </Grid>
+      <Text fontSize="xs" color="gray.500" mt={3}>
+        Refactor output from the Refactor page is not run here. Paste it into Optimized SP and run it; SQL runs only when you press the button.
+      </Text>
+    </Box>
+  );
+}
+
 function AnalysisPanel({ analysis, title, params, outputs }: {
   analysis: AuditAnalysis; title: string; params?: ExecParam[]; outputs?: Record<string, unknown>;
 }) {
@@ -89,6 +223,7 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
             <Text fontSize="sm" color="gray.400">{analysis.gradeRationale}</Text>
           </Box>
         </Flex>
+        <Box mt={3}><GradeLegend current={analysis.performanceGrade} /></Box>
       </Box>
 
       <Box px={6} py={6} display="flex" flexDirection="column" gap={6}>
@@ -258,16 +393,7 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
 
         <Separator borderColor="gray.700" />
 
-        {/* Recommendations */}
-        <Box>
-          <Text fontSize="sm" fontWeight="semibold" color="blue.400" mb={3} textTransform="uppercase" letterSpacing="wider">💡 Recommendations</Text>
-          {analysis.recommendations.map((r, i) => (
-            <Flex key={i} gap={2} mb={2} align="flex-start">
-              <Badge colorPalette="blue" variant="subtle" mt="1px" flexShrink={0}>{i + 1}</Badge>
-              <Text color="gray.200" fontSize="sm">{r}</Text>
-            </Flex>
-          ))}
-        </Box>
+        <RecommendationsPanel analysis={analysis} />
       </Box>
     </Box>
   );
@@ -278,7 +404,10 @@ function RawStatsPanel({ execution }: { execution: ExecutionResult }) {
   return (
     <Box bg="gray.900" borderWidth="1px" borderColor="gray.700" borderRadius="xl" overflow="hidden">
       <Flex justify="space-between" align="center" px={5} py={3} borderBottomWidth="1px" borderColor="gray.700">
-        <Text fontSize="sm" fontWeight="semibold" color="gray.300">📄 Raw Execution Output</Text>
+        <Box>
+          <Text fontSize="sm" fontWeight="semibold" color="gray.300">📄 Raw Execution Output</Text>
+          <Text fontSize="xs" color="gray.500">The server&apos;s messages for this run: the STATISTICS IO and TIME lines and the plan XML. Every number on this page is parsed from this text.</Text>
+        </Box>
         <Button size="xs" variant="ghost" colorPalette="gray" onClick={() => setShow(!show)}>
           {show ? 'Hide' : 'Show'}
         </Button>
@@ -329,6 +458,7 @@ export default function ExecutePage() {
   const [testInfo, setTestInfo] = useState<TestInfo | null>(null);
   const [result, setResult] = useState<ExecuteResult | null>(null);
   const [usedParams, setUsedParams] = useState<ExecParam[]>([]);
+  const [submittedSql, setSubmittedSql] = useState<{ original: string; optimized: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'compare' | 'original' | 'optimized'>('compare');
   const abortRef = useRef<AbortController | null>(null);
@@ -393,6 +523,10 @@ export default function ExecutePage() {
     setError(null);
     setResult(null);
     setUsedParams(orig.target.kind === 'procedure' ? orig.target.params : []);
+    const textOf = (d: TargetDraft) => kind === 'batch'
+      ? d.sql
+      : `${d.name}\n${d.params.map((p) => `  ${p.name} ${p.type} = ${p.isNull ? 'NULL' : p.value}`).join('\n')}`;
+    setSubmittedSql({ original: textOf(original), optimized: textOf(optimized) });
 
     const res = await api<{ result: ExecuteResult }>(
       '/api/execute',
@@ -698,6 +832,12 @@ export default function ExecutePage() {
                   ))}
                 </Flex>
 
+                {activeTab === 'compare' && submittedSql && (
+                  <OptimizedPanel
+                    original={result.original.analysis} optimized={result.optimized.analysis}
+                    originalText={submittedSql.original} optimizedText={submittedSql.optimized}
+                  />
+                )}
                 {activeTab === 'compare' && <AnalysisPanel analysis={result.comparison} title="📊 Comparative Audit" />}
                 {activeTab === 'original' && (
                   <>
