@@ -38,6 +38,10 @@ export type AppConfig = {
   showRefactor: boolean;
   /** The model the Execute screen's refactor uses; empty = an installed, compatible model with a chat template, instruction-tuned names (Instruct, Chat, -it) first, then the largest parameter estimate. */
   refactorModel: string;
+  /** RV-1: the Review screen's model; empty = the same automatic choice as refactorModel. */
+  reviewModel: string;
+  /** RV-1: the Review result format; auto = v1 for small models, v2 otherwise. */
+  reviewSchema: "auto" | "v1" | "v2";
 };
 
 export const defaultAppConfig: AppConfig = {
@@ -66,6 +70,8 @@ export const defaultAppConfig: AppConfig = {
   showCompare: false,
   showRefactor: false,
   refactorModel: "",
+  reviewModel: "",
+  reviewSchema: "auto",
 };
 
 type Rule = (v: unknown) => boolean;
@@ -152,6 +158,8 @@ const rules: Record<keyof AppConfig, Rule> = {
   showCompare: bool,
   showRefactor: bool,
   refactorModel: (v) => typeof v === "string" && v.length <= 1024,
+  reviewModel: (v) => typeof v === "string" && v.length <= 1024,
+  reviewSchema: (v) => v === "auto" || v === "v1" || v === "v2",
 };
 
 /**

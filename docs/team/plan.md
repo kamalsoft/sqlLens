@@ -445,6 +445,23 @@ Not in this phase: automatic deployment, changing the procedure, or any write to
 - Tests: request validation (missing domain → 400), driver config built with `authentication.type: 'ntlm'`, password scrubbing.
 - Not in scope: SSPI/Integrated Security (D-038 B) and Kerberos.
 
+## Phase RV — Review Stored Procedure redesign (APPROVED 2026-11-12; RV-1..RV-5 implemented, awaiting review)
+
+User decisions (2026-11-12): own Review model in Settings; run picker with a preview of the telemetry; Review returns findings only (the rewrite stays in Refactor); Result schema moves to Settings, default Auto.
+
+Cause of the reported failure: the page defaults to the first model alphabetically (Qwen2.5-0.5B), which gets the v1 prompt; that prompt also asks for the whole rewritten procedure, and the small model loops inside it until maxNewTokens. Telemetry requires schema v2, so it fails for small models.
+
+| ID | Task | Owner | Reviewer | Acceptance |
+|---|---|---|---|---|
+| RV-1 | Settings: `reviewModel` (default "" = Automatic, same ranking as Refactor) and `reviewSchema` (auto/v1/v2). `/api/review`: `modelId` and `schemaVersion` optional, falling back to Settings; existing callers keep working. | Backend | Senior Architect | Settings saves both; a request without modelId uses the configured or automatic model; tests. |
+| RV-2 | Findings only: drop the `<rewritten_procedure>` ask from `analysisSP.md`, `analysisSP.v1.md`, `review-with-telemetry.md`; rewrite fields become optional; result view shows a "Need a rewrite? Use Refactor" link. Older records with a rewrite still render. | AI/Models | Senior Architect | Prompt-contract tests pass; old record fixture renders; review output is findings only. |
+| RV-3 | Telemetry works with either schema: the telemetry prompt is used whenever a run is chosen, with the existing v1 fallback parse, instead of a 400 for small models. | AI/Models | Senior Architect | Small model + telemetry returns a review, not 400; test. |
+| RV-4 | Run picker: searchable selection box of this user's recent runs labelled "dbo.Proc · database · grade · elapsed · logical reads · date"; below it "What the model will see": timings (parse/compile, execution, CPU, total), per-table scans/logical/physical reads, plan included yes/no, simulated note. `/api/audit` list gains `database`, `elapsedMs`, `logicalReads` if missing. | Frontend + Backend | Senior Architect | Picker and preview render from stored data; nothing is sent until Analyze; tests. |
+| RV-5 | Page redesign in the Execute & Audit SP style: numbered steps (Procedure · Evidence (optional) · Analyze), "Model: X · Change in Settings" line, live status (what is sent, elapsed clock), results as tabs (Summary, Findings, Index ideas, Raw output), leave guard kept. | Frontend | Senior Architect | Same look as Execute; keyboard and screen-reader labels; component tests. |
+
+Out of scope (backlog): a loop detector that stops generation early; repetition penalty tuning.
+Docs: `docs/api.md`, `docs/configuration.md`, `docs/prompting.md`, `docs/changelog.md`. Security: no auth, credential or SQL-execution change; the audit list fields are the user's own records.
+
 ## DoD traceability (9/9)
 
 | DoD criterion | Tasks |

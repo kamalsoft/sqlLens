@@ -38,10 +38,10 @@ describe("prompt contracts", () => {
     const text = read(name);
     expect(text).toContain("{{STORED_PROCEDURE}}");
     expect(text).not.toContain("```");
-    expect(text).toMatch(/Return the keys in this order: [^\n]*indexRecommendations, rewriteNotes\./);
-    // The rewrite is plain SQL after the JSON, never a JSON string.
-    expect(text).toMatch(/\n\}\n<rewritten_procedure>\n[^\n]+\n<\/rewritten_procedure>/);
-    expect(text).not.toContain('"rewrittenProcedure"');
+    expect(text).toMatch(/Return the keys in this order: [^\n]*, indexRecommendations\./);
+    // RV-2: findings only; the rewrite is Refactor's job.
+    expect(text).toContain("Do not rewrite the procedure: return findings only.");
+    expect(text).not.toMatch(/rewritten_procedure|rewriteNotes|"rewrittenProcedure"/);
     expect(text).toContain("Do not write CREATE INDEX statements");
     if (name !== "review-with-telemetry.md") expect(() => buildPrompt(text, "SELECT 1")).not.toThrow();
   });

@@ -32,6 +32,8 @@ type AppSettings = {
   showCompare: boolean;
   showRefactor: boolean;
   refactorModel: string;
+  reviewModel: string;
+  reviewSchema: "auto" | "v1" | "v2";
 };
 
 // Mirrors C6 defaults in docs/team/contracts.md.
@@ -60,6 +62,8 @@ const defaultSettings: AppSettings = {
   showCompare: false,
   showRefactor: false,
   refactorModel: "",
+  reviewModel: "",
+  reviewSchema: "auto",
 };
 
 const knownKeys = Object.keys(defaultSettings).concat("prompt") as Array<keyof AppSettings>;
@@ -241,6 +245,30 @@ export default function SettingsPage() {
               )}
             </select>
             <small className="field-hint">Used by Refactor on the Execute &amp; Audit SP screen. Pick an instruction-tuned model (Instruct or Chat): a base model does not follow the refactor instructions and can repeat itself.</small>
+          </Field>
+          <Field label="Review Model" name="reviewModel" error={error}>
+            <select id="setting-reviewModel" className="select" value={settings.reviewModel}
+              onChange={(event) => update("reviewModel", event.target.value)} disabled={disabled}>
+              <option value="">Automatic: the best instruction-tuned model</option>
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}{m.parameterEstimate ? ` (about ${(m.parameterEstimate / 1e9).toFixed(1)}B parameters)` : ""}
+                </option>
+              ))}
+              {settings.reviewModel && !models.some((m) => m.id === settings.reviewModel) && (
+                <option value={settings.reviewModel}>{settings.reviewModel} (not installed)</option>
+              )}
+            </select>
+            <small className="field-hint">Used by Review Stored Procedure. A larger instruction-tuned model gives more reliable findings.</small>
+          </Field>
+          <Field label="Review Result Format" name="reviewSchema" error={error}>
+            <select id="setting-reviewSchema" className="select" value={settings.reviewSchema}
+              onChange={(event) => update("reviewSchema", event.target.value as AppSettings["reviewSchema"])} disabled={disabled}>
+              <option value="auto">Auto: short format for small models, tables otherwise</option>
+              <option value="v2">Tables: findings, performance, security, testing</option>
+              <option value="v1">Short: summary and issues</option>
+            </select>
+            <small className="field-hint">A review that uses a run&apos;s telemetry always asks for the tables.</small>
           </Field>
           <Field label="Temperature" name="temperature" error={error}>
             <input id="setting-temperature" className="input" type="number" step={0.1} value={settings.temperature} onChange={num("temperature")} disabled={disabled} />

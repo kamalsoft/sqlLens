@@ -32,6 +32,8 @@ export type AuditSummary = {
   logicalReads: number | null;
   /** UX-4: procedure name from the request, or null for batches and reviews. */
   procedure?: string | null;
+  /** RV-4: the database the run used (SQL Server), or null. */
+  database?: string | null;
   /** UX-4: performance grade and prod-readiness verdict from the stored result, when present. */
   grade?: string | null;
   verdict?: string | null;
@@ -58,6 +60,7 @@ type Row = {
   elapsed_ms: number | null;
   logical_reads: number | null;
   procedure?: string | null;
+  database?: string | null;
   grade?: string | null;
   verdict?: string | null;
 };
@@ -84,6 +87,7 @@ function summary(r: Row): AuditSummary {
     elapsedMs: r.elapsed_ms,
     logicalReads: r.logical_reads,
     procedure: r.procedure ?? null,
+    database: r.database ?? null,
     grade: r.grade ?? null,
     verdict: r.verdict ?? null,
   };
@@ -193,6 +197,7 @@ export function listAudits(sessionId: string, limit = 100): AuditSummary[] {
     .prepare(
       `SELECT ${SUMMARY_COLS},
               CASE WHEN json_valid(request_payload) THEN json_extract(request_payload, '$.original.name') END AS procedure,
+              CASE WHEN json_valid(request_payload) THEN json_extract(request_payload, '$.database') END AS database,
               CASE WHEN json_valid(response_payload) THEN COALESCE(json_extract(response_payload, '$.analysis.performanceGrade'),
                        json_extract(response_payload, '$.original.analysis.performanceGrade')) END AS grade,
               CASE WHEN json_valid(response_payload) THEN COALESCE(json_extract(response_payload, '$.analysis.prodVerdict.verdict'),

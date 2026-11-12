@@ -144,7 +144,7 @@ describe("review persistence and telemetry (P4-01)", () => {
     expect((await res.json()).executionAuditId).toBe(id);
   });
 
-  it("404 for another session's or missing executionAuditId, 400 for v1", async () => {
+  it("404 for another session's or missing executionAuditId; v1 still gets the telemetry review (RV-3)", async () => {
     const other = createSession(seedAdmin());
     const otherCookie = `session_token=${other.token}`;
     const id = seedExecute(sessionIdOf(otherCookie), false, 1, 1);
@@ -162,7 +162,7 @@ describe("review persistence and telemetry (P4-01)", () => {
           post("/api/review", { modelId, sql: "SELECT 1", executionAuditId: own, schemaVersion: "v1" }, cookie),
         )
       ).status,
-    ).toBe(400);
+    ).toBe(200);
   });
 });
 
