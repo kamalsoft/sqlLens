@@ -521,7 +521,7 @@ function RawStatsPanel({ execution, defaultOpen = false, label }: { execution: E
 export default function ExecutePage() {
   const api = useApi();
   const [mode, setMode] = useState<'single' | 'compare'>('single');
-  const [kind, setKind] = useState<'procedure' | 'batch'>('batch');
+  const [kind, setKind] = useState<'procedure' | 'batch'>('procedure');
   const [original, setOriginal] = useState<TargetDraft>(emptyDraft());
   const [optimized, setOptimized] = useState<TargetDraft>(emptyDraft());
   // PG-1: SQL Server first and selected; PostgreSQL is no longer offered here.
@@ -533,6 +533,12 @@ export default function ExecutePage() {
   const [databases, setDatabases] = useState<string[] | null>(null);
   const [loadingDbs, setLoadingDbs] = useState(false);
   const [dbNote, setDbNote] = useState<string | null>(null);
+  // The stored procedures of the chosen database, for the procedure name list; null until loaded.
+  const [procedures, setProcedures] = useState<string[] | null>(null);
+  const [loadingProcs, setLoadingProcs] = useState(false);
+  const [procNote, setProcNote] = useState<string | null>(null);
+  // Only the latest procedure list request may update the list (a slower, older reply is dropped).
+  const procRequest = useRef(0);
   // EX-2: after Connect and choosing a database, the form folds to one summary line.
   const [editingConn, setEditingConn] = useState(true);
   // After a successful run, steps 1-3 fold to one bar so the results start near the top.
@@ -657,6 +663,31 @@ export default function ExecutePage() {
     apply();
     setDatabases(null);
     setDbNote(null);
+    setProcedures(null);
+    setProcNote(null);
+    procRequest.current++;
+  }
+
+  /** Lists the stored procedures of `db` (the chosen database), for the procedure name field. */
+  async function loadProcedures(db = database) {
+    if (engine !== 'mssql' || !db.trim()) return;
+    const request = ++procRequest.current;
+    setLoadingProcs(true);
+    setProcNote(null);
+    const res = await api<{ procedures?: string[] }>(
+      '/api/execute/procedures',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ engine, connection: { ...connection(), database: db } }) },
+      'Could not list the stored procedures',
+    );
+    if (request !== procRequest.current) return;
+    if (res.ok) {
+      const list = res.data?.procedures ?? [];
+      setProcedures(list);
+      if (list.length === 0) setProcNote('No stored procedures in this database.');
+    } else if (res.status !== 401) {
+      setProcNote(res.error ?? 'Could not list the stored procedures');
+    }
+    setLoadingProcs(false);
   }
 
   async function loadDatabases() {
@@ -673,7 +704,7 @@ export default function ExecutePage() {
       setDatabases(list);
       if (list.length === 0) setDbNote('This login cannot open any database.');
       else if (!list.includes(database)) setDatabase('');
-      else setEditingConn(false);
+      else { setEditingConn(false); void loadProcedures(database); }
     } else if (res.status !== 401) {
       setDbNote(res.error ?? 'Could not list the databases');
     }
@@ -805,7 +836,8 @@ export default function ExecutePage() {
           ) : (<>
           <div className="connect-form">
             <label htmlFor="exec-engine">Server type</label>
-            <select id="exec-engine" className="select" value={engine} onChange={(e) => setEngine(e.target.value as 'simulation' | 'mssql')}>
+            <select id="exec-engine" className="select" value={engine}
+              onChange={(e) => { const v = e.target.value as 'simulation' | 'mssql'; changeLogin(() => setEngine(v)); }}>
               <option value="mssql">SQL Server</option>
               <option value="simulation">Simulation (no database needed)</option>
             </select>
@@ -860,13 +892,18 @@ export default function ExecutePage() {
                 <label htmlFor="exec-database">Database</label>
                 {databases && databases.length > 0 ? (
                   <select id="exec-database" className="select" value={database}
-                    onChange={(e) => { setDatabase(e.target.value); if (e.target.value) setEditingConn(false); }}>
+                    onChange={(e) => {
+                      const db = e.target.value;
+                      setDatabase(db);
+                      setProcedures(null);
+                      if (db) { setEditingConn(false); void loadProcedures(db); }
+                    }}>
                     <option value="">Select a database</option>
                     {databases.map((name) => <option key={name} value={name}>{name}</option>)}
                   </select>
                 ) : (
                   <input id="exec-database" className="input" value={database} placeholder="Connect to list databases, or type a name"
-                    onChange={(e) => setDatabase(e.target.value)} />
+                    onChange={(e) => { setDatabase(e.target.value); setProcedures(null); setProcNote(null); procRequest.current++; }} />
                 )}
 
                 <span />
@@ -955,6 +992,8 @@ export default function ExecutePage() {
               onSaveSet={(n) => saveSet('original', n)}
               onLoadSet={(n) => loadSet('original', n)}
               onDeleteSet={(n) => deleteSet('original', n)}
+              procedures={procedures} procedureNote={procNote} loadingProcedures={loadingProcs}
+              onRefreshProcedures={engine === 'mssql' && database.trim() ? () => void loadProcedures() : undefined}
             />
           </Box>
 
@@ -973,6 +1012,7 @@ export default function ExecutePage() {
                 onSaveSet={(n) => saveSet('optimized', n)}
                 onLoadSet={(n) => loadSet('optimized', n)}
                 onDeleteSet={(n) => deleteSet('optimized', n)}
+                procedures={procedures}
               />
             </Box>
           )}

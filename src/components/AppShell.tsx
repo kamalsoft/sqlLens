@@ -14,7 +14,7 @@ export const SETTINGS_SAVED_EVENT = "sqllens:settings-saved";
 const navItems: { href: string; label: string; icon: string; feature?: Feature }[] = [
   { href: "/", label: "Overview", icon: "◫" },
   { href: "/review", label: "Review SP", icon: "▣" },
-  { href: "/execute", label: "Execute", icon: "▶" },
+  { href: "/execute", label: "Execute & Audit SP", icon: "▶" },
   { href: "/compare", label: "Compare", icon: "⇄", feature: "showCompare" },
   { href: "/refactor", label: "Refactor", icon: "✎", feature: "showRefactor" },
   { href: "/audit", label: "Audit", icon: "☰" },

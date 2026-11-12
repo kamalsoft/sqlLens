@@ -96,7 +96,7 @@ describe("AppShell leave guard (UX-B)", () => {
     const cancel = vi.fn();
     const user = userEvent.setup();
     shell(cancel);
-    await user.click(screen.getByRole("link", { name: /Audit/ }));
+    await user.click(screen.getByRole("link", { name: /Audit$/ }));
     expect(await screen.findByText("A refactor is still running. Leaving cancels it, and the result is lost.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Stay on this screen" }));
     expect(cancel).not.toHaveBeenCalled();
@@ -107,7 +107,7 @@ describe("AppShell leave guard (UX-B)", () => {
     const cancel = vi.fn();
     const user = userEvent.setup();
     shell(cancel);
-    await user.click(screen.getByRole("link", { name: /Audit/ }));
+    await user.click(screen.getByRole("link", { name: /Audit$/ }));
     await user.click(await screen.findByRole("button", { name: "Cancel the task and leave" }));
     expect(cancel).toHaveBeenCalledTimes(1);
     expect(router.push).toHaveBeenCalledWith("/audit");
@@ -132,7 +132,7 @@ describe("AppShell leave guard (UX-B)", () => {
     }
     render(<ChakraProvider value={defaultSystem}><LeaveGuardProvider><AppShell><Both /></AppShell></LeaveGuardProvider></ChakraProvider>);
     const user = userEvent.setup();
-    await user.click(screen.getByRole("link", { name: /Audit/ }));
+    await user.click(screen.getByRole("link", { name: /Audit$/ }));
     expect(await screen.findByText("An execution and a refactor are still running. Leaving cancels them, and the result is lost.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Cancel the task and leave" }));
     expect(run).toHaveBeenCalledTimes(1);
@@ -149,7 +149,7 @@ describe("AppShell leave guard (UX-B)", () => {
     );
     const view = render(tree(true));
     const user = userEvent.setup();
-    await user.click(screen.getByRole("link", { name: /Audit/ }));
+    await user.click(screen.getByRole("link", { name: /Audit$/ }));
     expect(await screen.findByRole("button", { name: "Stay on this screen" })).toBeInTheDocument();
 
     view.rerender(tree(false));

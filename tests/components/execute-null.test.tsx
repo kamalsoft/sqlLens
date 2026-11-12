@@ -33,6 +33,7 @@ describe("ExecutePage null metrics", () => {
     const user = userEvent.setup();
     render(<ChakraProvider value={defaultSystem}><ExecutePage /></ChakraProvider>);
     fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
+    await user.click(screen.getByRole("radio", { name: "SQL batch" }));
     await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
 

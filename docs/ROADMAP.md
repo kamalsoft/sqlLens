@@ -152,7 +152,7 @@ Ordered by risk first, then by what blocks a release. Each item names its plan t
 
 **Priority 6: Refactor panel follow-ups (review of commit dd5276d, 2026-11-11)**
 22. Share the safety gates of `POST /api/execute/definition` and `POST /api/execute/parameters` (session, rate limit, engine, name, connection, live execution) in one function, so a change to one cannot miss the other.
-23. Share the connect, timeout and cleanup code of `listProcedureParams`, `getProcedureDefinition` and `listDatabases` in `src/lib/execution/mssql.ts` (and the gates of the three catalog routes in item 22, now including `POST /api/execute/databases`).
+23. Share the connect, timeout and cleanup code of `listProcedureParams`, `getProcedureDefinition` and `listDatabases` in `src/lib/execution/mssql.ts` (and the gates of the three catalog routes in item 22, now including `POST /api/execute/databases` and `POST /api/execute/procedures`). `listDatabases` and `listProcedures` already share `catalogNames`.
 24. ~~Add a component test that the refactor panel aborts its running `/api/refactor` request.~~ Done: `tests/components/refactor-panel.test.tsx` checks that closing the refactor dialog while it runs aborts the request (UX-D).
 
 ## Roadmap Overview Matrix
