@@ -25,6 +25,7 @@ type AppSettings = {
   maxNewTokens: number;
   logSqlText: boolean;
   shareTtlHours: number;
+  retentionDays: number;
   maxLogicalReads: number | null;
   maxElapsedMs: number | null;
   maxScanCount: number | null;
@@ -53,8 +54,9 @@ const defaultSettings: AppSettings = {
   maxSqlLength: 100000,
   inferenceTimeoutMs: 120000,
   maxNewTokens: 1536,
-  logSqlText: true,
+  logSqlText: false,
   shareTtlHours: 24,
+  retentionDays: 90,
   maxLogicalReads: null,
   maxElapsedMs: null,
   maxScanCount: null,
@@ -375,6 +377,10 @@ export default function SettingsPage() {
       <Group id="sharing" title="Sharing" description="Links that let someone without a login view one result.">
           <Field label="Share Link Lifetime (hours)" name="shareTtlHours" error={error}>
             <input id="setting-shareTtlHours" className="input" type="number" value={settings.shareTtlHours} onChange={num("shareTtlHours")} disabled={disabled} />
+          </Field>
+          <Field label="Keep Records (days)" name="retentionDays" error={error}>
+            <input id="setting-retentionDays" className="input" type="number" min={1} max={3650} value={settings.retentionDays} onChange={num("retentionDays")} disabled={disabled} />
+            <small className="field-hint">Audit records and run logs older than this are deleted when the server starts and once a day.</small>
           </Field>
       </Group>
 

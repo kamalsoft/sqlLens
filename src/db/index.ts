@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { runMigrations } from './migrate';
+import { hashPlainSessionTokens } from './session-tokens';
 
 // Store the database outside the app as per R008
 // We'll create it two levels up from the project root, or in a specific absolute path.
@@ -19,5 +20,8 @@ const db = new Database(dbPath);
 
 // Apply versioned SQL migrations (src/db/migrations)
 runMigrations(db, path.join(process.cwd(), 'src', 'db', 'migrations'));
+
+// SEC-T6: hash any session tokens saved in plain text before tokens were hashed.
+hashPlainSessionTokens(db);
 
 export default db;

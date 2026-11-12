@@ -47,8 +47,29 @@ export interface ExecutionResult {
 
 function auditLogDir(): string {
   const dir = path.resolve(process.env.SQLLENS_AUDIT_LOG_DIR || path.join(process.cwd(), 'audit_logs'));
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  // An existing default folder keeps old permissions: tighten it (a custom, possibly shared, folder is left as set).
+  if (!process.env.SQLLENS_AUDIT_LOG_DIR) fs.chmodSync(dir, 0o700);
   return dir;
+}
+
+const RUN_LOG_NAME = /^\d{6,}_.+\.txt$/;
+
+/** SEC-T4: deletes run logs older than `retentionDays`. Returns how many were removed. */
+export function purgeOldLogs(retentionDays: number, now: number = Date.now()): number {
+  const dir = auditLogDir();
+  const cutoff = now - retentionDays * 86_400_000;
+  let removed = 0;
+  for (const name of fs.readdirSync(dir)) {
+    // Only this app's run logs (<record>_<type>_<timestamp>.txt): the directory may be shared.
+    if (!RUN_LOG_NAME.test(name)) continue;
+    const file = path.join(dir, name);
+    if (fs.statSync(file).mtimeMs < cutoff) {
+      fs.unlinkSync(file);
+      removed += 1;
+    }
+  }
+  return removed;
 }
 
 function nextRecordNumber(): string {
@@ -129,7 +150,8 @@ function writeAuditLog(
     '='.repeat(80),
   ].join('\n');
 
-  fs.writeFileSync(filePath, content, 'utf-8');
+  // Owner-only: run logs can hold SQL text and returned data (SEC-T4).
+  fs.writeFileSync(filePath, content, { encoding: 'utf-8', mode: 0o600 });
   return filePath;
 }
 

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { logError, redact } from "@/lib/redact";
+import { logError, redact, scrubText } from "@/lib/redact";
 import { rateLimit, resetRateLimits } from "@/lib/request-guard";
 
 describe("redact", () => {
@@ -41,5 +41,32 @@ describe("rateLimit", () => {
     expect(rateLimit("other", 3, 60_000)).toBe(true);
     vi.advanceTimersByTime(60_000);
     expect(rateLimit("k", 3, 60_000)).toBe(true);
+  });
+});
+
+describe("scrubText (SEC-T8)", () => {
+  it("removes secrets, quoted names and SQL, and server addresses from logged messages", () => {
+    const msg = "Login failed for user 'sa'. Server=db01.corp:1433;User Id=sa;Password=Sup3r!;Database=Sales near 'SELECT * FROM dbo.Payroll' token hf_abcdefghijk12 Bearer eyJabc.def";
+    const out = scrubText(msg);
+    for (const leak of ["'sa'", "Sup3r!", "db01.corp:1433", "Payroll", "hf_abcdefghijk12", "eyJabc.def"]) expect(out).not.toContain(leak);
+    expect(out).toContain("Login failed for user '[…]'");
+    expect(out).toContain("Password=[REDACTED]");
+    expect(redact(new Error("connect to db01:1433 failed"))).toEqual({ name: "Error", message: "connect to [host]:[port] failed" });
+  });
+  it("removes URL credentials, key=value and JSON secrets, and double-quoted values (SEC review C1)", () => {
+    const cases: [string, string][] = [
+      ["connect postgres://alice:s3cret@db/app failed", "s3cret"],
+      ["secret=abc123 api_key=K-999 token=TTT", "abc123"],
+      ["api_key=K-999", "K-999"],
+      ["token=TTT", "TTT"],
+      ['{"password":"hunter2","user":"bob"}', "hunter2"],
+      ['near "SELECT * FROM dbo.Payroll"', "Payroll"],
+      ['Password="a b c";Server=x', "a b c"],
+    ];
+    for (const [text, leak] of cases) expect(scrubText(text)).not.toContain(leak);
+    expect(scrubText('{"password":"hunter2"}')).toContain("[REDACTED]");
+  });
+  it("caps very long messages", () => {
+    expect(scrubText("x".repeat(2000)).length).toBeLessThanOrEqual(501);
   });
 });

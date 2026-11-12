@@ -230,6 +230,13 @@ body {
   color: var(--text);
 }
 
+/* SEC-T4: the confirm step of a permanent delete. */
+.button-danger {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(180px, 1fr));

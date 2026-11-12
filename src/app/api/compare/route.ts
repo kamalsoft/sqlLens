@@ -15,7 +15,7 @@ import {
 import { extractJson } from "@/lib/extract-json";
 import { resolveModel, runModel } from "@/lib/model-run";
 import { logError } from "@/lib/redact";
-import { expandHome } from "@/lib/review-prompt";
+import { resolvePromptPath } from "@/lib/prompt-path";
 import { rateLimit } from "@/lib/request-guard";
 import type { ExecutionResult } from "@/lib/sp-executor";
 import { badRequest, isString, readJson } from "@/lib/validation/body";
@@ -136,9 +136,7 @@ export async function POST(request: Request) {
     if (!resolved.ok) return resolved.response;
     const model = resolved.model;
 
-    const promptPath = config.prompt?.compare
-      ? expandHome(config.prompt.compare)
-      : path.join(process.cwd(), "data", "prompts", "compare.md");
+    const promptPath = resolvePromptPath(config.prompt?.compare, "compare.md");
     let prompt: string;
     try {
       prompt = buildComparePrompt(

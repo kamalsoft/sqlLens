@@ -1,5 +1,5 @@
 import "server-only";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import db from "@/db";
 
@@ -8,12 +8,17 @@ export const SESSION_TTL_MS = 7 * 24 * 3600 * 1000;
 
 export type SessionInfo = { sessionId: string; userId: string; username: string };
 
+/** SEC-T6: the database keeps only SHA-256 of a session token, so a copy of it cannot be used to sign in. */
+export function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
 export function createSession(userId: string): { token: string; expiresAt: string } {
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();
   db.prepare(
     "INSERT INTO sessions (id, user_id, token, is_active, expires_at) VALUES (?, ?, ?, 1, ?)"
-  ).run(randomUUID(), userId, token, expiresAt);
+  ).run(randomUUID(), userId, hashToken(token), expiresAt);
   return { token, expiresAt };
 }
 
@@ -44,7 +49,7 @@ export function getSessionFromRequest(request: Request): SessionInfo | null {
        FROM sessions s JOIN users u ON u.id = s.user_id
        WHERE s.token = ? AND s.is_active = 1`
     )
-    .get(token) as
+    .get(hashToken(token)) as
     | { sessionId: string; userId: string; username: string; expiresAt: string | null }
     | undefined;
   if (!row) return null;
@@ -68,7 +73,7 @@ export function requireSession(
 }
 
 export function invalidateSession(token: string): void {
-  db.prepare("UPDATE sessions SET is_active = 0 WHERE token = ?").run(token);
+  db.prepare("UPDATE sessions SET is_active = 0 WHERE token = ?").run(hashToken(token));
 }
 
 export function getSessionToken(request: Request): string | null {

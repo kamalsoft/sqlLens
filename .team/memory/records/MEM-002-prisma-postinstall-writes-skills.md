@@ -1,7 +1,7 @@
 # MEM-002 `prisma skills sync` writes into `.claude/skills`
 
 - Kind: issue
-- Status: workaround
+- Status: resolved (2026-11-12, SEC-T1: Prisma and its postinstall hook removed; it was unused by the app)
 - Date: 2026-10-24 · Commit: 22d84fa
 - Area: package.json (`postinstall`), `.claude/skills/`
 - Owner: lead

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createShare, getAudit, revokeShare } from "@/db/audit-repo";
 import { readAppConfig } from "@/lib/app-config";
 import { requireSession } from "@/lib/auth";
+import { rateLimit } from "@/lib/request-guard";
 import { logError } from "@/lib/redact";
 import { badRequest } from "@/lib/validation/body";
 
@@ -10,6 +11,9 @@ type Ctx = { params: Promise<{ id: string }> };
 export async function POST(request: Request, { params }: Ctx) {
   const auth = requireSession(request);
   if (!auth.ok) return auth.response;
+  if (!rateLimit(`share:${auth.session.sessionId}`, 20, 60_000)) {
+    return NextResponse.json({ error: "Too many requests. Try again in a minute." }, { status: 429 });
+  }
   try {
     const { id } = await params;
     if (!getAudit(id, auth.session.sessionId)) {
@@ -46,6 +50,9 @@ export async function POST(request: Request, { params }: Ctx) {
 export async function DELETE(request: Request, { params }: Ctx) {
   const auth = requireSession(request);
   if (!auth.ok) return auth.response;
+  if (!rateLimit(`share:${auth.session.sessionId}`, 20, 60_000)) {
+    return NextResponse.json({ error: "Too many requests. Try again in a minute." }, { status: 429 });
+  }
   try {
     const { id } = await params;
     if (!getAudit(id, auth.session.sessionId)) {

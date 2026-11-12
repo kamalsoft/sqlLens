@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAudit, upsertFeedback, type FeedbackItem } from "@/db/audit-repo";
 import { requireSession } from "@/lib/auth";
+import { rateLimit } from "@/lib/request-guard";
 import { logError } from "@/lib/redact";
 import { badRequest, readJson } from "@/lib/validation/body";
 
@@ -9,6 +10,9 @@ const STATUSES = new Set(["accepted", "rejected", "pending"]);
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const auth = requireSession(request);
   if (!auth.ok) return auth.response;
+  if (!rateLimit(`feedback:${auth.session.sessionId}`, 60, 60_000)) {
+    return NextResponse.json({ error: "Too many requests. Try again in a minute." }, { status: 429 });
+  }
   try {
     const { id } = await params;
     if (!getAudit(id, auth.session.sessionId)) {

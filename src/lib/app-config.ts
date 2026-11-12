@@ -3,6 +3,7 @@ import { realpathSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { allowedPromptPath } from "@/lib/prompt-path";
 
 export type Engine = "simulation" | "mssql" | "postgres";
 
@@ -25,6 +26,8 @@ export type AppConfig = {
   maxNewTokens: number;
   logSqlText: boolean;
   shareTtlHours: number;
+  /** SEC-T4: audit records and run logs older than this many days are deleted at start-up and daily. */
+  retentionDays: number;
   /** P8-02 targets for the prod-readiness verdict. null = not set. */
   maxLogicalReads: number | null;
   maxElapsedMs: number | null;
@@ -60,8 +63,9 @@ export const defaultAppConfig: AppConfig = {
   maxSqlLength: 100000,
   inferenceTimeoutMs: 120000,
   maxNewTokens: 1536,
-  logSqlText: true,
+  logSqlText: false,
   shareTtlHours: 24,
+  retentionDays: 90,
   maxLogicalReads: null,
   maxElapsedMs: null,
   maxScanCount: null,
@@ -137,11 +141,13 @@ const rules: Record<keyof AppConfig, Rule> = {
   temperature: num(0, 2),
   contextWindow: int(1, 10_000_000),
   allowTelemetry: bool,
+  // SEC-2: each prompt must be a .md file inside data/prompts/.
   prompt: (v) =>
     typeof v === "object" &&
     v !== null &&
     !Array.isArray(v) &&
-    Object.values(v).every((x) => typeof x === "string"),
+    Object.keys(v).length <= 20 &&
+    Object.values(v).every((x) => allowedPromptPath(x) !== null),
   allowLiveExecution: bool,
   queryTimeoutMs: int(1000, 600_000),
   defaultEngine: (v) => v === "simulation" || v === "mssql" || v === "postgres",
@@ -150,6 +156,7 @@ const rules: Record<keyof AppConfig, Rule> = {
   maxNewTokens: int(64, 8192),
   logSqlText: bool,
   shareTtlHours: int(1, 720),
+  retentionDays: int(1, 3650),
   maxLogicalReads: optionalInt(1, 1e12),
   maxElapsedMs: optionalInt(1, 3_600_000),
   maxScanCount: optionalInt(1, 1e9),

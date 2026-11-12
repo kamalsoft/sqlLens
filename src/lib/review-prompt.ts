@@ -1,6 +1,5 @@
 import { readFile } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
+import { resolvePromptPath } from "@/lib/prompt-path";
 import type { SchemaVersion } from "@/lib/review-schema";
 
 export type LoadedPrompt = { path: string; content: string };
@@ -8,30 +7,15 @@ export type LoadedPrompt = { path: string; content: string };
 const PLACEHOLDER = "{{STORED_PROCEDURE}}";
 const MAX_PROMPT_CHARS = 30_000;
 
-export function expandHome(value: string): string {
-  if (value === "~") return os.homedir();
-  if (value.startsWith("~/")) return path.join(os.homedir(), value.slice(2));
-  return value;
-}
-
-/** Picks the prompt file for a schema version (v1 falls back to the bundled file). */
+/** Picks the prompt file for a schema version: the configured one when allowed (SEC-2), else the bundled file. */
 export function selectPromptPath(
   version: SchemaVersion,
   prompts?: Record<string, string>,
   cwd: string = process.cwd(),
 ): string {
-  if (version === "v1") {
-    const configured = prompts?.analysisSPv1;
-    return configured
-      ? expandHome(configured)
-      : path.join(cwd, "data", "prompts", "analysisSP.v1.md");
-  }
-
-  const configured = prompts?.analysisSP;
-  if (!configured) {
-    throw new Error("The analysisSP prompt path is not configured");
-  }
-  return expandHome(configured);
+  return version === "v1"
+    ? resolvePromptPath(prompts?.analysisSPv1, "analysisSP.v1.md", cwd)
+    : resolvePromptPath(prompts?.analysisSP, "analysisSP.md", cwd);
 }
 
 export async function loadPrompt(

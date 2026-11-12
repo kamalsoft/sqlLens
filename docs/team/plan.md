@@ -462,6 +462,24 @@ Cause of the reported failure: the page defaults to the first model alphabetical
 Out of scope (backlog): a loop detector that stops generation early; repetition penalty tuning.
 Docs: `docs/api.md`, `docs/configuration.md`, `docs/prompting.md`, `docs/changelog.md`. Security: no auth, credential or SQL-execution change; the audit list fields are the user's own records.
 
+## Phase SEC — Security and compliance fixes (APPROVED 2026-11-12; SEC-T1..T9 implemented, awaiting review)
+
+From the whole-app security audit of 2026-11-12 (`docs/security.md`, "Known gaps"). Each task needs Security sign-off and the Senior Architect review.
+
+| ID | Task | Fixes | Owner | Acceptance |
+|---|---|---|---|---|
+| SEC-T1 | Upgrade `next` to the patched 16.x and the other packages with high or critical advisories; move `prisma` and `npm` to devDependencies. | SEC-1 | Lead + QA | `npm audit --omit=dev` shows no critical or high; typecheck, lint, tests and build pass. |
+| SEC-T2 | `prompt.*` settings accept only `.md` files whose real path is inside `data/prompts/`; validated on save and again when read. | SEC-2 | Backend | A path outside `data/prompts/` gives 400 on save and is ignored on read; tests. |
+| SEC-T3 | Security headers for every response: CSP (self, plus what Next and Chakra need), `frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`. | SEC-3 | Backend | Headers present on pages and API; app still works; test. |
+| SEC-T4 | Retention: `retentionDays` setting (default 90), delete for one's own audit record, start-up purge of old records, expired sessions and run logs; `logSqlText` default `false`; run logs written with mode 0600. | SEC-4, SEC-6 (purge) | Backend | Old rows and files removed on start; delete route is owner-only; tests. |
+| SEC-T5 | A clear warning on Execute & Audit SP when live execution is on: "Runs change data; use a test database". | SEC-5 | Frontend | Warning shown when the setting is on; test. |
+| SEC-T6 | Store SHA-256 of the session token instead of the token (migration signs everyone out once). | SEC-6 | Backend | Login, logout and expiry work; DB holds no raw token; tests. |
+| SEC-T7 | Rate-limit the remaining write routes (settings save, share, feedback); per-username login limit so one client cannot lock out others. | SEC-8 | Backend | 429 after the limit; tests. |
+| SEC-T8 | Log only the error name and a scrubbed message (server names, SQL removed). | SEC-10 | Backend | Redaction test. |
+| SEC-T9 | Remove the stray `a.sh`. | SEC-12 | Lead | File gone. |
+
+Deferred (backlog): SEC-7 (require HTTPS off localhost) and SEC-11 (tamper-evident audit records), which matter only when the app is shared beyond one machine.
+
 ## DoD traceability (9/9)
 
 | DoD criterion | Tasks |

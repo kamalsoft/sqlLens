@@ -43,9 +43,14 @@ export function clientKey(request: Request): string {
   return "local";
 }
 
-/** Login limits: per IP (5/min), per username (5/min), global (20/min). */
+/**
+ * Login limits: per username (5/min), global (20/min), and per client IP (5/min) only when the address is
+ * known (SQLLENS_TRUST_PROXY=1). SEC-T7: without a trusted proxy every client is "local", so a per-IP bucket
+ * would let one client's failed attempts lock everyone out.
+ */
 export function loginAllowed(request: Request, username: unknown): boolean {
-  const ip = rateLimit(`login:ip:${clientKey(request)}`, 5, 60_000);
+  const client = clientKey(request);
+  const ip = client === "local" ? true : rateLimit(`login:ip:${client}`, 5, 60_000);
   const global = rateLimit("login:global", 20, 60_000);
   const user =
     typeof username === "string"

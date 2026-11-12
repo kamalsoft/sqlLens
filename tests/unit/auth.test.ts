@@ -3,6 +3,7 @@ import db from "@/db";
 import {
   createSession,
   getSessionFromRequest,
+  hashToken,
   invalidateSession,
   requireSession,
   SESSION_TTL_MS,
@@ -27,12 +28,18 @@ describe("auth sessions", () => {
     const { token } = createSession(userId);
     db.prepare("UPDATE sessions SET expires_at = ? WHERE token = ?").run(
       new Date(Date.now() - 1000).toISOString(),
-      token
+      hashToken(token)
     );
     expect(getSessionFromRequest(req(token))).toBeNull();
     const second = createSession(userId);
     invalidateSession(second.token);
     expect(getSessionFromRequest(req(second.token))).toBeNull();
+  });
+  it("stores only the SHA-256 of the token (SEC-T6)", () => {
+    const { token } = createSession(seedAdmin());
+    expect(db.prepare("SELECT 1 FROM sessions WHERE token = ?").get(token)).toBeUndefined();
+    expect(db.prepare("SELECT 1 FROM sessions WHERE token = ?").get(hashToken(token))).toBeDefined();
+    expect(hashToken(token)).toMatch(/^[0-9a-f]{64}$/);
   });
   it("requireSession returns 401 without a session", async () => {
     const r = requireSession(req());

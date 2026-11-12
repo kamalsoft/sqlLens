@@ -210,7 +210,7 @@ let exitHookSet = false;
 function getWorker(): ChildProcess {
   if (worker) return worker;
   // The worker ships with the app: a build that leaves out scripts/ cannot run models.
-  const script = path.join(process.cwd(), "scripts", "inference-worker.mjs");
+  const script = path.join(/* turbopackIgnore: true */ process.cwd(), "scripts", "inference-worker.mjs");
   if (!existsSync(script)) throw new Error("Model worker scripts/inference-worker.mjs not found; scripts/ must ship with the app.");
   // Only what the runtime needs: no tokens, credentials or connection strings reach the worker.
   const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, HOME: process.env.HOME, NODE_ENV: process.env.NODE_ENV };

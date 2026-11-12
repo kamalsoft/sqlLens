@@ -528,6 +528,8 @@ export default function ExecutePage() {
   const [optimized, setOptimized] = useState<TargetDraft>(emptyDraft());
   // PG-1: SQL Server first and selected; PostgreSQL is no longer offered here.
   const [engine, setEngine] = useState<'simulation' | 'mssql'>('mssql');
+  // SEC-T5: whether Settings allows real runs; null until known.
+  const [liveAllowed, setLiveAllowed] = useState<boolean | null>(null);
   // P9-01: SQL Server login type; Windows logs in with NTLM as DOMAIN\\user.
   const [authType, setAuthType] = useState<'sql' | 'windows'>('sql');
   const [domain, setDomain] = useState('');
@@ -722,6 +724,14 @@ export default function ExecutePage() {
     }
     setLoadingDbs(false);
   }
+
+  useEffect(() => {
+    let cancelled = false;
+    void api<{ allowLiveExecution?: boolean }>('/api/appconfig', { cache: 'no-store' }).then((res) => {
+      if (!cancelled && res.ok) setLiveAllowed(res.data?.allowLiveExecution === true);
+    });
+    return () => { cancelled = true; };
+  }, [api]);
 
   // Reopen a saved run from Audit: /execute?record=<id> shows its result and its latest refactor as they were.
   useEffect(() => {
@@ -1139,6 +1149,17 @@ export default function ExecutePage() {
           {mode === 'single' && engine !== 'simulation' && (
             <Text fontSize="xs" color="fg.muted" mt={3}>
               Runs several times: a warm-up that is not counted, then the measured runs set in Settings (2 by default).
+            </Text>
+          )}
+          {engine !== 'simulation' && liveAllowed === true && (
+            <Text role="note" fontSize="sm" color="status.warn" mt={3}>
+              ⚠ This runs the code for real on the server you connected to. Procedures are not rolled back and can change data:
+              use a development or test database and a login with only the rights the procedure needs.
+            </Text>
+          )}
+          {engine !== 'simulation' && liveAllowed === false && (
+            <Text role="note" fontSize="sm" color="fg.muted" mt={3}>
+              Live execution is off in <Link href="/settings" className="text-link">Settings</Link>, so only Simulation can run.
             </Text>
           )}
         </Box>

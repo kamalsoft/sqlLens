@@ -27,7 +27,8 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe("ExecutePage null metrics", () => {
   it("renders Not captured and the Simulated badge", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+    // A fresh Response per call: the page also loads /api/appconfig (SEC-T5).
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () =>
       new Response(JSON.stringify({ result }), { status: 200, headers: { "content-type": "application/json" } })
     ));
     const user = userEvent.setup();

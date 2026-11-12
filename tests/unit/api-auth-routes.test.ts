@@ -69,6 +69,11 @@ describe("auth routes", () => {
     for (let i = 0; i < 5; i++) expect((await login(post("/api/auth/login", bad))).status).toBe(401);
     expect((await login(post("/api/auth/login", TEST_ADMIN))).status).toBe(429);
   });
+  it("rate limits settings saves per session (SEC-T7)", async () => {
+    const cookie = createTestSession();
+    for (let i = 0; i < 10; i++) expect((await putConfig(put({ temperature: 0.2 }, cookie))).status).toBe(200);
+    expect((await putConfig(put({ temperature: 0.2 }, cookie))).status).toBe(429);
+  });
   it("legacy hash users get 401", async () => {
     const { default: db } = await import("@/db");
     db.prepare("INSERT OR REPLACE INTO users (id, username, password_hash) VALUES ('legacy','legacy','!disabled')").run();

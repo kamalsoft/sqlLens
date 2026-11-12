@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useApi } from "@/components/api-client";
 import { ReviewResultView } from "@/components/review/ReviewResultView";
 import type { ReviewV1, ReviewV2, SchemaVersion } from "@/lib/review-schema";
@@ -149,6 +149,16 @@ export default function AuditDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const [record, setRecord] = useState<AuditRecord | null>(null);
+  const router = useRouter();
+  // SEC-T4: deleting asks once more, inline, before the record is gone for good.
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+
+  async function deleteRecord(id: string) {
+    const res = await api<{ deleted?: boolean }>(`/api/audit/${encodeURIComponent(id)}`, { method: "DELETE" }, "Unable to delete the record");
+    if (res.ok) router.push("/audit");
+    else if (res.status !== 401) setDeleteError(res.error ?? "Unable to delete the record");
+  }
   const [feedback, setFeedback] = useState<Record<string, FeedbackEntry>>({});
   const [loadError, setLoadError] = useState("");
   const [feedbackError, setFeedbackError] = useState("");
@@ -224,7 +234,17 @@ export default function AuditDetailPage() {
             <Link href={`/execute?record=${record.related.source.id}`} className="button button-primary">Open in Execute &amp; Audit SP</Link>
           )}
           <SharePanel auditId={record.id} />
+          {confirmDelete ? (
+            <span role="group" aria-label="Confirm delete" className="page-actions">
+              <span>Delete this record permanently?</span>
+              <button type="button" className="button button-danger" onClick={() => void deleteRecord(record.id)}>Delete</button>
+              <button type="button" className="button button-secondary" onClick={() => setConfirmDelete(false)}>Cancel</button>
+            </span>
+          ) : (
+            <button type="button" className="button button-secondary" onClick={() => setConfirmDelete(true)}>Delete record</button>
+          )}
         </div>
+        {deleteError && <div role="alert" className="alert">{deleteError}</div>}
       </header>
 
       {feedbackError && <div role="alert" className="alert">{feedbackError}</div>}

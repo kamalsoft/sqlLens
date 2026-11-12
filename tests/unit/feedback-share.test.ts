@@ -9,12 +9,12 @@ import { GET as auditById } from "@/app/api/audit/[id]/route";
 import { PATCH as patchRecs } from "@/app/api/audit/[id]/recommendations/route";
 import { DELETE as unshare, POST as share } from "@/app/api/audit/[id]/share/route";
 import { GET as getShared } from "@/app/api/share/[token]/route";
-import { createSession } from "@/lib/auth";
+import { createSession, hashToken } from "@/lib/auth";
 import { seedAdmin } from "../helpers/auth";
 
 function sessionFor(): { sessionId: string; cookie: string } {
   const { token } = createSession(seedAdmin());
-  const row = db.prepare("SELECT id FROM sessions WHERE token = ?").get(token) as { id: string };
+  const row = db.prepare("SELECT id FROM sessions WHERE token = ?").get(hashToken(token)) as { id: string };
   return { sessionId: row.id, cookie: `session_token=${token}` };
 }
 const call = (method: string, body?: unknown, cookie?: string) =>
