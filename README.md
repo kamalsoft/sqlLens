@@ -4,13 +4,19 @@ SQLLens is an AI-assisted SQL stored procedure analysis and optimization platfor
 
 ## Getting Started
 
-Start the development server from the repository root:
+From the repository root:
 
 ```bash
+npm install
+npm run admin:set-password   # creates the "admin" login; password of at least 12 characters
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) and sign in as `admin`.
+
+> Upgrade note: audit records and run logs older than **Keep Records (days)** in Settings (default 90) are deleted when the server starts and once a day. Raise it before upgrading if you need older history.
+
+ Download a model under Manage Models (an instruction-tuned one such as `onnx-community/Qwen2.5-1.5B-Instruct`). To run procedures against SQL Server, turn on `allowLiveExecution` in Settings, and use a development or test database only (see [Security](docs/security.md)).
 
 ## Architecture Overview
 
@@ -115,6 +121,7 @@ flowchart TB
 - Local Hugging Face Transformers inference remains inside the local trust boundary unless an explicit local REST bridge is exposed externally.
 - Managed API traffic crosses a cloud boundary and should use TLS and secret management (API keys, environment variables, or secure secret stores).
 - Audit logs and execution outputs should be treated as sensitive operational data and protected according to database and application policy.
+- Models run locally; no SQL or prompt is sent to an external AI service. See [docs/security.md](docs/security.md) for the controls, data kept and known gaps, and [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ## Changelog Summary
 
@@ -210,6 +217,9 @@ If required files are missing, files are empty, checksums do not match, or the r
 - [Configuration](docs/configuration.md)
 - [Model Management](docs/model-management.md)
 - [Prompting](docs/prompting.md)
+- [Security and Compliance](docs/security.md) and [Security Policy](SECURITY.md)
+- [Limitations](docs/limitations.md)
+- [Roadmap](docs/ROADMAP.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Contributing](docs/contributing.md)
 - [Changelog](docs/changelog.md)

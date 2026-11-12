@@ -42,3 +42,13 @@ Append-only learnings (date, task ID, fact, evidence path:line). Scribe promotes
 - reviewModel <=1024 string, reviewSchema enum; resolveModel still validates chosen id.
 - Review no longer returns model SQL; rewrite-check remains in src/lib/refactor.ts:96,159 for /api/refactor.
 - Conditions: test that no-modelId path + config.reviewModel not installed falls back; test that review response has empty rewrittenProcedure even when model emits a rewrite block.
+
+## 2026-11-12 — Phase SEC (SEC-T1..T9) sign-off, branch features/security-compliance (uncommitted)
+- Verdict: SIGNED OFF WITH CONDITIONS.
+- prompt-path.ts:19-21 realpath + root+sep prefix blocks traversal/symlink escape; TOCTOU needs local write to data/prompts (out of threat model). Accepted.
+- CSP 'unsafe-inline' script-src (next.config.ts:11): weak against XSS but acceptable for no-nonce static build; object-src none, frame-ancestors none, base-uri self hold. Only innerHTML is emotion-registry.tsx:53,59 (CSS).
+- purgeExpired (audit-repo.ts:152-166): feedback->audits->unreferenced expired sessions; users untouched; share links live on the row. Correct.
+- deleteAudit (audit-repo.ts:138-146) scoped by session_id in a tx; route needs session, rate limit, proxy Origin check. Owner-only OK.
+- Token migration (session-tokens.ts:10) idempotent: legacy tokens are 43 chars, hashes are 64. OK.
+- Login limiter (request-guard.ts:53): per-username + global remain; global 20/min is a lockout-DoS lever for a local client. Accepted.
+- Conditions: C1 scrubText (redact.ts:10-15) misses URL creds (postgres://u:p@h), secret=/api_key=/token=, JSON "password":"x", double-quoted and space-containing values -> add patterns + tests. C2 sp-executor.ts:50 mkdir mode only applies on create, so chmod 0700 the existing dir (and 0600 existing logs).

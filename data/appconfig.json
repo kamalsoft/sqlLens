@@ -14,7 +14,7 @@
   "maxSqlLength": 100000,
   "inferenceTimeoutMs": 600000,
   "maxNewTokens": 3072,
-  "logSqlText": true,
+  "logSqlText": false,
   "shareTtlHours": 24,
   "maxLogicalReads": null,
   "maxElapsedMs": null,
@@ -25,7 +25,7 @@
   "showRefactor": false,
   "refactorModel": "",
   "prompt": {
-    "analysisSP": "~/dev/dbPro/sqlens/data/prompts/analysisSP.md",
-    "explainStatistic": "~/dev/dbPro/sqlens/data/prompts/explainStatistic.md"
+    "analysisSP": "data/prompts/analysisSP.md",
+    "explainStatistic": "data/prompts/explainStatistic.md"
   }
 }

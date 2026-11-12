@@ -32,7 +32,6 @@ sqlens/
 ├── tsconfig.json
 ├── eslint.config.mjs
 ├── postcss.config.mjs
-├── prisma.config.ts
 ├── skills-lock.json
 ├── data/
 │   ├── appconfig.json
@@ -511,7 +510,7 @@ Keep API result types synchronized between the route and the client.
 ### Prompt handling
 
 - Treat submitted SQL as untrusted text.
-- Do not execute submitted SQL.
+- Run submitted SQL only through Execute & Audit SP with `allowLiveExecution` on, against a development or test database; Review, Compare and Refactor never execute SQL, and model-written SQL is never run.
 - Require evidence-based findings.
 - Do not invent schema, indexes, execution plans, runtime metrics, or vulnerabilities.
 - Keep the response schema stable.
@@ -652,10 +651,11 @@ Pull requests should receive review for correctness, security, model compatibili
 - Store tokens only in environment variables or an approved secret manager.
 - Treat submitted SQL as sensitive.
 - Do not send SQL to external services unless explicitly intended and documented.
-- Do not execute submitted SQL.
+- Run submitted SQL only through Execute & Audit SP with `allowLiveExecution` on, against a development or test database; Review, Compare and Refactor never execute SQL, and model-written SQL is never run.
 - Review downloaded model licenses before redistribution.
 - Keep downloaded model files out of source control.
 - Revoke tokens immediately if they are exposed.
+- See [security.md](security.md) for the controls, data inventory, retention and known gaps.
 
 ---
 
@@ -860,7 +860,6 @@ Tokens and session data must never be logged or exposed in client responses.
 ### Database boundary
 
 - `src/db/index.ts` is the database access boundary.
-- `prisma.config.ts` configures Prisma-related tooling.
 - No Prisma schema or migration directory is currently present in the tracked repository.
 - Do not document migrations until schema and migration files are added.
 

@@ -134,6 +134,37 @@ export function insertAudit(input: InsertAuditInput): { id: string; recordNumber
   return { id, recordNumber: tx.immediate() };
 }
 
+/** SEC-T4: deletes one of the session's own records with its feedback. False when it is not the session's. */
+export function deleteAudit(id: string, sessionId: string): boolean {
+  return db.transaction((): boolean => {
+    const own = db.prepare("SELECT 1 FROM audit_requests WHERE id = ? AND session_id = ?").get(id, sessionId);
+    if (!own) return false;
+    db.prepare("DELETE FROM recommendation_feedback WHERE audit_id = ?").run(id);
+    db.prepare("DELETE FROM audit_requests WHERE id = ?").run(id);
+    return true;
+  })();
+}
+
+/**
+ * SEC-T4: deletes records older than `retentionDays` (with their feedback), then expired sessions
+ * that no remaining record belongs to (records are owned by the session that made them).
+ */
+export function purgeExpired(retentionDays: number, now: Date = new Date()): { audits: number; sessions: number } {
+  // created_at is SQLite's CURRENT_TIMESTAMP text (UTC, "YYYY-MM-DD HH:MM:SS"); expires_at is ISO.
+  const cutoff = new Date(now.getTime() - retentionDays * 86_400_000).toISOString().replace("T", " ").slice(0, 19);
+  return db.transaction(() => {
+    db.prepare(
+      "DELETE FROM recommendation_feedback WHERE audit_id IN (SELECT id FROM audit_requests WHERE created_at < ?)"
+    ).run(cutoff);
+    const audits = db.prepare("DELETE FROM audit_requests WHERE created_at < ?").run(cutoff).changes;
+    const sessions = db.prepare(
+      `DELETE FROM sessions WHERE expires_at < ?
+         AND NOT EXISTS (SELECT 1 FROM audit_requests a WHERE a.session_id = sessions.id)`
+    ).run(now.toISOString()).changes;
+    return { audits, sessions };
+  })();
+}
+
 export function getAudit(id: string, sessionId: string): AuditRecord | null {
   const r = db
     .prepare(

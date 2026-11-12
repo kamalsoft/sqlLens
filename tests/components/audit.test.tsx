@@ -95,6 +95,20 @@ describe("audit detail", () => {
     expect(within(group).getByRole("button", { name: "Pending" })).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("deletes the record only after a second confirmation, then returns to Audit (SEC-T4)", async () => {
+    const fetchMock = mockRecord({ ...base, type: "REVIEW" }, (url, init) =>
+      init?.method === "DELETE" ? json(200, { deleted: true }) : undefined);
+    render(<AuditDetailPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete record" }));
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
+    const confirm = screen.getByRole("group", { name: "Confirm delete" });
+    fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete record" }));
+    fireEvent.click(within(screen.getByRole("group", { name: "Confirm delete" })).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/audit"));
+    expect(fetchMock).toHaveBeenCalledWith("/api/audit/rec1", expect.objectContaining({ method: "DELETE" }));
+  });
+
   it("lays out a refactor record: navigation, facts, report, related run, prompt, request and response (AD-1..AD-3)", async () => {
     mockRecord({
       ...base, type: "REFACTOR", modelId: "onnx-community/Qwen2.5-1.5B-Instruct", recordNumber: 116,

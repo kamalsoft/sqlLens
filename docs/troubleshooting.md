@@ -18,7 +18,7 @@ Evidence: `src/app/api/review/models/route.ts:6-9`; `src/lib/installed-models.ts
 The token is missing, expired, invalid, or lacks access to the repository.
 
 - For the Python script, check that `HF_TOKEN` is set without printing it: `echo "${HF_TOKEN:+HF_TOKEN is set}"`.
-- For the app, the token is the `apiKey` field in `data/appconfig.json` (`src/app/api/models/download/route.ts:236`). Check that the field is non-empty without printing its value. Planned: P1-03 switches the app to `HF_TOKEN`.
+- For the app and the Python script, the token is the `HF_TOKEN` environment variable of the server process. Check that it is set (for example `test -n "$HF_TOKEN" && echo set`) without printing its value, and restart `npm run dev` after changing it.
 
 ## Hugging Face returns HTTP 404
 

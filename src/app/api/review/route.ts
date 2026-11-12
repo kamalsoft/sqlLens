@@ -19,7 +19,8 @@ import { dropUnsupportedEvidence } from "@/lib/review-evidence";
 import { verifyIndexRecommendations } from "@/lib/index-recommendations";
 import { chooseRefactorModel, getInstalledModels } from "@/lib/installed-models";
 import { resolveModel, runModel } from "@/lib/model-run";
-import { buildPrompt, expandHome, loadPrompt } from "@/lib/review-prompt";
+import { buildPrompt, loadPrompt } from "@/lib/review-prompt";
+import { resolvePromptPath } from "@/lib/prompt-path";
 import {
   buildTelemetryPrompt,
   normalizeTelemetry,
@@ -117,10 +118,7 @@ export async function POST(request: Request) {
     let promptPath: string;
     let prompt: string;
     if (telemetry) {
-      const configured = config.prompt?.reviewWithTelemetry;
-      promptPath = configured
-        ? expandHome(configured)
-        : path.join(process.cwd(), "data", "prompts", "review-with-telemetry.md");
+      promptPath = resolvePromptPath(config.prompt?.reviewWithTelemetry, "review-with-telemetry.md");
       prompt = buildTelemetryPrompt((await readFile(promptPath, "utf8")).trim(), sql, telemetry);
     } else {
       const loadedPrompt = await loadPrompt(schemaVersion, config.prompt);

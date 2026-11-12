@@ -8,13 +8,13 @@ import { runMigrations } from "@/db/migrate";
 import { GET as auditGet } from "@/app/api/audit/route";
 import { GET as auditById } from "@/app/api/audit/[id]/route";
 import { GET as analysis } from "@/app/api/analysis/route";
-import { createSession } from "@/lib/auth";
+import { createSession, hashToken } from "@/lib/auth";
 import { seedAdmin } from "../helpers/auth";
 
 function sessionFor(): { sessionId: string; cookie: string } {
   const userId = seedAdmin();
   const { token } = createSession(userId);
-  const row = db.prepare("SELECT id FROM sessions WHERE token = ?").get(token) as { id: string };
+  const row = db.prepare("SELECT id FROM sessions WHERE token = ?").get(hashToken(token)) as { id: string };
   return { sessionId: row.id, cookie: `session_token=${token}` };
 }
 

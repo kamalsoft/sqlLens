@@ -17,8 +17,9 @@ afterEach(() => {
 });
 
 describe("request-guard", () => {
-  it("ignores X-Forwarded-For by default so spoofing cannot bypass the limit", () => {
-    for (let i = 0; i < 5; i++) expect(loginAllowed(req(`1.2.3.${i}`), `user${i}`)).toBe(true);
+  it("ignores X-Forwarded-For by default: spoofed addresses still hit the global limit", () => {
+    // SEC-T7: without a trusted proxy there is no per-client bucket, so five failures do not lock everyone out.
+    for (let i = 0; i < 20; i++) expect(loginAllowed(req(`1.2.3.${i}`), `user${i}`)).toBe(true);
     expect(loginAllowed(req("9.9.9.9"), "another")).toBe(false);
   });
   it("honours X-Forwarded-For only with SQLLENS_TRUST_PROXY=1", () => {

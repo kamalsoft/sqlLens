@@ -481,7 +481,7 @@ The repository contains four primary application boundaries:
 | Presentation | `src/app/`, `src/components/` | Pages, navigation, forms, result rendering, and client state. |
 | HTTP/API | `src/app/api/` | Request validation, authentication, orchestration, and response formatting. |
 | Domain/infrastructure | `src/lib/` | Model loading, configuration, auditing, execution, downloading, and validation. |
-| Persistence | `src/db/`, `prisma.config.ts` | Database access and Prisma tooling configuration. |
+| Persistence | `src/db/` | SQLite access (better-sqlite3) and numbered migrations. |
 
 The repository also contains:
 

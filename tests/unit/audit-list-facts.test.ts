@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import db from "@/db";
 import { insertAudit, listAudits } from "@/db/audit-repo";
-import { createSession } from "@/lib/auth";
+import { createSession, hashToken } from "@/lib/auth";
 import { seedAdmin } from "../helpers/auth";
 
 function sessionId(): string {
   const { token } = createSession(seedAdmin());
-  return (db.prepare("SELECT id FROM sessions WHERE token = ?").get(token) as { id: string }).id;
+  return (db.prepare("SELECT id FROM sessions WHERE token = ?").get(hashToken(token)) as { id: string }).id;
 }
 
 describe("audit list facts (UX-4)", () => {

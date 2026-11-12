@@ -13,11 +13,13 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+// The page also loads /api/appconfig (SEC-T5); assertions about API calls skip it.
+const apiCalls = (m: { mock: { calls: unknown[][] } }) => m.mock.calls.filter(([u]) => u !== "/api/appconfig") as [string, RequestInit & { body: string }][];
 const view = () => render(<ChakraProvider value={defaultSystem}><ExecutePage /></ChakraProvider>);
 
 describe("ExecutePage", () => {
   it("sends a C12 procedure request with typed params", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(json({ error: "nope" }, 400));
+    const fetchMock = vi.fn().mockImplementation(async () => json({ error: "nope" }, 400));
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     view();
@@ -30,8 +32,8 @@ describe("ExecutePage", () => {
     await user.type(screen.getByLabelText("Parameter 1 value"), "42");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0];
+    expect(apiCalls(fetchMock)).toHaveLength(1);
+    const [url, init] = apiCalls(fetchMock)[0];
     expect(url).toBe("/api/execute");
     expect(JSON.parse(init.body)).toEqual({
       mode: "single", engine: "simulation",
@@ -57,18 +59,18 @@ describe("ExecutePage", () => {
     // UX-1: the run is blocked while the input is invalid, and the reason is shown next to the button.
     expect(screen.getByRole("button", { name: /Execute & Audit/ })).toBeDisabled();
     expect(screen.getByText(/Fix before running: Parameter @id must be a number/)).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(apiCalls(fetchMock)).toHaveLength(0);
   });
 
   it("Connect checks the login and lists the databases to choose from", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(json({ databases: ["master", "TestDB"] }));
+    const fetchMock = vi.fn().mockImplementation(async () => json({ databases: ["master", "TestDB"] }));
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     view();
     await user.type(screen.getByLabelText(/^(Login|User name)$/), "sa");
     await user.click(screen.getByRole("button", { name: "Connect" }));
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/execute/databases");
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body).engine).toBe("mssql");
+    expect(apiCalls(fetchMock)[0][0]).toBe("/api/execute/databases");
+    expect(JSON.parse(apiCalls(fetchMock)[0][1].body).engine).toBe("mssql");
     // The connection folds; the database is chosen under What to run, which gets the focus.
     expect(await screen.findByText(/localhost · SQL login sa · 2 databases/)).toBeInTheDocument();
     const picker = screen.getByRole("combobox", { name: "Database" });
@@ -98,6 +100,19 @@ describe("ExecutePage", () => {
   });
 });
 
+describe("ExecutePage live-execution warning (SEC-T5)", () => {
+  it.each([
+    [true, /runs the code for real/],
+    [false, /Live execution is off in/],
+  ])("allowLiveExecution %s shows the matching note for SQL Server, none for Simulation", async (allowed, text) => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => (url === "/api/appconfig" ? json({ allowLiveExecution: allowed }) : json({}))));
+    view();
+    expect(await screen.findByText(text)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
+    expect(screen.queryByText(text)).toBeNull();
+  });
+});
+
 describe("ExecutePage null handling and validation", () => {
   const analysis = (over: object = {}) => ({
     performanceGrade: "A", gradeRationale: "r", summary: "s",
@@ -114,7 +129,7 @@ describe("ExecutePage null handling and validation", () => {
       optimized: { execution: exec, analysis: analysis() },
       comparison: analysis({ improvementPercent: null }),
     };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ result })));
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => json({ result })));
     const user = userEvent.setup();
     view();
     fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
@@ -139,7 +154,7 @@ describe("ExecutePage null handling and validation", () => {
         planOperators: [{ nodeId: 8, physicalOp: "Clustered Index Scan", table: "Customers", actualRows: 1000000, logicalReads: 9185, executions: 1 }],
       }),
     };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ result: single })));
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => json({ result: single })));
     const user = userEvent.setup();
     view();
     fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
@@ -168,7 +183,7 @@ describe("ExecutePage null handling and validation", () => {
         multiRun: { runs: 4, warmupRuns: 1, elapsedMs: { min: 10, median: 25, p95: 40, max: 40 }, logicalReads: { min: 1, median: 1, p95: 1, max: 1 }, spreadPct: 120 },
       }),
     };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ result: single })));
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => json({ result: single })));
     const user = userEvent.setup();
     view();
     fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
@@ -190,7 +205,7 @@ describe("ExecutePage null handling and validation", () => {
         recommendations: ["Seek on T accounts for 90% of logical reads. Review it.", "Sort spilled 10 pages to tempdb. Fix the estimate.", "Other observation here"],
       }),
     };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ result: single })));
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => json({ result: single })));
     const user = userEvent.setup();
     view();
     fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
@@ -218,7 +233,7 @@ describe("ExecutePage null handling and validation", () => {
       optimized: { execution: exec, analysis: analysis({ performanceGrade: "B" }) },
       comparison: analysis({ improvementPercent: 10 }),
     };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ result })));
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => json({ result })));
     const user = userEvent.setup();
     view();
     fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
@@ -318,7 +333,7 @@ describe("ExecutePage null handling and validation", () => {
       execution: { ...exec, stats: { ...exec.stats, rawOutput: "Table 'SalesOrders'. Scan count 5, logical reads 6" } },
       analysis: analysis(),
     };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ result: single })));
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => json({ result: single })));
     const user = userEvent.setup();
     view();
     fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
@@ -344,7 +359,7 @@ describe("ExecutePage null handling and validation", () => {
     await user.click(screen.getByRole("button", { name: "Connect" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Port must be");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(apiCalls(fetchMock)).toHaveLength(0);
   });
 });
 
@@ -452,7 +467,7 @@ describe("ExecutePage guided steps (EX-1 to EX-5)", () => {
       prosAndCons: { pros: [], cons: [] }, recommendations: [],
     };
     const exec = { recordNumber: 7, connectionEngine: "simulation", executedAt: "n", success: true, spLabel: "SQL Batch", stats: { rawOutput: "Table 'T'. Scan count 1", simulated: true } };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ result: { mode: "single", simulated: true, warnings: [], execution: exec, analysis } })));
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => json({ result: { mode: "single", simulated: true, warnings: [], execution: exec, analysis } })));
     const user = userEvent.setup();
     view();
     fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
@@ -475,7 +490,7 @@ describe("ExecutePage guided steps (EX-1 to EX-5)", () => {
       prosAndCons: { pros: [], cons: [] }, recommendations: [],
     };
     const exec = { recordNumber: 9, connectionEngine: "simulation", executedAt: "n", success: true, spLabel: "SP", stats: { rawOutput: "raw", simulated: true } };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ result: {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => json({ result: {
       mode: "compare", simulated: true, warnings: [],
       original: { execution: exec, analysis }, optimized: { execution: exec, analysis }, comparison: { ...analysis, improvementPercent: 5 },
     } })));
@@ -521,7 +536,7 @@ describe("ExecutePage guided steps (EX-1 to EX-5)", () => {
     expect(top).toHaveTextContent("Rewrite the cursor as a set-based query");
 
     await user.click(screen.getByRole("button", { name: "Run again" }));
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(apiCalls(fetchMock)).toHaveLength(2);
     await user.click(await screen.findByRole("button", { name: "Edit setup" }));
     expect(screen.getByRole("heading", { name: "What to run" })).toBeInTheDocument();
   });

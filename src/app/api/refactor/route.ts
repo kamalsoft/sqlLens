@@ -16,7 +16,7 @@ import {
 } from "@/lib/refactor";
 import { logError } from "@/lib/redact";
 import { rateLimit } from "@/lib/request-guard";
-import { expandHome } from "@/lib/review-prompt";
+import { resolvePromptPath } from "@/lib/prompt-path";
 import { badRequest, isString, readJson } from "@/lib/validation/body";
 import { NOT_SQL_ERROR, looksLikeSql, validateSqlInput } from "@/lib/validation/sql-input";
 
@@ -85,8 +85,7 @@ export async function POST(request: Request) {
     if (!resolved.ok) return resolved.response;
     const model = resolved.model;
 
-    const configured = config.prompt?.refactor;
-    const promptPath = configured ? expandHome(configured) : path.join(process.cwd(), "data", "prompts", "refactor.md");
+    const promptPath = resolvePromptPath(config.prompt?.refactor, "refactor.md");
     let prompt: string;
     try {
       prompt = buildRefactorPrompt((await readFile(promptPath, "utf8")).trim(), sql, instructions);
