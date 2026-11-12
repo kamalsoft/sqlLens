@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useState, type ReactNode } from 'react';
+import { Fragment, useId, useState, type ReactNode } from 'react';
 import { Box, Button, Flex, Input, Text, Textarea } from '@chakra-ui/react';
 
 export const PARAM_TYPES = [
@@ -139,6 +139,7 @@ function Field({ caption, error, hint, children }: { caption: string; error?: st
 
 export function TargetEditor({
   kind, draft, onChange, placeholder, color, onLoadParams, loadNote, setNames, onSaveSet, onLoadSet, onDeleteSet,
+  procedures, procedureNote, loadingProcedures, onRefreshProcedures,
 }: {
   kind: 'procedure' | 'batch';
   draft: TargetDraft;
@@ -153,7 +154,13 @@ export function TargetEditor({
   onSaveSet?: (name: string) => void;
   onLoadSet?: (name: string) => void;
   onDeleteSet?: (name: string) => void;
+  /** The stored procedures of the chosen database, offered as the name is typed; null until loaded. */
+  procedures?: string[] | null;
+  procedureNote?: string | null;
+  loadingProcedures?: boolean;
+  onRefreshProcedures?: () => void;
 }) {
+  const listId = useId();
   const [chosen, setChosen] = useState('');
   const [newSetName, setNewSetName] = useState('');
   if (kind === 'batch') {
@@ -172,12 +179,29 @@ export function TargetEditor({
   const procError = draft.name.trim() && !PROC_RE.test(draft.name.trim()) ? 'Use a name such as dbo.MyProcedure' : null;
   return (
     <Box>
-      <Field caption="Procedure name" error={procError}>
-        <Input
-          size="md" value={draft.name} aria-label="Procedure name" aria-invalid={!!procError}
-          onChange={(e) => onChange({ ...draft, name: e.target.value })}
-          placeholder="dbo.MyProcedure" bg="bg.canvas" borderColor="border.subtle" color="fg.default" mb={4}
-        />
+      <Field
+        caption="Procedure name" error={procError ?? procedureNote}
+        hint={procedures && procedures.length > 0 ? `${procedures.length} stored procedures in this database: pick one from the list, or type to search.` : undefined}
+      >
+        <Flex gap={2} mb={4}>
+          {/* A searchable list: typing filters the procedures; any name can still be typed. */}
+          <Input
+            size="md" value={draft.name} aria-label="Procedure name" aria-invalid={!!procError}
+            list={procedures && procedures.length > 0 ? listId : undefined}
+            onChange={(e) => onChange({ ...draft, name: e.target.value })}
+            placeholder={procedures && procedures.length > 0 ? 'Choose or type a stored procedure' : 'dbo.MyProcedure'}
+            bg="bg.canvas" borderColor="border.subtle" color="fg.default"
+          />
+          {procedures && procedures.length > 0 && (
+            <datalist id={listId}>{procedures.map((p) => <option key={p} value={p} />)}</datalist>
+          )}
+          {onRefreshProcedures && (
+            <Button size="md" variant="outline" colorPalette="brand" flexShrink={0} onClick={onRefreshProcedures}
+              loading={loadingProcedures} aria-label="Refresh the stored procedure list">
+              Refresh
+            </Button>
+          )}
+        </Flex>
       </Field>
       <Flex align="center" justify="space-between" gap={3} mb={2} wrap="wrap">
         <Text fontSize="xs" color="fg.muted">Parameters</Text>

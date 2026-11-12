@@ -271,18 +271,17 @@ export async function getProcedureDefinition(
 }
 
 /**
- * DB-1: the databases this login can open, online ones only, for the database picker. Read-only.
+ * A fixed, read-only catalog query that returns one `name` column, with the timeout and pool cleanup.
+ * Keep it private and pass only string literals: the query text is sent to the server as written.
  */
-export async function listDatabases(conn: ExecConnection, timeoutMs: number): Promise<string[]> {
+async function catalogNames(conn: ExecConnection, timeoutMs: number, query: string): Promise<string[]> {
   const { config } = buildMssqlConfig(conn, timeoutMs);
   const pool = new sql.ConnectionPool(config);
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const run = (async () => {
       await pool.connect();
-      const r = await pool.request().query(
-        `SELECT name FROM sys.databases WHERE state_desc = N'ONLINE' AND HAS_DBACCESS(name) = 1 ORDER BY name`,
-      );
+      const r = await pool.request().query(query);
       return ((r.recordset ?? []) as { name: unknown }[]).map((row) => row.name).filter((n): n is string => typeof n === 'string');
     })();
     run.catch(() => {});
@@ -292,6 +291,18 @@ export async function listDatabases(conn: ExecConnection, timeoutMs: number): Pr
     if (timer) clearTimeout(timer);
     try { await pool.close(); } catch { /* already closed */ }
   }
+}
+
+/** DB-1: the databases this login can open, online ones only, for the database picker. Read-only. */
+export function listDatabases(conn: ExecConnection, timeoutMs: number): Promise<string[]> {
+  return catalogNames(conn, timeoutMs,
+    `SELECT name FROM sys.databases WHERE state_desc = N'ONLINE' AND HAS_DBACCESS(name) = 1 ORDER BY name`);
+}
+
+/** The stored procedures in the connection's database, as schema.name, for the procedure picker. Read-only. */
+export function listProcedures(conn: ExecConnection, timeoutMs: number): Promise<string[]> {
+  return catalogNames(conn, timeoutMs,
+    `SELECT SCHEMA_NAME(schema_id) + N'.' + name AS name FROM sys.procedures WHERE is_ms_shipped = 0 ORDER BY 1`);
 }
 
 export async function testMssqlConnection(

@@ -48,7 +48,7 @@ vi.mock('mssql', () => {
     batch(t: string) { return this.run(t); }
     async query(t: string) {
       s.texts.push(t);
-      if (/sys\.databases/.test(t)) return { recordset: s.databases };
+      if (/sys\.databases|sys\.procedures/.test(t)) return { recordset: s.databases };
       return { recordset: [{ definition: s.definition }] };
     }
     async execute(n: string) { return { ...(await this.run(`EXEC ${n}`)), output: s.procOutput }; }
@@ -78,7 +78,7 @@ vi.mock('mssql', () => {
   };
 });
 
-import { buildMssqlConfig, executeMssql, getProcedureDefinition, listDatabases, testMssqlConnection } from '@/lib/execution/mssql';
+import { buildMssqlConfig, executeMssql, getProcedureDefinition, listDatabases, listProcedures, testMssqlConnection } from '@/lib/execution/mssql';
 import { ExecAbortError, ExecTimeoutError, TLS_WARNING } from '@/lib/execution/types';
 
 const conn = { host: 'db.example.com', database: 'app', username: 'sa', password: 'Sup3rSecret!' };
@@ -297,6 +297,15 @@ describe('listDatabases (DB-1)', () => {
     h.state.databases = [{ name: 'master' }, { name: 'TestDB' }, { name: null }];
     expect(await listDatabases({ ...conn, database: '' }, 1000)).toEqual(['master', 'TestDB']);
     expect(h.state.texts[0]).toMatch(/^SELECT name FROM sys\.databases WHERE state_desc = N'ONLINE' AND HAS_DBACCESS\(name\) = 1/);
+    expect(h.state.calls).toEqual(['connect', 'close']);
+  });
+});
+
+describe('listProcedures', () => {
+  it('lists user procedures as schema.name, read-only, then closes', async () => {
+    h.state.databases = [{ name: 'dbo.usp_GetSummary' }, { name: 'sales.usp_Close' }];
+    expect(await listProcedures(conn, 1000)).toEqual(['dbo.usp_GetSummary', 'sales.usp_Close']);
+    expect(h.state.texts[0]).toMatch(/^SELECT SCHEMA_NAME\(schema_id\) \+ N'\.' \+ name AS name FROM sys\.procedures WHERE is_ms_shipped = 0/);
     expect(h.state.calls).toEqual(['connect', 'close']);
   });
 });
