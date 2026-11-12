@@ -460,39 +460,38 @@ body {
 }
 
 .models-page {
-  min-height: 100vh;
-  padding: 48px clamp(20px, 5vw, 72px);
   color: var(--text);
-  background: var(--bg);
 }
 
 .models-hero {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 28px;
-  max-width: 1280px;
-  margin: 0 auto 36px;
+  gap: 16px;
+  margin-bottom: 20px;
 }
 
 .models-eyebrow {
-  color: var(--accent-default);
-  font-size: 0.75rem;
-  font-weight: 800;
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 0.74rem;
   letter-spacing: 0.18em;
   text-transform: uppercase;
 }
 
 .models-hero h1 {
-  margin: 8px 0 10px;
-  font-size: clamp(2rem, 4vw, 3.25rem);
-  letter-spacing: -0.04em;
+  margin: 0;
+  font-size: clamp(2rem, 3vw, 2.6rem);
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--text);
 }
 
 .models-hero p {
-  max-width: 600px;
-  margin: 0;
+  max-width: 720px;
+  margin: 8px 0 0;
   color: var(--muted);
+  line-height: 1.7;
 }
 
 .models-actions {
@@ -772,10 +771,6 @@ body {
 }
 
 @media (max-width: 700px) {
-  .models-page {
-    padding: 30px 16px;
-  }
-
   .models-hero {
     display: block;
   }
@@ -790,33 +785,34 @@ body {
 }
 
 .overview-page {
-  min-height: 100%;
-  padding: 42px clamp(20px, 4vw, 64px);
   color: var(--text);
 }
 
 .overview-header {
-  margin: 0 auto 32px;
-  max-width: 1280px;
+  margin-bottom: 20px;
 }
 
 .overview-eyebrow {
-  color: var(--accent-default);
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.16em;
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
 }
 
 .overview-header h1 {
-  margin: 8px 0;
-  font-size: clamp(2rem, 4vw, 3rem);
-  letter-spacing: -0.04em;
+  margin: 0;
+  font-size: clamp(2rem, 3vw, 2.6rem);
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--text);
 }
 
 .overview-header p {
-  margin: 0;
+  max-width: 720px;
+  margin: 8px 0 0;
   color: var(--muted);
+  line-height: 1.7;
 }
 
 .overview-metrics {
@@ -981,8 +977,6 @@ body {
 }
 
 .review-page {
-  min-height: 100%;
-  padding: 42px clamp(20px, 4vw, 64px);
   color: var(--text);
 }
 
@@ -994,27 +988,31 @@ body {
 }
 
 .review-hero {
-  margin-bottom: 30px;
+  margin-bottom: 20px;
 }
 
 .review-eyebrow,
 .review-step {
-  color: var(--accent-default);
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.16em;
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
 }
 
 .review-hero h1 {
-  margin: 8px 0;
-  font-size: clamp(2rem, 4vw, 3rem);
-  letter-spacing: -0.04em;
+  margin: 0;
+  font-size: clamp(2rem, 3vw, 2.6rem);
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--text);
 }
 
 .review-hero p {
-  margin: 0;
+  max-width: 720px;
+  margin: 8px 0 0;
   color: var(--muted);
+  line-height: 1.7;
 }
 
 .review-layout {
@@ -1546,4 +1544,36 @@ body {
 
 .data-table a {
   color: var(--accent-default);
+}
+
+.text-link {
+  color: var(--accent-default);
+  text-decoration: underline;
+}
+
+.disclosure {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+/* Settings: one panel per category, stacked with even spacing. */
+.settings-group {
+  margin-bottom: 20px;
+}
+
+.settings-group-note {
+  margin: 4px 0 16px;
+}
+
+.field-hint {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+@media (max-width: 700px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
 }

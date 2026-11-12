@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useLeaveGuard } from "@/components/leave-guard";
 import { useApi } from "@/components/api-client";
 import { ReviewResultView } from "@/components/review/ReviewResultView";
 import { NOT_SQL_ERROR, looksLikeSql } from "@/lib/validation/sql-input";
@@ -92,6 +93,10 @@ export default function ReviewPage() {
   const [error, setError] = useState("");
   const [loadingModels, setLoadingModels] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
+  // UX-B: leaving while the model runs asks first, and cancels the request when the user agrees.
+  const abortRef = useRef<AbortController | null>(null);
+  useLeaveGuard(analyzing, "A review", () => abortRef.current?.abort());
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -154,10 +159,12 @@ export default function ReviewPage() {
     setResult(null);
     setRawOutput(null);
 
+    abortRef.current = new AbortController();
     const res = await api<ReviewResponse>(
       "/api/review",
       {
         method: "POST",
+        signal: abortRef.current.signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           modelId,
@@ -222,7 +229,7 @@ export default function ReviewPage() {
     <main className="review-page">
       <header className="review-hero">
         <div>
-          <span className="review-eyebrow">R001</span>
+          <span className="review-eyebrow">Analysis</span>
           <h1>Review Stored Procedure</h1>
           <p>
             Select an installed Hugging Face model and analyze a SQL Server

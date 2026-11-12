@@ -11,7 +11,9 @@ vi.mock("next/navigation", () => ({
   usePathname: () => pathname,
 }));
 
+import { ChakraProvider, defaultSystem } from "@chakra-ui/react";
 import { AppShell } from "@/components/AppShell";
+import { LeaveGuardProvider, useLeaveGuard } from "@/components/leave-guard";
 
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -53,5 +55,107 @@ describe("AppShell", () => {
     expect(screen.getByText("login form")).toBeInTheDocument();
     expect(screen.queryByRole("navigation")).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("hides Compare and Refactor until Settings switches them on (UX-A)", async () => {
+    let config = { showCompare: false, showRefactor: false };
+    vi.stubGlobal("fetch", vi.fn(async (url: string) =>
+      url === "/api/appconfig" ? json(200, config) : json(200, { authenticated: true, user: { username: "admin" } })));
+    render(<AppShell><p>content</p></AppShell>);
+    await screen.findByTestId("current-user");
+    expect(screen.queryByRole("link", { name: /Compare/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Refactor/ })).toBeNull();
+    expect(screen.getByRole("link", { name: /Execute/ })).toBeInTheDocument();
+
+    config = { showCompare: true, showRefactor: false };
+    window.dispatchEvent(new Event("sqllens:settings-saved"));
+    expect(await screen.findByRole("link", { name: /Compare/ })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Refactor/ })).toBeNull();
+  });
+});
+
+describe("AppShell leave guard (UX-B)", () => {
+  function Running({ cancel }: { cancel: () => void }) {
+    useLeaveGuard(true, "A refactor", cancel);
+    return <p>working</p>;
+  }
+  const shell = (cancel: () => void) => render(
+    <ChakraProvider value={defaultSystem}>
+      <LeaveGuardProvider>
+        <AppShell><Running cancel={cancel} /></AppShell>
+      </LeaveGuardProvider>
+    </ChakraProvider>,
+  );
+
+  beforeEach(() => {
+    router.push.mockClear();
+    vi.stubGlobal("fetch", vi.fn(async () => json(200, { authenticated: true, user: { username: "admin" } })));
+  });
+
+  it("asks before leaving, and staying keeps the task", async () => {
+    const cancel = vi.fn();
+    const user = userEvent.setup();
+    shell(cancel);
+    await user.click(screen.getByRole("link", { name: /Audit/ }));
+    expect(await screen.findByText("A refactor is still running. Leaving cancels it, and the result is lost.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Stay on this screen" }));
+    expect(cancel).not.toHaveBeenCalled();
+    expect(router.push).not.toHaveBeenCalled();
+  });
+
+  it("cancels the task and goes when the user chooses to leave", async () => {
+    const cancel = vi.fn();
+    const user = userEvent.setup();
+    shell(cancel);
+    await user.click(screen.getByRole("link", { name: /Audit/ }));
+    await user.click(await screen.findByRole("button", { name: "Cancel the task and leave" }));
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(router.push).toHaveBeenCalledWith("/audit");
+  });
+
+  it("asks before logging out too", async () => {
+    const cancel = vi.fn();
+    const user = userEvent.setup();
+    shell(cancel);
+    await user.click(await screen.findByRole("button", { name: "Logout" }));
+    expect(await screen.findByRole("button", { name: "Cancel the task and leave" })).toBeInTheDocument();
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it("guards every task that runs at once, and leaving cancels them all", async () => {
+    const run = vi.fn();
+    const refactor = vi.fn();
+    function Both() {
+      useLeaveGuard(true, "An execution", run);
+      useLeaveGuard(true, "A refactor", refactor);
+      return <p>working</p>;
+    }
+    render(<ChakraProvider value={defaultSystem}><LeaveGuardProvider><AppShell><Both /></AppShell></LeaveGuardProvider></ChakraProvider>);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("link", { name: /Audit/ }));
+    expect(await screen.findByText("An execution and a refactor are still running. Leaving cancels them, and the result is lost.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel the task and leave" }));
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(refactor).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops the question when its task finishes, so it does not come back for the next task", async () => {
+    function Toggle({ active }: { active: boolean }) {
+      useLeaveGuard(active, "A review", () => {});
+      return <p>working</p>;
+    }
+    const tree = (active: boolean) => (
+      <ChakraProvider value={defaultSystem}><LeaveGuardProvider><AppShell><Toggle active={active} /></AppShell></LeaveGuardProvider></ChakraProvider>
+    );
+    const view = render(tree(true));
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("link", { name: /Audit/ }));
+    expect(await screen.findByRole("button", { name: "Stay on this screen" })).toBeInTheDocument();
+
+    view.rerender(tree(false));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Stay on this screen" })).toBeNull());
+    view.rerender(tree(true));
+    expect(screen.queryByRole("button", { name: "Stay on this screen" })).toBeNull();
+    expect(router.push).not.toHaveBeenCalled();
   });
 });

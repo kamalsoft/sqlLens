@@ -11,6 +11,7 @@ import type { ExecutionResult } from '@/lib/sp-executor';
 import { useApi } from '@/components/api-client';
 import { gradeToken, VERDICT_TONE, verdictTone } from '@/lib/status-tone';
 import { RefactorPanel, type RefactorSource } from '@/components/execute/refactor-panel';
+import { useLeaveGuard } from '@/components/leave-guard';
 import { readParamSets, setNamesFor, withSet, withoutSet, writeParamSets, type ParamSetStore, type SavedParam } from '@/lib/param-sets';
 import {
   TargetEditor, buildTarget, emptyDraft, isDraftEmpty, targetError, newParamRow, type ParamType, type TargetDraft,
@@ -118,7 +119,7 @@ function RecommendationsPanel({ analysis }: { analysis: AuditAnalysis }) {
   return (
     <Box borderWidth="1px" borderColor="border.subtle" borderRadius="xl" bg="bg.panel" p={5} aria-label="Recommendations" display="flex" flexDirection="column" gap={5}>
       <Box>
-        <Heading size="sm" color="accent.default">💡 Recommendations</Heading>
+        <Heading size="sm" color="accent.default">Recommendations</Heading>
         <Text fontSize="xs" color="fg.muted" mt={1}>
           How to use: start with the verdict, take the first high-priority finding, change the SQL, then run the changed SQL in compare mode and check that the verdict and grade improve.
         </Text>
@@ -203,7 +204,7 @@ function OptimizedPanel({ original, optimized, originalText, optimizedText }: {
   ];
   return (
     <Box borderWidth="1px" borderColor="border.subtle" borderRadius="xl" bg="bg.panel" p={5} aria-label="Original and optimized SQL">
-      <Heading size="sm" color="status.ok" mb={4}>🟢 Original vs Optimized</Heading>
+      <Heading size="sm" color="status.ok" mb={4}>Original vs Optimized</Heading>
       <Grid templateColumns={{ base: '1fr', md: '1fr 1fr' }} gap={4}>
         {sides.map((side) => (
           <Box key={side.label} p={4} bg="bg.canvas" borderRadius="lg" borderLeftWidth="3px" borderColor={side.color}>
@@ -263,7 +264,7 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
         {/* Row counts for the real tables the run read (D-039) */}
         {analysis.ioAnalysis.rowCounts && (
           <Box>
-            <Text fontSize="sm" fontWeight="semibold" color="accent.default" mb={3} textTransform="uppercase" letterSpacing="wider">Row counts (tables read)</Text>
+            <Text fontSize="sm" fontWeight="semibold" color="fg.default" mb={3} textTransform="uppercase" letterSpacing="wider">Row counts (tables read)</Text>
             <Grid templateColumns={{ base: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' }} gap={3}>
               {Object.entries(analysis.ioAnalysis.rowCounts).map(([table, rows]) => (
                 <StatCard key={table} label={table} value={rows} color={rows === 0 ? 'status.bad' : 'accent.default'} />
@@ -305,7 +306,7 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
         {/* OUTPUT parameter values returned by the run */}
         {outputs && Object.keys(outputs).length > 0 && (
           <Box>
-            <Text fontSize="sm" fontWeight="semibold" color="accent.default" mb={3} textTransform="uppercase" letterSpacing="wider">OUTPUT parameters</Text>
+            <Text fontSize="sm" fontWeight="semibold" color="fg.default" mb={3} textTransform="uppercase" letterSpacing="wider">OUTPUT parameters</Text>
             <Box as="pre" fontSize="xs" color="accent.default" bg="bg.canvas" p={3} borderRadius="lg" overflowX="auto" fontFamily="mono">
               {JSON.stringify(outputs, null, 2)}
             </Box>
@@ -314,7 +315,7 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
 
         {/* Time breakdown */}
         <Box>
-          <Text fontSize="sm" fontWeight="semibold" color="accent.default" mb={3} textTransform="uppercase" letterSpacing="wider">⏱ Time Analysis</Text>
+          <Text fontSize="sm" fontWeight="semibold" color="fg.default" mb={3} textTransform="uppercase" letterSpacing="wider">Time Analysis</Text>
           <Grid templateColumns="1fr 1fr" gap={4}>
             <Box p={4} bg="bg.raised" borderRadius="lg">
               <Text fontSize="xs" color="fg.muted" mb={1}>Parse & Compile</Text>
@@ -336,7 +337,7 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
         {/* Costliest plan operators (P8-06) */}
         {analysis.planOperators && analysis.planOperators.length > 0 && (
           <Box>
-            <Text fontSize="sm" fontWeight="semibold" color="accent.default" mb={3} textTransform="uppercase" letterSpacing="wider">Costliest plan operators</Text>
+            <Text fontSize="sm" fontWeight="semibold" color="fg.default" mb={3} textTransform="uppercase" letterSpacing="wider">Costliest plan operators</Text>
             <Box display="flex" flexDirection="column" gap={2}>
               {analysis.planOperators.map((op, i) => (
                 <Box key={i} p={4} bg="bg.raised" borderRadius="lg" borderLeftWidth="3px" borderColor="accent.default">
@@ -355,7 +356,7 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
         {/* Hot tables */}
         {analysis.ioAnalysis.hotTables.length > 0 && (
           <Box>
-            <Text fontSize="sm" fontWeight="semibold" color="status.warn" mb={3} textTransform="uppercase" letterSpacing="wider">🔥 Hot Tables (I/O)</Text>
+            <Text fontSize="sm" fontWeight="semibold" color="fg.default" mb={3} textTransform="uppercase" letterSpacing="wider">Hot Tables (I/O)</Text>
             <Box display="flex" flexDirection="column" gap={2}>
               {analysis.ioAnalysis.hotTables.map((ht, i) => (
                 <Box key={i} p={4} bg="bg.raised" borderRadius="lg" borderLeftWidth="3px"
@@ -387,7 +388,7 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
         {/* Pros & Cons */}
         <Grid templateColumns="1fr 1fr" gap={4}>
           <Box>
-            <Text fontSize="sm" fontWeight="semibold" color="status.ok" mb={3} textTransform="uppercase" letterSpacing="wider">✅ Pros</Text>
+            <Text fontSize="sm" fontWeight="semibold" color="fg.default" mb={3} textTransform="uppercase" letterSpacing="wider">Pros</Text>
             {analysis.prosAndCons.pros.map((p, i) => (
               <Flex key={i} gap={2} mb={2} align="flex-start">
                 <Text color="status.ok">+</Text>
@@ -396,7 +397,7 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
             ))}
           </Box>
           <Box>
-            <Text fontSize="sm" fontWeight="semibold" color="status.bad" mb={3} textTransform="uppercase" letterSpacing="wider">❌ Cons</Text>
+            <Text fontSize="sm" fontWeight="semibold" color="fg.default" mb={3} textTransform="uppercase" letterSpacing="wider">Cons</Text>
             {analysis.prosAndCons.cons.map((c, i) => (
               <Flex key={i} gap={2} mb={2} align="flex-start">
                 <Text color="status.bad">−</Text>
@@ -471,7 +472,6 @@ function RawStatsPanel({ execution }: { execution: ExecutionResult }) {
 export default function ExecutePage() {
   const api = useApi();
   const [mode, setMode] = useState<'single' | 'compare'>('single');
-  const [runs, setRuns] = useState(1);
   const [kind, setKind] = useState<'procedure' | 'batch'>('batch');
   const [original, setOriginal] = useState<TargetDraft>(emptyDraft());
   const [optimized, setOptimized] = useState<TargetDraft>(emptyDraft());
@@ -611,6 +611,10 @@ export default function ExecutePage() {
   function handleCancel() {
     abortRef.current?.abort();
   }
+  // UX-B: leaving while a run is in progress asks first, and cancels the run when the user agrees.
+  useLeaveGuard(loading, 'An execution', handleCancel);
+  // Leaving through a link inside the page skips the question; stop the run then too (it rolls back).
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   async function handleExecute() {
     if (isDraftEmpty(kind, original)) return;
@@ -651,7 +655,6 @@ export default function ExecutePage() {
           ...(engine !== 'simulation' ? { connection: connection() } : {}),
           original: orig.target,
           ...(opt && opt.ok ? { optimized: opt.target } : {}),
-          ...(mode === 'single' && runs > 1 ? { runs } : {}),
         }),
       },
       'Execution failed'
@@ -676,7 +679,7 @@ export default function ExecutePage() {
           <div>
             <p className="page-kicker">Execution</p>
             <h2 className="page-title">Execute & Audit SP</h2>
-            <p className="analysis-note">Execute Stored Procedures, collect full IO/Statistical metrics, store audit logs, and get deep R004 performance analysis.</p>
+            <p className="analysis-note">Run a stored procedure or SQL batch, collect its I/O and time statistics, save an audit record, and get a performance analysis.</p>
           </div>
         </header>
 
@@ -696,16 +699,10 @@ export default function ExecutePage() {
           >
             Compare Original vs Optimized
           </Button>
-          {mode === 'single' && (
-            <Flex align="center" gap={2}>
-              <Text fontSize="xs" color="fg.muted">Runs</Text>
-              <Input
-                size="xs" type="number" min={1} max={20} w="72px" value={runs} aria-label="Runs"
-                onChange={(e) => setRuns(Math.min(20, Math.max(1, Math.trunc(Number(e.target.value) || 1))))}
-                bg="bg.canvas" borderColor="border.subtle" color="fg.default"
-              />
-              <Text fontSize="xs" color="fg.muted">1 = one run; more adds a warm-up and summary</Text>
-            </Flex>
+          {mode === 'single' && engine !== 'simulation' && (
+            <Text fontSize="xs" color="fg.muted">
+              Runs several times: a warm-up that is not counted, then the measured runs set in Settings (2 by default).
+            </Text>
           )}
         </Flex>
 
@@ -917,7 +914,7 @@ export default function ExecutePage() {
 
             {result.mode === 'single' ? (
               <>
-                <AnalysisPanel analysis={result.analysis} title={`📊 Execution Analysis — ${result.execution.spLabel}`} params={usedParams} outputs={result.execution.outputs} />
+                <AnalysisPanel analysis={result.analysis} title={`Execution Analysis — ${result.execution.spLabel}`} params={usedParams} outputs={result.execution.outputs} />
                 <RawStatsPanel execution={result.execution} />
                 {result.execution.success && ranSource && (
                   <RefactorPanel
@@ -956,7 +953,7 @@ export default function ExecutePage() {
                       colorPalette="brand"
                       onClick={() => setActiveTab(tab)}
                     >
-                      {tab === 'compare' ? '📊 Comparison' : tab === 'original' ? '🔴 Original' : '🟢 Optimized'}
+                      {tab === 'compare' ? 'Comparison' : tab === 'original' ? 'Original' : 'Optimized'}
                     </Button>
                   ))}
                 </Flex>
@@ -967,16 +964,16 @@ export default function ExecutePage() {
                     originalText={submittedSql.original} optimizedText={submittedSql.optimized}
                   />
                 )}
-                {activeTab === 'compare' && <AnalysisPanel analysis={result.comparison} title="📊 Comparative Audit" />}
+                {activeTab === 'compare' && <AnalysisPanel analysis={result.comparison} title="Comparative Audit" />}
                 {activeTab === 'original' && (
                   <>
-                    <AnalysisPanel analysis={result.original.analysis} title="🔴 Original SP Audit" outputs={result.original.execution.outputs} />
+                    <AnalysisPanel analysis={result.original.analysis} title="Original SP Audit" outputs={result.original.execution.outputs} />
                     <RawStatsPanel execution={result.original.execution} />
                   </>
                 )}
                 {activeTab === 'optimized' && (
                   <>
-                    <AnalysisPanel analysis={result.optimized.analysis} title="🟢 Optimized SP Audit" outputs={result.optimized.execution.outputs} />
+                    <AnalysisPanel analysis={result.optimized.analysis} title="Optimized SP Audit" outputs={result.optimized.execution.outputs} />
                     <RawStatsPanel execution={result.optimized.execution} />
                   </>
                 )}

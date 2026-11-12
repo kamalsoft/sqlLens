@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Box, Button, Flex, Heading, Text } from '@chakra-ui/react';
+import { Box, Button, CloseButton, Dialog, Flex, Heading, Portal, Text } from '@chakra-ui/react';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { useApi } from '@/components/api-client';
+import { useLeaveGuard } from '@/components/leave-guard';
 import {
   RefactorRawOutput, RefactorResultView, refactorFailure, type RefactorModel, type RefactorResponse,
 } from '@/components/refactor/RefactorResultView';
@@ -17,6 +19,7 @@ type Engine = 'simulation' | 'mssql' | 'postgres';
 /**
  * RF-2/RF-3: after a run, refactor what was run with a local model and show the refactored SQL, the
  * index and view scripts and the other recommendations, each in its own section. Nothing here runs SQL.
+ * UX-D: the work happens in a large dialog; closing it while the model runs asks first.
  */
 export function RefactorPanel({ source, engine, connection, analysis, onUseAsOptimized }: {
   source: RefactorSource;
@@ -36,7 +39,8 @@ export function RefactorPanel({ source, engine, connection, analysis, onUseAsOpt
   const [rawOutput, setRawOutput] = useState('');
   const [validation, setValidation] = useState('');
   const [response, setResponse] = useState<RefactorResponse | null>(null);
-  const instructions = open ? evidenceInstructions(analysis) : '';
+  const [confirmClose, setConfirmClose] = useState(false);
+  const instructions = evidenceInstructions(analysis);
   // A model run can take minutes; stop it when the panel goes away (a new run, or Use as Optimized).
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -104,6 +108,7 @@ export function RefactorPanel({ source, engine, connection, analysis, onUseAsOpt
   }
 
   const running = step !== null;
+  useLeaveGuard(running, 'A refactor', () => abortRef.current?.abort());
   const refactoredSql = response?.result?.status === 'provided' ? response.result.refactoredSql : '';
   const actions = refactoredSql
     ? source.kind === 'batch' && onUseAsOptimized
@@ -120,49 +125,94 @@ export function RefactorPanel({ source, engine, connection, analysis, onUseAsOpt
       )
     : null;
 
+  function requestClose() {
+    if (running) setConfirmClose(true);
+    else setOpen(false);
+  }
+
+  function cancelAndClose() {
+    abortRef.current?.abort();
+    setConfirmClose(false);
+    setOpen(false);
+  }
+
   return (
     <Box bg="bg.panel" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" p={5} aria-label="Refactor stored procedure">
-      <Flex justify="space-between" align="center" gap={3} wrap="wrap">
-        <Box>
-          <Heading size="sm" color="fg.default">Refactor Stored Procedure</Heading>
+      <Flex justify="space-between" align="center" gap={4} wrap="wrap">
+        <Box flex="1 1 320px">
+          <Heading size="sm" color="fg.default">Refactor and recommendations</Heading>
           <Text fontSize="sm" color="fg.muted" mt={1}>
             Generate a refactored version and index, view and other recommendation scripts with a local model,
             guided by this run&apos;s evidence. Generated SQL is never executed.
           </Text>
         </Box>
-        {!open && <Button colorPalette="brand" onClick={() => void openPanel()}>Refactor Stored Procedure</Button>}
+        <Button colorPalette="brand" onClick={() => void openPanel()}>Refactor Stored Procedure</Button>
       </Flex>
 
-      {open && (
-        <Box mt={4} display="flex" flexDirection="column" gap={4}>
-          <Flex gap={3} align="flex-end" wrap="wrap">
-            <label className="field" style={{ flex: '1 1 260px' }}>
-              <span className="label">Model</span>
-              <select className="select" value={modelId} onChange={(e) => setModelId(e.target.value)} disabled={models === null || models.length === 0 || running}>
-                {models === null ? <option value="">Loading installed models...</option>
-                  : models.length === 0 ? <option value="">No compatible model installed</option>
-                    : models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-              </select>
-            </label>
-            <Button colorPalette="brand" onClick={() => void generate()} disabled={running || !modelId} loading={running}>
-              Generate refactor
-            </Button>
-          </Flex>
-          <Text fontSize="xs" color="fg.muted">
-            {source.kind === 'procedure'
-              ? `Refactors ${source.name}; its definition is read from SQL Server.`
-              : 'Refactors the SQL batch exactly as it was run.'}
-          </Text>
-          <details>
-            <summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--muted)' }}>Evidence sent to the model</summary>
-            <Box as="pre" mt={2} p={3} bg="bg.code" borderRadius="md" fontSize="xs" color="fg.default" whiteSpace="pre-wrap">{instructions}</Box>
-          </details>
+      <Dialog.Root
+        open={open}
+        onOpenChange={(e) => (e.open ? setOpen(true) : requestClose())}
+        size="xl" placement="center" scrollBehavior="inside"
+      >
+        <Portal>
+          <Dialog.Backdrop />
+          <Dialog.Positioner>
+            <Dialog.Content bg="bg.panel" color="fg.default" borderWidth="1px" borderColor="border.subtle" maxW="min(1100px, 95vw)">
+              <Dialog.Header>
+                <Box>
+                  <Dialog.Title>Refactor Stored Procedure</Dialog.Title>
+                  <Text fontSize="sm" color="fg.muted" mt={1}>
+                    {source.kind === 'procedure'
+                      ? `Refactors ${source.name}; its definition is read from SQL Server.`
+                      : 'Refactors the SQL batch exactly as it was run.'}
+                  </Text>
+                </Box>
+              </Dialog.Header>
+              <Dialog.Body display="flex" flexDirection="column" gap={4}>
+                <Flex gap={3} align="flex-end" wrap="wrap">
+                  <label className="field" style={{ flex: '1 1 260px' }}>
+                    <span className="label">Model</span>
+                    <select className="select" value={modelId} onChange={(e) => setModelId(e.target.value)} disabled={models === null || models.length === 0 || running}>
+                      {models === null ? <option value="">Loading installed models...</option>
+                        : models.length === 0 ? <option value="">No compatible model installed</option>
+                          : models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    </select>
+                  </label>
+                  <Button colorPalette="brand" onClick={() => void generate()} disabled={running || !modelId} loading={running}>
+                    Generate refactor
+                  </Button>
+                </Flex>
+                <details>
+                  <summary className="disclosure">Evidence sent to the model</summary>
+                  <Box as="pre" mt={2} p={3} bg="bg.code" borderRadius="md" fontSize="xs" color="fg.default" whiteSpace="pre-wrap">{instructions}</Box>
+                </details>
 
-          {step && <Text role="status" fontSize="sm" color="accent.default">{step}</Text>}
-          {error && <div role="alert" className="alert">{error}</div>}
-          {response?.result && <RefactorResultView response={response} actions={actions} />}
-          {!response && rawOutput && <RefactorRawOutput rawOutput={rawOutput} validation={validation} />}
-        </Box>
+                {step && <Text role="status" fontSize="sm" color="accent.default">{step}</Text>}
+                {error && <div role="alert" className="alert">{error}</div>}
+                {response?.result && <RefactorResultView response={response} actions={actions} />}
+                {!response && rawOutput && <RefactorRawOutput rawOutput={rawOutput} validation={validation} />}
+              </Dialog.Body>
+              <Dialog.Footer>
+                <Button variant="outline" colorPalette="gray" onClick={requestClose}>Close</Button>
+              </Dialog.Footer>
+              <Dialog.CloseTrigger asChild>
+                <CloseButton size="sm" aria-label="Close refactor" />
+              </Dialog.CloseTrigger>
+            </Dialog.Content>
+          </Dialog.Positioner>
+        </Portal>
+      </Dialog.Root>
+
+      {confirmClose && (
+        <ConfirmDialog
+          open
+          title="A refactor is still running"
+          message="Closing cancels the refactor, and its result is lost."
+          confirmLabel="Cancel the refactor and close"
+          cancelLabel="Keep it running"
+          onConfirm={cancelAndClose}
+          onCancel={() => setConfirmClose(false)}
+        />
       )}
     </Box>
   );

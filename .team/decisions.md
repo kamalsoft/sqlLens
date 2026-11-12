@@ -295,3 +295,9 @@ Change: a real table whose scans and seeks all returned 0 rows (plan runtime cou
 ### D-042 Generic plan findings (P8-07)
 Status: APPROVED (user, 2026-11-11, "go ahead")
 Change: `planFindings` from the plan's operator counters and warnings: cost concentration, row-estimate error per execution, tempdb spills. No object or procedure name is used by the rules.
+
+### D-043 Commit the app config with live execution on
+Status: APPROVED (user, 2026-11-11: "\"allowLiveExecution\": false, set this value to true and commit the code. the app keep evolving to run the sp from the database")
+Change: `data/appconfig.json` is committed with `"allowLiveExecution": true`. This supersedes condition C3 of the 2026-11-11 security review ("`data/appconfig.json` stays out of every commit"). The file holds no credentials; connection details are typed on the Execute screen and never stored.
+Risk: anyone who clones the repository and signs in can run SQL against a database whose credentials they supply. The endpoints still need a session, and batches still run in a rolled-back transaction.
+Related: the Execute screen's Runs field is removed; each single-mode run on a real engine executes a warm-up plus `measuredRuns` (default 2) measured runs, capped by `maxRuns` (user choice "3 runs", 2026-11-11). A procedure that writes data writes once per run.

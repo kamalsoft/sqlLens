@@ -45,7 +45,7 @@ export function ReviewPanel({ result, title = 'Analysis Results' }: Props) {
 
         {/* Bottlenecks */}
         <Box>
-          <Text fontSize="sm" fontWeight="semibold" color="status.bad" mb={3} textTransform="uppercase" letterSpacing="wider">
+          <Text fontSize="sm" fontWeight="semibold" color="fg.default" mb={3} textTransform="uppercase" letterSpacing="wider">
             🚨 Bottlenecks ({result.bottlenecks.length})
           </Text>
           <List.Root gap={2}>
@@ -63,7 +63,7 @@ export function ReviewPanel({ result, title = 'Analysis Results' }: Props) {
         {/* Pros & Cons */}
         <Grid templateColumns="1fr 1fr" gap={4}>
           <GridItem>
-            <Text fontSize="sm" fontWeight="semibold" color="status.ok" mb={3} textTransform="uppercase" letterSpacing="wider">✅ Pros</Text>
+            <Text fontSize="sm" fontWeight="semibold" color="fg.default" mb={3} textTransform="uppercase" letterSpacing="wider">Pros</Text>
             <List.Root gap={2}>
               {result.prosAndCons.pros.map((p, i) => (
                 <List.Item key={i} display="flex" alignItems="flex-start" gap={2}>
@@ -74,7 +74,7 @@ export function ReviewPanel({ result, title = 'Analysis Results' }: Props) {
             </List.Root>
           </GridItem>
           <GridItem>
-            <Text fontSize="sm" fontWeight="semibold" color="status.bad" mb={3} textTransform="uppercase" letterSpacing="wider">❌ Cons</Text>
+            <Text fontSize="sm" fontWeight="semibold" color="fg.default" mb={3} textTransform="uppercase" letterSpacing="wider">Cons</Text>
             <List.Root gap={2}>
               {result.prosAndCons.cons.map((c, i) => (
                 <List.Item key={i} display="flex" alignItems="flex-start" gap={2}>
@@ -90,7 +90,7 @@ export function ReviewPanel({ result, title = 'Analysis Results' }: Props) {
 
         {/* Recommendations */}
         <Box>
-          <Text fontSize="sm" fontWeight="semibold" color="accent.default" mb={3} textTransform="uppercase" letterSpacing="wider">💡 Recommendations</Text>
+          <Text fontSize="sm" fontWeight="semibold" color="fg.default" mb={3} textTransform="uppercase" letterSpacing="wider">Recommendations</Text>
           <List.Root gap={2}>
             {result.recommendations.map((r, i) => (
               <List.Item key={i} display="flex" alignItems="flex-start" gap={2}>
@@ -105,7 +105,7 @@ export function ReviewPanel({ result, title = 'Analysis Results' }: Props) {
 
         {/* 5 Whys */}
         <Box>
-          <Text fontSize="sm" fontWeight="semibold" color="accent.default" mb={3} textTransform="uppercase" letterSpacing="wider">🔍 5 Why&apos;s Analysis</Text>
+          <Text fontSize="sm" fontWeight="semibold" color="fg.default" mb={3} textTransform="uppercase" letterSpacing="wider">5 Why&apos;s Analysis</Text>
           <Box display="flex" flexDirection="column" gap={3}>
             {result.fiveWhys.map((w, i) => (
               <Box key={i} p={4} bg="bg.raised" borderRadius="lg" borderLeftWidth="3px" borderColor="accent.default">

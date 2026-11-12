@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { useApi } from "@/components/api-client";
+import { SETTINGS_SAVED_EVENT } from "@/components/AppShell";
 
 type Engine = "simulation" | "mssql" | "postgres";
 
@@ -24,6 +25,12 @@ type AppSettings = {
   maxNewTokens: number;
   logSqlText: boolean;
   shareTtlHours: number;
+  maxLogicalReads: number | null;
+  maxElapsedMs: number | null;
+  maxScanCount: number | null;
+  measuredRuns: number;
+  showCompare: boolean;
+  showRefactor: boolean;
 };
 
 // Mirrors C6 defaults in docs/team/contracts.md.
@@ -45,6 +52,12 @@ const defaultSettings: AppSettings = {
   maxNewTokens: 1536,
   logSqlText: true,
   shareTtlHours: 24,
+  maxLogicalReads: null,
+  maxElapsedMs: null,
+  maxScanCount: null,
+  measuredRuns: 2,
+  showCompare: false,
+  showRefactor: false,
 };
 
 const knownKeys = Object.keys(defaultSettings).concat("prompt") as Array<keyof AppSettings>;
@@ -88,6 +101,17 @@ function Field({
   );
 }
 
+/** A titled group of settings: one per category. */
+function Group({ id, title, description, children }: { id: string; title: string; description: string; children: ReactNode }) {
+  return (
+    <section className="panel panel-card settings-group" aria-labelledby={`settings-${id}`}>
+      <h3 className="section-title" id={`settings-${id}`}>{title}</h3>
+      <p className="analysis-note settings-group-note">{description}</p>
+      <div className="form-grid">{children}</div>
+    </section>
+  );
+}
+
 export default function SettingsPage() {
   const api = useApi();
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
@@ -121,6 +145,9 @@ export default function SettingsPage() {
 
   const num = (key: keyof AppSettings) => (event: React.ChangeEvent<HTMLInputElement>) =>
     update(key, Number(event.target.value) as never);
+  // An empty target means "not set" (null), not zero.
+  const optionalNum = (key: "maxLogicalReads" | "maxElapsedMs" | "maxScanCount") => (event: React.ChangeEvent<HTMLInputElement>) =>
+    update(key, event.target.value.trim() === "" ? null : Number(event.target.value));
 
   async function handleSave() {
     setSaving(true);
@@ -140,6 +167,7 @@ export default function SettingsPage() {
     if (result.ok) {
       setSettings(normalize(result.data));
       setMessage("Settings saved.");
+      window.dispatchEvent(new Event(SETTINGS_SAVED_EVENT));
     } else if (result.status !== 401) {
       setError({ field: result.field, message: result.error ?? "Unable to save settings" });
     }
@@ -163,201 +191,140 @@ export default function SettingsPage() {
         </div>
       </header>
 
-      {loading && <p role="status">Loading settings...</p>}
+      {loading && <p role="status" className="status-note">Loading settings...</p>}
 
-      <section className="panel panel-card">
-        <div className="form-grid">
+      <Group id="features" title="Features" description="Screens shown in the menu. A screen that is off cannot be opened.">
+          <Field label="Show Compare" name="showCompare" error={error}>
+            <div className="checkbox-row">
+              <span>Show the Compare screen</span>
+              <input id="setting-showCompare" className="checkbox" type="checkbox" checked={settings.showCompare}
+                onChange={(event) => update("showCompare", event.target.checked)} disabled={disabled} />
+            </div>
+          </Field>
+          <Field label="Show Refactor" name="showRefactor" error={error}>
+            <div className="checkbox-row">
+              <span>Show the Refactor screen</span>
+              <input id="setting-showRefactor" className="checkbox" type="checkbox" checked={settings.showRefactor}
+                onChange={(event) => update("showRefactor", event.target.checked)} disabled={disabled} />
+            </div>
+            <small className="field-hint">The refactor popup on Execute &amp; Audit is always available.</small>
+          </Field>
+      </Group>
+
+      <Group id="models" title="Models and inference" description="The local model used for reviews, comparisons and refactors, and how it runs.">
           <Field label="Model Provider" name="provider" error={error}>
-            <input id="setting-provider" value={settings.provider} readOnly />
+            <input id="setting-provider" className="input" value={settings.provider} readOnly />
           </Field>
-
           <Field label="Default Model" name="defaultModel" error={error}>
-            <input
-              id="setting-defaultModel"
-              value={settings.defaultModel}
-              onChange={(event) => update("defaultModel", event.target.value)}
-              disabled={disabled}
-            />
+            <input id="setting-defaultModel" className="input" value={settings.defaultModel} onChange={(event) => update("defaultModel", event.target.value)} disabled={disabled} />
           </Field>
-
-          <Field label="Download Directory" name="downloadDirectory" error={error} full>
-            <input
-              id="setting-downloadDirectory"
-              value={settings.downloadDirectory}
-              onChange={(event) => update("downloadDirectory", event.target.value)}
-              disabled={disabled}
-            />
-          </Field>
-
           <Field label="Temperature" name="temperature" error={error}>
-            <input
-              id="setting-temperature"
-              type="number"
-              step={0.1}
-              value={settings.temperature}
-              onChange={num("temperature")}
-              disabled={disabled}
-            />
+            <input id="setting-temperature" className="input" type="number" step={0.1} value={settings.temperature} onChange={num("temperature")} disabled={disabled} />
           </Field>
-
           <Field label="Context Window" name="contextWindow" error={error}>
-            <input
-              id="setting-contextWindow"
-              type="number"
-              value={settings.contextWindow}
-              onChange={num("contextWindow")}
-              disabled={disabled}
-            />
+            <input id="setting-contextWindow" className="input" type="number" value={settings.contextWindow} onChange={num("contextWindow")} disabled={disabled} />
           </Field>
-
-          <Field label="Max Concurrent Downloads" name="maxConcurrentDownloads" error={error}>
-            <input
-              id="setting-maxConcurrentDownloads"
-              type="number"
-              value={settings.maxConcurrentDownloads}
-              onChange={num("maxConcurrentDownloads")}
-              disabled={disabled}
-            />
-          </Field>
-
-          <Field label="Inference Timeout (ms)" name="inferenceTimeoutMs" error={error}>
-            <input
-              id="setting-inferenceTimeoutMs"
-              type="number"
-              value={settings.inferenceTimeoutMs}
-              onChange={num("inferenceTimeoutMs")}
-              disabled={disabled}
-            />
-          </Field>
-
           <Field label="Max New Tokens (model output)" name="maxNewTokens" error={error}>
-            <input
-              id="setting-maxNewTokens"
-              type="number"
-              value={settings.maxNewTokens}
-              onChange={num("maxNewTokens")}
-              disabled={disabled}
-            />
+            <input id="setting-maxNewTokens" className="input" type="number" value={settings.maxNewTokens} onChange={num("maxNewTokens")} disabled={disabled} />
           </Field>
-
-          <Field label="Max SQL Length (characters)" name="maxSqlLength" error={error}>
-            <input
-              id="setting-maxSqlLength"
-              type="number"
-              value={settings.maxSqlLength}
-              onChange={num("maxSqlLength")}
-              disabled={disabled}
-            />
+          <Field label="Inference Timeout (ms)" name="inferenceTimeoutMs" error={error}>
+            <input id="setting-inferenceTimeoutMs" className="input" type="number" value={settings.inferenceTimeoutMs} onChange={num("inferenceTimeoutMs")} disabled={disabled} />
           </Field>
+      </Group>
 
-          <Field label="Query Timeout (ms)" name="queryTimeoutMs" error={error}>
-            <input
-              id="setting-queryTimeoutMs"
-              type="number"
-              value={settings.queryTimeoutMs}
-              onChange={num("queryTimeoutMs")}
-              disabled={disabled}
-            />
+      <Group id="downloads" title="Model downloads" description="Where models are stored and how they are fetched and kept up to date.">
+          <Field label="Download Directory" name="downloadDirectory" error={error} full>
+            <input id="setting-downloadDirectory" className="input" value={settings.downloadDirectory} onChange={(event) => update("downloadDirectory", event.target.value)} disabled={disabled} />
           </Field>
+          <Field label="Max Concurrent Downloads" name="maxConcurrentDownloads" error={error}>
+            <input id="setting-maxConcurrentDownloads" className="input" type="number" value={settings.maxConcurrentDownloads} onChange={num("maxConcurrentDownloads")} disabled={disabled} />
+          </Field>
+          <Field label="Download Behavior" name="autoDownload" error={error}>
+            <div className="checkbox-row">
+              <span>Auto-download recommended models</span>
+              <input id="setting-autoDownload" className="checkbox" type="checkbox" checked={settings.autoDownload}
+                onChange={(event) => update("autoDownload", event.target.checked)} disabled={disabled} />
+            </div>
+          </Field>
+          <Field label="Model Updates" name="autoUpdateModels" error={error}>
+            <div className="checkbox-row">
+              <span>Auto-update installed models</span>
+              <input id="setting-autoUpdateModels" className="checkbox" type="checkbox" checked={settings.autoUpdateModels}
+                onChange={(event) => update("autoUpdateModels", event.target.checked)} disabled={disabled} />
+            </div>
+          </Field>
+      </Group>
 
+      <Group id="execution" title="SQL execution" description="How stored procedures and SQL batches run, and the limits a run is judged against.">
           <Field label="Default Engine" name="defaultEngine" error={error}>
-            <select
-              id="setting-defaultEngine"
-              value={settings.defaultEngine}
-              onChange={(event) => update("defaultEngine", event.target.value as Engine)}
-              disabled={disabled}
-            >
+            <select id="setting-defaultEngine" className="select" value={settings.defaultEngine}
+              onChange={(event) => update("defaultEngine", event.target.value as Engine)} disabled={disabled}>
               <option value="simulation">Simulation</option>
               <option value="mssql">SQL Server</option>
               <option value="postgres">PostgreSQL</option>
             </select>
           </Field>
-
-          <Field label="Share Link Lifetime (hours)" name="shareTtlHours" error={error}>
-            <input
-              id="setting-shareTtlHours"
-              type="number"
-              value={settings.shareTtlHours}
-              onChange={num("shareTtlHours")}
-              disabled={disabled}
-            />
+          <Field label="Query Timeout (ms)" name="queryTimeoutMs" error={error}>
+            <input id="setting-queryTimeoutMs" className="input" type="number" value={settings.queryTimeoutMs} onChange={num("queryTimeoutMs")} disabled={disabled} />
           </Field>
-
-          <Field label="Download Behavior" name="autoDownload" error={error}>
-            <div className="checkbox-row">
-              <span>Auto-download recommended models</span>
-              <input
-                id="setting-autoDownload"
-                className="checkbox"
-                type="checkbox"
-                checked={settings.autoDownload}
-                onChange={(event) => update("autoDownload", event.target.checked)}
-                disabled={disabled}
-              />
-            </div>
+          <Field label="Max SQL Length (characters)" name="maxSqlLength" error={error}>
+            <input id="setting-maxSqlLength" className="input" type="number" value={settings.maxSqlLength} onChange={num("maxSqlLength")} disabled={disabled} />
           </Field>
-
-          <Field label="Model Updates" name="autoUpdateModels" error={error}>
-            <div className="checkbox-row">
-              <span>Auto-update installed models</span>
-              <input
-                id="setting-autoUpdateModels"
-                className="checkbox"
-                type="checkbox"
-                checked={settings.autoUpdateModels}
-                onChange={(event) => update("autoUpdateModels", event.target.checked)}
-                disabled={disabled}
-              />
-            </div>
+          <Field label="Measured Runs" name="measuredRuns" error={error}>
+            <input id="setting-measuredRuns" className="input" type="number" min={1} max={20}
+              value={settings.measuredRuns} onChange={num("measuredRuns")} disabled={disabled} />
+            <small className="field-hint">
+              Runs measured for each execution on a real database. Above 1, one warm-up run is added first and not
+              counted. Each run really executes the SQL, so a procedure that writes data writes once per run.
+            </small>
           </Field>
-
-          <Field label="Privacy" name="allowTelemetry" error={error}>
-            <div className="checkbox-row">
-              <span>Allow telemetry</span>
-              <input
-                id="setting-allowTelemetry"
-                className="checkbox"
-                type="checkbox"
-                checked={settings.allowTelemetry}
-                onChange={(event) => update("allowTelemetry", event.target.checked)}
-                disabled={disabled}
-              />
-            </div>
+          <Field label="Target: Max Logical Reads" name="maxLogicalReads" error={error}>
+            <input id="setting-maxLogicalReads" className="input" type="number" min={1} placeholder="Not set"
+              value={settings.maxLogicalReads ?? ""} onChange={optionalNum("maxLogicalReads")} disabled={disabled} />
+            <small className="field-hint">A run over this is marked OPTIMIZE. Leave empty for no target.</small>
           </Field>
-
-          <Field label="SQL Logging" name="logSqlText" error={error}>
-            <div className="checkbox-row">
-              <span>Write SQL text to audit logs (off stores a hash and length only)</span>
-              <input
-                id="setting-logSqlText"
-                className="checkbox"
-                type="checkbox"
-                checked={settings.logSqlText}
-                onChange={(event) => update("logSqlText", event.target.checked)}
-                disabled={disabled}
-              />
-            </div>
+          <Field label="Target: Max Elapsed Time (ms)" name="maxElapsedMs" error={error}>
+            <input id="setting-maxElapsedMs" className="input" type="number" min={1} placeholder="Not set"
+              value={settings.maxElapsedMs ?? ""} onChange={optionalNum("maxElapsedMs")} disabled={disabled} />
+            <small className="field-hint">A run over this is marked OPTIMIZE. Leave empty for no target.</small>
           </Field>
-
+          <Field label="Target: Max Scan Count" name="maxScanCount" error={error}>
+            <input id="setting-maxScanCount" className="input" type="number" min={1} placeholder="Not set"
+              value={settings.maxScanCount ?? ""} onChange={optionalNum("maxScanCount")} disabled={disabled} />
+            <small className="field-hint">A run over this is marked OPTIMIZE. Leave empty for no target.</small>
+          </Field>
           <Field label="Live Execution" name="allowLiveExecution" error={error} full>
             <div className="checkbox-row">
               <span>Allow live execution against a real database</span>
-              <input
-                id="setting-allowLiveExecution"
-                className="checkbox"
-                type="checkbox"
-                checked={settings.allowLiveExecution}
-                onChange={(event) => update("allowLiveExecution", event.target.checked)}
-                disabled={disabled}
-              />
+              <input id="setting-allowLiveExecution" className="checkbox" type="checkbox" checked={settings.allowLiveExecution}
+                onChange={(event) => update("allowLiveExecution", event.target.checked)} disabled={disabled} />
             </div>
-            <small>
-              Warning: when enabled, stored procedures run against the connected database and can
-              change data. Leave off to use simulation only.
-            </small>
+            <small className="field-hint">Warning: when enabled, stored procedures run against the connected database and can change data. Leave off to use simulation only.</small>
           </Field>
-        </div>
-      </section>
+      </Group>
+
+      <Group id="privacy" title="Privacy and logging" description="What is written to the audit logs and what leaves this machine.">
+          <Field label="SQL Logging" name="logSqlText" error={error}>
+            <div className="checkbox-row">
+              <span>Write SQL text to audit logs (off stores a hash and length only)</span>
+              <input id="setting-logSqlText" className="checkbox" type="checkbox" checked={settings.logSqlText}
+                onChange={(event) => update("logSqlText", event.target.checked)} disabled={disabled} />
+            </div>
+          </Field>
+          <Field label="Privacy" name="allowTelemetry" error={error}>
+            <div className="checkbox-row">
+              <span>Allow telemetry</span>
+              <input id="setting-allowTelemetry" className="checkbox" type="checkbox" checked={settings.allowTelemetry}
+                onChange={(event) => update("allowTelemetry", event.target.checked)} disabled={disabled} />
+            </div>
+          </Field>
+      </Group>
+
+      <Group id="sharing" title="Sharing" description="Links that let someone without a login view one result.">
+          <Field label="Share Link Lifetime (hours)" name="shareTtlHours" error={error}>
+            <input id="setting-shareTtlHours" className="input" type="number" value={settings.shareTtlHours} onChange={num("shareTtlHours")} disabled={disabled} />
+          </Field>
+      </Group>
 
       <div className="page-actions form-actions">
         <button type="button" className="button button-primary" onClick={() => void handleSave()} disabled={disabled}>

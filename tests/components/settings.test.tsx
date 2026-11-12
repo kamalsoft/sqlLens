@@ -106,4 +106,34 @@ describe("SettingsPage", () => {
     expect(alert).toHaveTextContent("queryTimeoutMs must be positive");
     expect(alert.id).toBe("setting-queryTimeoutMs-error");
   });
+
+  it("groups settings by category, saves the feature switches and tells the menu (UX-A, UX-C)", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) =>
+      json(200, init?.method === "PUT" ? { ...loaded, ...JSON.parse(init.body as string) } : { ...loaded, maxLogicalReads: 5000 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const saved = vi.fn();
+    window.addEventListener("sqllens:settings-saved", saved);
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+
+    for (const title of ["Features", "Models and inference", "Model downloads", "SQL execution", "Privacy and logging", "Sharing"]) {
+      expect(screen.getByRole("region", { name: title })).toBeInTheDocument();
+    }
+    const compare = (await screen.findByLabelText("Show Compare")) as HTMLInputElement;
+    await waitFor(() => expect(compare).toBeEnabled());
+    expect(compare.checked).toBe(false);
+    await user.click(compare);
+    const reads = screen.getByLabelText("Target: Max Logical Reads") as HTMLInputElement;
+    expect(reads.value).toBe("5000");
+    await user.clear(reads);
+
+    await user.click(screen.getByRole("button", { name: "Save Settings" }));
+    expect(await screen.findByText("Settings saved.")).toBeInTheDocument();
+    const body = JSON.parse(fetchMock.mock.calls.find(([, init]) => init?.method === "PUT")![1].body);
+    expect(body.showCompare).toBe(true);
+    expect(body.showRefactor).toBe(false);
+    expect(body.maxLogicalReads).toBeNull();
+    expect(saved).toHaveBeenCalledTimes(1);
+    window.removeEventListener("sqllens:settings-saved", saved);
+  });
 });

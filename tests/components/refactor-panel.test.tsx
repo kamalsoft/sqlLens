@@ -118,4 +118,31 @@ describe("RefactorPanel (RF-2/3/4/6)", () => {
     expect(await screen.findByLabelText("Response preview")).toHaveTextContent("not json");
     expect(screen.getByRole("alert")).toHaveTextContent("Unable to parse model response");
   });
+
+  it("asks before closing while the model runs, and closing cancels the request (UX-D)", async () => {
+    let signal: AbortSignal | undefined;
+    const hanging = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/review/models") return json({ models: [{ id: "m1", name: "Model One", compatible: true }] });
+      signal = init?.signal ?? undefined;
+      return new Promise<Response>((_, reject) => signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError"))));
+    });
+    vi.stubGlobal("fetch", hanging);
+    render(
+      <ChakraProvider value={defaultSystem}>
+        <RefactorPanel source={{ kind: "batch", sql: "SELECT 1" }} engine="simulation" connection={{}} analysis={analysis} />
+      </ChakraProvider>,
+    );
+    const user = userEvent.setup();
+    await generate(user);
+    expect(await screen.findByRole("status")).toHaveTextContent(/Running the local model/);
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.click(await screen.findByRole("button", { name: "Keep it running" }));
+    expect(signal?.aborted).toBe(false);
+    expect(screen.getByText("Evidence sent to the model")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.click(await screen.findByRole("button", { name: "Cancel the refactor and close" }));
+    expect(signal?.aborted).toBe(true);
+  });
 });

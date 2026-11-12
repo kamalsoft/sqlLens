@@ -179,12 +179,30 @@ describe('POST /api/execute repeated runs (P8-03)', () => {
     expect(body.result.analysis.multiRun).toMatchObject({ runs: 4, warmupRuns: 1 });
   });
 
-  it('defaults to a single run with no summary', async () => {
+  it('without runs, a real run uses the configured measured runs plus a warm-up (default 2 + 1)', async () => {
     setLive(true);
+    ex.mssql.mockResolvedValue(ok());
+    const body = await (await execute(post(real(), cookie))).json();
+    expect(ex.mssql).toHaveBeenCalledTimes(3);
+    expect(body.result.analysis.multiRun).toMatchObject({ runs: 2, warmupRuns: 1 });
+  });
+
+  it('measuredRuns 1 means one run with no summary', async () => {
+    writeFileSync(cfgPath, JSON.stringify({ allowLiveExecution: true, measuredRuns: 1 }));
     ex.mssql.mockResolvedValue(ok());
     const body = await (await execute(post(real(), cookie))).json();
     expect(ex.mssql).toHaveBeenCalledTimes(1);
     expect(body.result.analysis.multiRun).toBeNull();
+  });
+
+  it('simulation and compare runs are not repeated by default', async () => {
+    setLive(true);
+    const sim = await (await execute(post({ mode: 'single', engine: 'simulation', original: { kind: 'batch', sql: 'SELECT 1' } }, cookie))).json();
+    expect(sim.result.analysis.multiRun).toBeNull();
+    ex.mssql.mockResolvedValue(ok());
+    const res = await execute(post({ mode: 'compare', engine: 'mssql', connection, original: real().original, optimized: real().original }, cookie));
+    expect(res.status).toBe(200);
+    expect(ex.mssql).toHaveBeenCalledTimes(2);
   });
 
   it('rejects runs outside 1..maxRuns, non-integers, and repeated compare runs', async () => {
