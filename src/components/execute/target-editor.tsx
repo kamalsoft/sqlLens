@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { Fragment, useState, type ReactNode } from 'react';
 import { Box, Button, Flex, Input, Text, Textarea } from '@chakra-ui/react';
 
 export const PARAM_TYPES = [
@@ -189,10 +189,13 @@ export function TargetEditor({
       </Flex>
       {loadNote && <Text fontSize="xs" color="status.warn" mb={2}>{loadNote}</Text>}
       {onSaveSet && onLoadSet && onDeleteSet && (
+        // EX-3: saved sets are an extra; folded away so the name and parameters lead.
+        <details className="connect-more param-sets">
+          <summary>Saved parameter sets{setNames && setNames.length > 0 ? ` (${setNames.length})` : ''}</summary>
         <Flex gap={2} wrap="wrap" align="center" mb={3}>
           <select
             aria-label="Saved parameter sets" value={chosen} onChange={(e) => setChosen(e.target.value)}
-            className="rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-2 text-[var(--text)]" style={{ minHeight: 40 }}
+            className="select" style={{ width: 'auto', minWidth: 180 }}
           >
             <option value="">Saved sets</option>
             {(setNames ?? []).map((n) => <option key={n} value={n}>{n}</option>)}
@@ -212,74 +215,73 @@ export function TargetEditor({
           </Button>
           <Text fontSize="xs" color="fg.muted" w="100%">Saved in this browser only. Passwords and connection details are never saved.</Text>
         </Flex>
+        </details>
       )}
-      <Box display="flex" flexDirection="column" gap={3} mb={3}>
-        {draft.params.map((row, i) => {
-          const nameError = row.name.trim() && !NAME_RE.test(row.name.trim()) ? 'Use a name such as @StartDate' : null;
-          const valueError = row.name.trim() && !nameError ? rowError(row) : null;
-          return (
-            <Flex
-              key={row.id} direction={{ base: 'column', md: 'row' }} gap={3}
-              align={{ base: 'stretch', md: 'flex-end' }} wrap="wrap" p={3} bg="bg.panel" borderRadius="lg"
-              borderWidth="1px" borderColor={valueError || nameError ? 'status.bad' : 'border.subtle'}
-            >
-              <Field caption="Name" error={nameError}>
-                <Input
-                  size="md" value={row.name} aria-label={`Parameter ${i + 1} name`} placeholder="@StartDate"
-                  aria-invalid={!!nameError}
+      {/* One line per parameter, under a single header row; errors show under their own row only. */}
+      {draft.params.length > 0 && (
+        <div className="param-table" role="group" aria-label="Parameters">
+          <span className="param-head" aria-hidden="true">Name</span>
+          <span className="param-head" aria-hidden="true">Type</span>
+          <span className="param-head" aria-hidden="true">Value</span>
+          <span className="param-head" aria-hidden="true">NULL</span>
+          <span className="param-head" aria-hidden="true">OUTPUT</span>
+          <span className="param-head" aria-hidden="true" />
+          {draft.params.map((row, i) => {
+            const nameError = row.name.trim() && !NAME_RE.test(row.name.trim()) ? 'Use a name such as @StartDate' : null;
+            const valueError = row.name.trim() && !nameError ? rowError(row) : null;
+            const errorId = `param-${row.id}-error`;
+            return (
+              <Fragment key={row.id}>
+                <input
+                  className="input param-cell" value={row.name} aria-label={`Parameter ${i + 1} name`} placeholder="@StartDate"
+                  aria-invalid={!!nameError} aria-describedby={nameError ? errorId : undefined}
                   onChange={(e) => setRow(row.id, { name: e.target.value })}
-                  bg="bg.canvas" borderColor="border.subtle" color="fg.default"
                 />
-              </Field>
-              <Field caption="Type">
                 <select
-                  aria-label={`Parameter ${i + 1} type`} value={row.type}
+                  className="select param-cell" aria-label={`Parameter ${i + 1} type`} value={row.type}
                   onChange={(e) => setRow(row.id, { type: e.target.value as ParamType })}
-                  className="w-full rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-2 text-[var(--text)]"
-                  style={{ minHeight: 40 }}
                 >
                   {PARAM_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
-              </Field>
-              <Field caption="Value" error={valueError} hint={row.type === 'datetime' ? '24-hour time, for example 23:59' : undefined}>
-                <Input
-                  size="md" type={inputTypeFor(row.type)} value={row.value}
-                  aria-label={`Parameter ${i + 1} value`} aria-invalid={!!valueError}
-                  placeholder={row.type === 'date' ? 'YYYY-MM-DD' : row.type === 'datetime' ? 'YYYY-MM-DD HH:MM or HH:MM:SS' : row.type === 'bit' ? 'true or false' : 'value'}
+                <input
+                  className="input param-cell" type={inputTypeFor(row.type)} value={row.value}
+                  aria-label={`Parameter ${i + 1} value`} aria-invalid={!!valueError} aria-describedby={valueError ? errorId : undefined}
+                  placeholder={row.type === 'date' ? 'YYYY-MM-DD' : row.type === 'datetime' ? 'YYYY-MM-DD HH:MM (24-hour)' : row.type === 'bit' ? 'true or false' : 'value'}
                   inputMode={row.type === 'int' || row.type === 'bigint' || row.type === 'decimal' ? 'decimal' : undefined}
-                  disabled={row.isNull}
-                  onChange={(e) => setRow(row.id, { value: e.target.value })}
-                  bg="bg.canvas" borderColor="border.subtle" color="fg.default"
+                  disabled={row.isNull} onChange={(e) => setRow(row.id, { value: e.target.value })}
                 />
-              </Field>
-              <Flex gap={4} align="center" minH="40px">
-                <label className="flex items-center gap-2 text-sm text-[var(--text)]">
+                {/* The header row names these columns; on phones it is hidden, so each box shows its own word. */}
+                <label className="param-check">
                   <input
                     type="checkbox" checked={row.isNull} aria-label={`Parameter ${i + 1} is NULL`}
                     onChange={(e) => setRow(row.id, { isNull: e.target.checked })}
-                    style={{ width: 18, height: 18 }}
                   />
-                  NULL
+                  <span className="param-mobile-label">NULL</span>
                 </label>
-                <label className="flex items-center gap-2 text-sm text-[var(--text)]">
+                <label className="param-check">
                   <input
                     type="checkbox" checked={row.output} aria-label={`Parameter ${i + 1} is OUTPUT`}
                     onChange={(e) => setRow(row.id, { output: e.target.checked })}
-                    style={{ width: 18, height: 18 }}
                   />
-                  OUTPUT
+                  <span className="param-mobile-label">OUTPUT</span>
                 </label>
-              </Flex>
-              <Button
-                size="md" variant="ghost" color="status.bad" aria-label={`Remove parameter ${i + 1}`}
-                onClick={() => onChange({ ...draft, params: draft.params.filter((r) => r.id !== row.id) })}
-              >
-                Remove
-              </Button>
-            </Flex>
-          );
-        })}
-      </Box>
+                <Button
+                  size="sm" variant="ghost" color="status.bad" aria-label={`Remove parameter ${i + 1}`}
+                  onClick={() => onChange({ ...draft, params: draft.params.filter((r) => r.id !== row.id) })}
+                >
+                  Remove
+                </Button>
+                {(nameError || valueError) && (
+                  <p className="param-error" role="alert" id={errorId}>{`Parameter ${i + 1}: ${nameError ?? valueError}`}</p>
+                )}
+              </Fragment>
+            );
+          })}
+        </div>
+      )}
+      {draft.params.some((r) => r.type === 'datetime') && (
+        <Text fontSize="xs" color="fg.muted" mb={2}>Date-times use 24-hour time, for example 2026-12-31 23:59.</Text>
+      )}
       <Button size="md" variant="outline" w={{ base: '100%', md: 'auto' }} onClick={() => onChange({ ...draft, params: [...draft.params, newParamRow()] })}>
         Add parameter
       </Button>
