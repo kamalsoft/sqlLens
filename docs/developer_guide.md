@@ -506,6 +506,7 @@ Keep API result types synchronized between the route and the client.
 - Ignore temporary and incomplete downloads.
 - Do not infer ONNX compatibility from `config.json` alone.
 - Do not rename Safetensors or GGUF files to ONNX filenames.
+- Model generation runs in `scripts/inference-worker.mjs`, a plain Node child process forked by `src/lib/inference.ts` (one at a time, started on first use, kept loaded). It gets only `PATH`, `HOME` and `NODE_ENV`. If it crashes, the run returns 502 and the next run starts a new worker; the server keeps running. After a timeout it gets 10 s to stop, then it is killed so the next run is not blocked. `scripts/` must ship with the app.
 
 ### Prompt handling
 
@@ -598,6 +599,10 @@ The repository ID or casing is incorrect, or the repository no longer exists.
 ### Safetensors or GGUF files were downloaded
 
 The repository is not compatible with the current ONNX runtime. Remove the incomplete directory and select a repository containing compatible ONNX assets.
+
+### Server dies during a review, compare or refactor
+
+Before the worker existed, onnxruntime 1.24.3 crashed the whole Next server with SIGILL on Apple M5 (SME2): the matmul kernel runs in SME streaming mode and a signal handled by Next's native module during that window runs NEON code (ESR `0x76000001`, SME access trap). The crash report is in `~/Library/Logs/DiagnosticReports/node-*.ips`; the Next log shows nothing. Generation now runs in the worker process, which has no such handler. A worker crash shows "The model runtime stopped unexpectedly" and the next run starts a new worker.
 
 ### Model output is invalid JSON
 

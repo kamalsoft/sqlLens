@@ -120,7 +120,8 @@ export async function POST(request: Request) {
       prompt = buildPrompt(loadedPrompt.content, sql);
     }
 
-    const run = await runModel(model, prompt, "Return the JSON analysis now.", {
+    const message = "Return the JSON analysis now.";
+    const run = await runModel(model, prompt, message, {
       maxNewTokens: config.maxNewTokens,
       temperature: config.temperature,
       timeoutMs: config.inferenceTimeoutMs,
@@ -256,7 +257,11 @@ export async function POST(request: Request) {
     const saved = insertAudit({
       sessionId: auth.session.sessionId,
       type: "REVIEW",
-      request: { sql, modelId: model.id, schemaVersion, executionAuditId: executionAuditId ?? null },
+      request: {
+        sql, modelId: model.id, schemaVersion, executionAuditId: executionAuditId ?? null,
+        // AD-1: what the model was given, for the audit record page.
+        prompt: { template: path.basename(promptPath), text: prompt, message },
+      },
       response: result,
       schemaVersion: resultVersion,
       modelId: model.id,

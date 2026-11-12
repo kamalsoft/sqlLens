@@ -259,6 +259,57 @@ describe("ExecutePage null handling and validation", () => {
     expect(screen.getByPlaceholderText(/Paste your Stored Procedure/)).toHaveValue("select * from dbo.Customers");
   });
 
+  it("reopens a saved run from Audit read-only, with its result and its saved refactor", async () => {
+    const single = { mode: "single", simulated: true, warnings: [], execution: { ...exec, recordNumber: 57 }, analysis: analysis() };
+    const records: Record<string, unknown> = {
+      "/api/audit/run57": {
+        id: "run57", type: "EXECUTE", recordNumber: 57, createdAt: "2026-11-12T10:00:00Z", modelId: null, engine: "simulation",
+        request: { mode: "single", engine: "simulation", original: { kind: "batch", sql: "select 1" } },
+        response: single, related: { source: null, refactors: [{ id: "rf1", recordNumber: 58 }] },
+      },
+      "/api/audit/rf1": {
+        id: "rf1", type: "REFACTOR", modelId: "Qwen2.5-1.5B-Instruct",
+        response: { status: "provided", refactoredSql: "SELECT 1;", formatted: true, checks: [], summary: "Saved summary", changes: [],
+          indexRecommendations: [], viewRecommendations: [], otherRecommendations: [], limitations: [] },
+      },
+    };
+    const fetchMock = vi.fn(async (url: string) => records[url] ? json(records[url]) : json({}));
+    vi.stubGlobal("fetch", fetchMock);
+    window.history.replaceState(null, "", "/execute?record=run57");
+    const user = userEvent.setup();
+    view();
+    expect(await screen.findByText("Saved run #57")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to the audit record" })).toHaveAttribute("href", "/audit/run57");
+    expect(screen.queryByRole("button", { name: /Execute & Audit/ })).toBeNull();
+    await user.click(await screen.findByRole("tab", { name: "Refactor" }));
+    expect(await screen.findByText("Saved summary")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Generate refactor" })).toBeNull();
+    expect(screen.getByRole("link", { name: "#58" })).toHaveAttribute("href", "/audit/rf1");
+    expect(fetchMock.mock.calls.some(([u]) => u === "/api/refactor" || u === "/api/execute")).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: "Start a new run" }));
+    expect(window.location.search).toBe("");
+    expect(screen.queryByText("Saved run #57")).toBeNull();
+    expect(screen.getByRole("heading", { name: "What to run" })).toBeInTheDocument();
+  });
+
+  it("does not render a saved run whose stored result is malformed or not a run", async () => {
+    const records: Record<string, unknown> = {
+      "/api/audit/bad": { id: "bad", type: "EXECUTE", recordNumber: 9, createdAt: "n", request: {}, response: { mode: "single" } },
+      "/api/audit/rv": { id: "rv", type: "REVIEW", recordNumber: 10, createdAt: "n", request: {}, response: {} },
+    };
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => records[url] ? json(records[url]) : json({})));
+    window.history.replaceState(null, "", "/execute?record=bad");
+    view();
+    expect(await screen.findByText("That saved run has no result that can be shown.")).toBeInTheDocument();
+    expect(screen.queryByText("Saved run #9")).toBeNull();
+    cleanup();
+    window.history.replaceState(null, "", "/execute?record=rv");
+    view();
+    expect(await screen.findByText("That audit record is not a run of Execute & Audit SP.")).toBeInTheDocument();
+    window.history.replaceState(null, "", "/execute");
+  });
+
   it("copies the raw output to the clipboard from the raw-output panel", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });

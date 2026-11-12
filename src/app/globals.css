@@ -1829,3 +1829,33 @@ body {
 .what-database {
   margin-bottom: 16px;
 }
+
+/* Audit record page: label / value rows and link lists. */
+.record-facts {
+  display: grid;
+  grid-template-columns: minmax(140px, max-content) 1fr;
+  gap: 6px 16px;
+  margin: 0 0 12px;
+}
+
+.record-facts dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.record-facts dd {
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.record-links {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.8;
+}
+
+.record-block {
+  display: grid;
+  gap: 12px;
+}

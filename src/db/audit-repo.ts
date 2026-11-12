@@ -158,6 +158,34 @@ export function getAudit(id: string, sessionId: string): AuditRecord | null {
   };
 }
 
+/**
+ * AD-2: records linked to this one: the run a refactor came from, and the refactors made from a run.
+ * shortcut: the refactors lookup scans the session's REFACTOR rows with json_extract (no index); fine for a local
+ * tool, add a generated column with an index if a session ever holds tens of thousands of records.
+ */
+export function relatedAudits(record: AuditRecord, sessionId: string): {
+  source: { id: string; recordNumber: number | null } | null;
+  refactors: { id: string; recordNumber: number | null }[];
+} {
+  const sourceId = (record.request as { sourceAuditId?: unknown } | null)?.sourceAuditId;
+  const sourceRow = typeof sourceId === "string"
+    ? (db.prepare("SELECT id, record_number FROM audit_requests WHERE id = ? AND session_id = ?").get(sourceId, sessionId) as
+        { id: string; record_number: number | null } | undefined)
+    : undefined;
+  const refactors = db
+    .prepare(
+      `SELECT id, record_number FROM audit_requests
+       WHERE session_id = ? AND type = 'REFACTOR' AND json_valid(request_payload)
+         AND json_extract(request_payload, '$.sourceAuditId') = ?
+       ORDER BY created_at, rowid`
+    )
+    .all(sessionId, record.id) as { id: string; record_number: number | null }[];
+  return {
+    source: sourceRow ? { id: sourceRow.id, recordNumber: sourceRow.record_number } : null,
+    refactors: refactors.map((r) => ({ id: r.id, recordNumber: r.record_number })),
+  };
+}
+
 export function listAudits(sessionId: string, limit = 100): AuditSummary[] {
   // UX-4: the procedure, grade and verdict are read inside SQLite, so the large plan payloads never leave the database.
   // A stored record that is not valid JSON gives NULL for these fields instead of failing the whole list.

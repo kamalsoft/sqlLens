@@ -1,4 +1,6 @@
 import "server-only";
+import { fork, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { readAppConfig } from "@/lib/app-config";
@@ -11,6 +13,8 @@ export type GenerateOptions = {
   timeoutMs: number;
   /** Overrides config.contextWindow (tests). */
   contextWindow?: number;
+  /** After a timeout, how long the worker gets to stop before it is killed (tests). */
+  killGraceMs?: number;
   /** Aborted when the client goes away: generation stops and frees the slot. */
   signal?: AbortSignal;
 };
@@ -59,6 +63,13 @@ export class InferenceBusyError extends Error {
   }
 }
 
+export class InferenceCrashedError extends Error {
+  constructor(reason: string) {
+    super(`The model runtime stopped unexpectedly (${reason}). The server is still running; try again.`);
+    this.name = "InferenceCrashedError";
+  }
+}
+
 export class PromptTooLargeError extends Error {
   constructor(
     public readonly promptTokens: number,
@@ -80,6 +91,7 @@ const DTYPE_FILES: Array<[string, Dtype]> = [
 ];
 
 const MIN_NEW_TOKENS = 64;
+const KILL_GRACE_MS = 10_000;
 
 const pipelines = new Map<string, Promise<TextGenerator>>();
 const status = new Map<
@@ -184,6 +196,99 @@ function getPipeline(modelDir: string, dtype: Dtype): Promise<TextGenerator> {
   return loaded;
 }
 
+// Real generation runs in scripts/inference-worker.mjs, a plain Node child process: onnxruntime's SME2
+// kernels crash the Next server itself (SIGILL) on Apple M5. See the worker for the details.
+type WorkerReply =
+  | { id: number; ok: true; text: string; hitTokenLimit: boolean }
+  | { id: number; ok: false; error: { name: string; message: string; promptTokens?: number; limit?: number } };
+
+let worker: ChildProcess | null = null;
+let pending: { id: number; child: ChildProcess; resolve: (r: WorkerReply) => void; reject: (e: Error) => void } | null = null;
+let nextId = 1;
+let exitHookSet = false;
+
+function getWorker(): ChildProcess {
+  if (worker) return worker;
+  // The worker ships with the app: a build that leaves out scripts/ cannot run models.
+  const script = path.join(process.cwd(), "scripts", "inference-worker.mjs");
+  if (!existsSync(script)) throw new Error("Model worker scripts/inference-worker.mjs not found; scripts/ must ship with the app.");
+  // Only what the runtime needs: no tokens, credentials or connection strings reach the worker.
+  const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, HOME: process.env.HOME, NODE_ENV: process.env.NODE_ENV };
+  if (process.env.SystemRoot) env.SystemRoot = process.env.SystemRoot; // Windows needs it to start node
+  if (process.env.NODE_ENV === "test" && process.env.SQLLENS_TRANSFORMERS_MODULE) {
+    env.SQLLENS_TRANSFORMERS_MODULE = process.env.SQLLENS_TRANSFORMERS_MODULE;
+  }
+  const child = fork(script, [], {
+    execArgv: [],
+    env,
+    stdio: ["ignore", "ignore", "inherit", "ipc"],
+  });
+  child.on("message", (msg: WorkerReply) => {
+    if (pending?.id === msg.id) {
+      const done = pending;
+      pending = null;
+      done.resolve(msg);
+    }
+  });
+  child.on("exit", (code, signal) => {
+    if (worker === child) worker = null;
+    // Loaded models went with the process.
+    for (const dir of status.keys()) setStatus(dir, { loaded: false, loading: false });
+    if (pending) {
+      const done = pending;
+      pending = null;
+      done.reject(new InferenceCrashedError(signal ?? `exit code ${code}`));
+    }
+  });
+  child.on("error", (error) => {
+    if (pending?.child === child) {
+      const done = pending;
+      pending = null;
+      done.reject(error);
+    }
+  });
+  worker = child;
+  // A long native call can delay the worker's own disconnect exit; stop it with the server.
+  if (!exitHookSet) {
+    exitHookSet = true;
+    process.once("exit", () => worker?.kill("SIGKILL"));
+  }
+  return child;
+}
+
+async function runInWorker(
+  modelDir: string,
+  messages: ChatMessage[],
+  opts: GenerateOptions,
+  stopper: { interrupt?: () => void },
+): Promise<GenerateResult> {
+  const dtype = await detectDtype(modelDir);
+  const config = await readAppConfig();
+  const maxPositions = await readMaxPositions(modelDir);
+  const limit = Math.min(opts.contextWindow ?? config.contextWindow, maxPositions ?? Number.POSITIVE_INFINITY);
+  const child = getWorker();
+  const id = nextId++;
+  if (!status.get(modelDir)?.loaded) setStatus(modelDir, { loading: true });
+  const reply = await new Promise<WorkerReply>((resolve, reject) => {
+    pending = { id, child, resolve, reject };
+    child.send({
+      id, type: "generate", modelDir, dtype, messages, limit,
+      maxNewTokens: opts.maxNewTokens, minNewTokens: MIN_NEW_TOKENS, temperature: opts.temperature,
+    });
+    stopper.interrupt = () => { if (child.connected) child.send({ type: "interrupt" }); };
+    if (opts.signal?.aborted) stopper.interrupt();
+  });
+  if (reply.ok) {
+    setStatus(modelDir, { loaded: true, loading: false, lastError: undefined });
+    return { text: reply.text, hitTokenLimit: reply.hitTokenLimit };
+  }
+  setStatus(modelDir, { loading: false });
+  if (reply.error.name === "PromptTooLargeError") {
+    throw new PromptTooLargeError(reply.error.promptTokens ?? 0, reply.error.limit ?? 0);
+  }
+  throw new Error(reply.error.message);
+}
+
 function fakeReview(messages: ChatMessage[]): string {
   const text = messages.map((m) => m.content).join("\n");
   if (text.includes("findingsTable")) {
@@ -222,6 +327,7 @@ function fakeReview(messages: ChatMessage[]): string {
   });
 }
 
+// Keep in step with generate() in scripts/inference-worker.mjs (prompt template, token budget, hitTokenLimit).
 async function runGeneration(
   modelDir: string,
   messages: ChatMessage[],
@@ -308,12 +414,19 @@ export async function generateTextDetailed(
   const stopper: { interrupt?: () => void } = {};
   const onAbort = () => stopper.interrupt?.();
   opts.signal?.addEventListener("abort", onAbort, { once: true });
-  const work = runGeneration(modelDir, messages, opts, stopper);
+  // The test factory runs in-process; real models run in the worker.
+  const work = factoryOverride
+    ? runGeneration(modelDir, messages, opts, stopper)
+    : runInWorker(modelDir, messages, opts, stopper);
+  // A worker that does not stop after a timeout is killed; its exit frees the slot.
+  let killTimer: ReturnType<typeof setTimeout> | undefined;
   work.then(
     () => {
+      clearTimeout(killTimer);
       busy = false;
     },
     (error: unknown) => {
+      clearTimeout(killTimer);
       busy = false;
       if (!(error instanceof PromptTooLargeError)) {
         setStatus(modelDir, {
@@ -327,6 +440,10 @@ export async function generateTextDetailed(
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       stopper.interrupt?.();
+      if (!factoryOverride) {
+        const hung = worker;
+        killTimer = setTimeout(() => hung?.kill("SIGKILL"), opts.killGraceMs ?? KILL_GRACE_MS);
+      }
       setStatus(modelDir, { lastError: `Inference timed out after ${opts.timeoutMs} ms` });
       reject(new InferenceTimeoutError(opts.timeoutMs));
     }, opts.timeoutMs);

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import {
   Box, Container, Heading, Text, Button, Flex,
   Spinner, Badge, Grid, Separator, Tabs,
@@ -11,6 +12,7 @@ import type { ExecutionResult } from '@/lib/sp-executor';
 import { useApi } from '@/components/api-client';
 import { gradeToken, VERDICT_TONE, verdictTone } from '@/lib/status-tone';
 import { RefactorPanel, type RefactorSource } from '@/components/execute/refactor-panel';
+import type { RefactorResponse } from '@/components/refactor/RefactorResultView';
 import { useLeaveGuard } from '@/components/leave-guard';
 import { readParamSets, setNamesFor, withSet, withoutSet, writeParamSets, type ParamSetStore, type SavedParam } from '@/lib/param-sets';
 import {
@@ -543,6 +545,9 @@ export default function ExecutePage() {
   const [editingConn, setEditingConn] = useState(true);
   // After a successful run, steps 1-3 fold to one bar so the results start near the top.
   const [setupFolded, setSetupFolded] = useState(false);
+  // A run reopened from Audit (/execute?record=<id>): its saved result and refactor, read-only.
+  const [savedRun, setSavedRun] = useState<{ id: string; recordNumber: number | null; createdAt: string; summary: string } | null>(null);
+  const [savedRefactor, setSavedRefactor] = useState<{ response: RefactorResponse; id: string; recordNumber: number | null } | null>(null);
   const [host, setHost] = useState('localhost');
   const [port, setPort] = useState('1433');
   const [database, setDatabase] = useState('');
@@ -553,6 +558,8 @@ export default function ExecutePage() {
 
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ExecuteResult | null>(null);
+  // AD-2: the audit record of the last run, so a refactor made from it is linked to it.
+  const [resultAuditId, setResultAuditId] = useState<string | null>(null);
   const [usedParams, setUsedParams] = useState<ExecParam[]>([]);
   const [submittedSql, setSubmittedSql] = useState<{ original: string; optimized: string } | null>(null);
   const [ranSource, setRanSource] = useState<{ source: RefactorSource; engine: typeof engine; connection: Record<string, unknown> } | null>(null);
@@ -716,12 +723,80 @@ export default function ExecutePage() {
     setLoadingDbs(false);
   }
 
+  // Reopen a saved run from Audit: /execute?record=<id> shows its result and its latest refactor as they were.
+  useEffect(() => {
+    const recordId = new URLSearchParams(window.location.search).get('record');
+    if (!recordId) return;
+    let cancelled = false;
+    type Saved = {
+      id: string; type: string; createdAt: string; recordNumber: number | null; modelId: string | null; engine: string | null;
+      request: { mode?: string; engine?: string; database?: string; original?: { kind: string; name?: string; sql?: string; params?: unknown[] } };
+      response: unknown; related?: { refactors: { id: string; recordNumber: number | null }[] };
+    };
+    void (async () => {
+      const res = await api<Saved>(`/api/audit/${encodeURIComponent(recordId)}`, { cache: 'no-store' }, 'Unable to load the saved run');
+      if (cancelled) return;
+      if (!res.ok || !res.data) {
+        if (res.status !== 401) setError(res.status === 404 ? 'That saved run was not found.' : (res.error ?? 'Unable to load the saved run'));
+        return;
+      }
+      const run = res.data;
+      if (run.type !== 'EXECUTE' && run.type !== 'EXECUTE_COMPARE') {
+        setError('That audit record is not a run of Execute & Audit SP.');
+        return;
+      }
+      // Stored JSON is untrusted: the result tabs need an execution and an analysis to render.
+      type Shape = { execution?: unknown; analysis?: unknown };
+      const stored = run.response as (Shape & { mode?: string; original?: Shape; optimized?: Shape }) | null;
+      const hasRun = (side?: Shape) => Boolean(side?.execution && side.analysis);
+      const usable = stored && typeof stored === 'object' &&
+        (stored.mode === 'compare' ? hasRun(stored.original) && hasRun(stored.optimized) : hasRun(stored));
+      if (!usable) {
+        setError('That saved run has no result that can be shown.');
+        return;
+      }
+      const target = run.request.original;
+      const engineName = run.request.engine === 'mssql' ? `SQL Server · ${run.request.database ?? ''}` : 'Simulation';
+      const what = target?.kind === 'procedure' ? `${target.name} (procedure)` : 'SQL batch';
+      setResult(run.response as ExecuteResult);
+      setResultAuditId(run.id);
+      setRanSource({
+        source: target?.kind === 'procedure' ? { kind: 'procedure', name: target.name ?? '' } : { kind: 'batch', sql: target?.sql ?? '' },
+        engine: run.request.engine === 'mssql' ? 'mssql' : 'simulation',
+        connection: {},
+      });
+      setSavedRun({ id: run.id, recordNumber: run.recordNumber, createdAt: run.createdAt, summary: `${engineName} · ${what}` });
+      const last = run.related?.refactors.at(-1);
+      if (!last) return;
+      const rf = await api<{ id: string; modelId: string | null; response: unknown }>(`/api/audit/${encodeURIComponent(last.id)}`, { cache: 'no-store' }, 'Unable to load the saved refactor');
+      if (cancelled) return;
+      if (!rf.ok || !rf.data) {
+        if (rf.status !== 401) setError(`The refactor saved from this run (#${last.recordNumber ?? '-'}) could not be loaded.`);
+      } else {
+        setSavedRefactor({ response: { id: rf.data.id, model: rf.data.modelId ?? undefined, result: rf.data.response as RefactorResponse['result'] }, id: last.id, recordNumber: last.recordNumber });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [api]);
+
+  /** Leaves a reopened saved run for a fresh form. */
+  function startNewRun() {
+    setSavedRun(null);
+    setSavedRefactor(null);
+    setResult(null);
+    setResultAuditId(null);
+    setError('');
+    setSetupFolded(false);
+    window.history.replaceState(null, '', '/execute');
+  }
+
   /** RF-6: a refactored batch goes into the Optimized editor; nothing runs until Execute is pressed. */
   function useAsOptimized(sql: string) {
     setMode('compare');
     setKind('batch');
     setOptimized({ ...emptyDraft(), sql });
     setResult(null);
+    setResultAuditId(null);
     setSetupFolded(false);
   }
 
@@ -748,6 +823,7 @@ export default function ExecutePage() {
     setLoading(true);
     setError(null);
     setResult(null);
+    setResultAuditId(null);
     setUsedParams(orig.target.kind === 'procedure' ? orig.target.params : []);
     // RF-2: the refactor panel works on what was run, on the server it ran on, even if the form changes afterwards.
     setRanSource({
@@ -760,7 +836,7 @@ export default function ExecutePage() {
       : `${d.name}\n${d.params.map((p) => `  ${p.name} ${p.type} = ${p.isNull ? 'NULL' : p.value}`).join('\n')}`;
     setSubmittedSql({ original: textOf(original), optimized: textOf(optimized) });
 
-    const res = await api<{ result: ExecuteResult }>(
+    const res = await api<{ result: ExecuteResult; id?: string }>(
       '/api/execute',
       {
         method: 'POST',
@@ -779,6 +855,7 @@ export default function ExecutePage() {
     abortRef.current = null;
     if (res.ok && res.data) {
       setResult(res.data.result);
+      setResultAuditId(res.data.id ?? null);
       setSetupFolded(true);
     } else if (controller.signal.aborted) {
       setSetupFolded(false);
@@ -803,7 +880,17 @@ export default function ExecutePage() {
           </div>
         </header>
 
-        {setupFolded ? (
+        {savedRun ? (
+          <Box as="section" aria-label="Saved run" className="setup-bar">
+            <Text color="fg.default">
+              <strong>Saved run #{savedRun.recordNumber ?? '-'}</strong> · {new Date(savedRun.createdAt).toLocaleString()} · {savedRun.summary}
+            </Text>
+            <Flex gap={2} wrap="wrap">
+              <Link href={`/audit/${savedRun.id}`} className="button button-secondary">Back to the audit record</Link>
+              <Button colorPalette="brand" onClick={startNewRun}>Start a new run</Button>
+            </Flex>
+          </Box>
+        ) : setupFolded ? (
           <Box as="section" aria-label="Run setup" className="setup-bar">
             <Text color="fg.default">
               <strong>{engine === 'mssql' ? `SQL Server · ${database}` : 'Simulation'}</strong>
@@ -1122,9 +1209,10 @@ export default function ExecutePage() {
                       {result.execution.success && ranSource && (
                         <Tabs.Content value="refactor">
                           <RefactorPanel
-                            key={result.execution.recordNumber}
+                            key={`${result.execution.recordNumber}-${savedRefactor?.id ?? ""}`}
                             source={ranSource.source} engine={ranSource.engine} connection={ranSource.connection}
-                            analysis={result.analysis} onUseAsOptimized={useAsOptimized}
+                            analysis={result.analysis} onUseAsOptimized={savedRun ? undefined : useAsOptimized} sourceAuditId={resultAuditId}
+                            saved={savedRefactor} readOnly={savedRun !== null}
                           />
                         </Tabs.Content>
                       )}

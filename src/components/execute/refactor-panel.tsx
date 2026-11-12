@@ -28,7 +28,7 @@ type Engine = 'simulation' | 'mssql' | 'postgres';
  * It sits inline in the Refactor tab, styled like the other result tabs. The model is chosen in Settings
  * (Refactor model); left on automatic, the server picks an installed, compatible model with a chat template, instruction-tuned names (Instruct, Chat, -it) first, then the largest parameter estimate.
  */
-export function RefactorPanel({ source, engine, connection, analysis, onUseAsOptimized }: {
+export function RefactorPanel({ source, engine, connection, analysis, onUseAsOptimized, sourceAuditId, saved, readOnly }: {
   source: RefactorSource;
   engine: Engine;
   /** The connection the run used (a snapshot, so later edits to the form do not change the target). */
@@ -36,13 +36,19 @@ export function RefactorPanel({ source, engine, connection, analysis, onUseAsOpt
   analysis: AuditAnalysis;
   /** RF-6: offered for batches only; a procedure's refactor is a CREATE script, not something to time. */
   onUseAsOptimized?: (sql: string) => void;
+  /** AD-2: the run's audit record, so the refactor's record links back to it. */
+  sourceAuditId?: string | null;
+  /** A refactor saved for this run (reopened from Audit): shown as it was. */
+  saved?: { response: RefactorResponse; id: string; recordNumber: number | null } | null;
+  /** A saved run reopened from Audit: there is no login, so nothing can be generated. */
+  readOnly?: boolean;
 }) {
   const api = useApi();
   const [step, setStep] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [rawOutput, setRawOutput] = useState('');
   const [validation, setValidation] = useState('');
-  const [response, setResponse] = useState<RefactorResponse | null>(null);
+  const [response, setResponse] = useState<RefactorResponse | null>(saved?.response ?? null);
   const instructions = evidenceInstructions(analysis);
   // A model run can take minutes; stop it when the panel goes away (a new run, or Use as Optimized).
   const abortRef = useRef<AbortController | null>(null);
@@ -96,7 +102,7 @@ export function RefactorPanel({ source, engine, connection, analysis, onUseAsOpt
     setNow(Date.now());
     const res = await api<RefactorResponse>(
       '/api/refactor',
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql, instructions }), signal: abortRef.current.signal },
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql, instructions, ...(sourceAuditId ? { sourceAuditId } : {}) }), signal: abortRef.current.signal },
       'Refactor failed',
     );
     if (res.ok && res.data?.result) {
@@ -148,9 +154,11 @@ export function RefactorPanel({ source, engine, connection, analysis, onUseAsOpt
               <Link href="/settings" className="text-link">Change in Settings</Link>
             </Text>
           </Box>
-          <Button colorPalette="brand" onClick={() => void generate()} loading={running} loadingText="Generating..." disabled={running}>
-            Generate refactor
-          </Button>
+          {!readOnly && (
+            <Button colorPalette="brand" onClick={() => void generate()} loading={running} loadingText="Generating..." disabled={running}>
+              Generate refactor
+            </Button>
+          )}
         </Flex>
         <details className="connect-more grade-help">
           <summary>Evidence sent to the model</summary>
@@ -172,7 +180,16 @@ export function RefactorPanel({ source, engine, connection, analysis, onUseAsOpt
         {error && <div role="alert" className="alert">{error}</div>}
         {response?.result && <RefactorResultView response={response} actions={actions} />}
         {!response && rawOutput && <RefactorRawOutput rawOutput={rawOutput} validation={validation} />}
-        {!response && !rawOutput && !error && !step && (
+        {saved && (
+          <Text fontSize="xs" color="fg.muted">
+            Saved refactor from audit record{' '}
+            <Link href={`/audit/${saved.id}`} className="text-link">#{saved.recordNumber ?? '-'}</Link>.
+          </Text>
+        )}
+        {readOnly && !saved && (
+          <Text fontSize="sm" color="fg.muted">No refactor was saved for this run. Start a new run to refactor it.</Text>
+        )}
+        {!readOnly && !response && !rawOutput && !error && !step && (
           <Text fontSize="sm" color="fg.muted">
             Press Generate refactor for a refactored version, index and view scripts and other recommendations, guided by this run&apos;s evidence.
           </Text>

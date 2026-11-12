@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getInstalledModels } from "@/lib/installed-models";
 import {
   InferenceBusyError,
+  InferenceCrashedError,
   InferenceTimeoutError,
   PromptTooLargeError,
   generateTextDetailed,
@@ -85,6 +86,9 @@ export async function runModel(
           { status: 429 },
         ),
       };
+    }
+    if (error instanceof InferenceCrashedError) {
+      return { ok: false, response: NextResponse.json({ error: error.message, model: model.id }, { status: 502 }) };
     }
     if (error instanceof PromptTooLargeError) {
       return {
