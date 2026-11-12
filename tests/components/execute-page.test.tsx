@@ -22,7 +22,7 @@ describe("ExecutePage", () => {
     const user = userEvent.setup();
     view();
     fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
-    await user.click(screen.getByRole("button", { name: "Procedure" }));
+    await user.click(screen.getByRole("radio", { name: "Stored procedure" }));
     await user.type(screen.getByLabelText("Procedure name"), "dbo.Get");
     await user.click(screen.getByRole("button", { name: "Add parameter" }));
     await user.type(screen.getByLabelText("Parameter 1 name"), "@id");
@@ -45,12 +45,15 @@ describe("ExecutePage", () => {
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     view();
-    await user.click(screen.getByRole("button", { name: "Procedure" }));
+    fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
+    await user.click(screen.getByRole("radio", { name: "Stored procedure" }));
     await user.type(screen.getByLabelText("Procedure name"), "p");
     await user.click(screen.getByRole("button", { name: "Add parameter" }));
     await user.type(screen.getByLabelText("Parameter 1 name"), "@id");
     fireEvent.change(screen.getByLabelText("Parameter 1 type"), { target: { value: "int" } });
     await user.type(screen.getByLabelText("Parameter 1 value"), "abc");
+    // The error is linked to the field, so a screen reader reads it there.
+    expect(await screen.findByLabelText("Parameter 1 value")).toHaveAccessibleDescription(/Parameter 1:/);
     // UX-1: the run is blocked while the input is invalid, and the reason is shown next to the button.
     expect(screen.getByRole("button", { name: /Execute & Audit/ })).toBeDisabled();
     expect(screen.getByText(/Fix before running: Parameter @id must be a number/)).toBeInTheDocument();
@@ -80,6 +83,7 @@ describe("ExecutePage", () => {
     }));
     const user = userEvent.setup();
     view();
+    fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
     await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
     const cancel = await screen.findByRole("button", { name: "Cancel" });
@@ -109,7 +113,8 @@ describe("ExecutePage null handling and validation", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ result })));
     const user = userEvent.setup();
     view();
-    await user.click(screen.getByRole("button", { name: "Compare Original vs Optimized" }));
+    fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
+    await user.click(screen.getByRole("checkbox", { name: "Compare with an optimized version" }));
     await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
     await user.type(screen.getByPlaceholderText(/Paste your Optimized SP/), "select 2");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
@@ -132,12 +137,16 @@ describe("ExecutePage null handling and validation", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ result: single })));
     const user = userEvent.setup();
     view();
+    fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
     await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
     const verdict = await screen.findByLabelText("Prod-readiness verdict");
     expect(verdict).toHaveTextContent("INSUFFICIENT EVIDENCE");
     expect(verdict).toHaveTextContent("Customers has 0 rows");
-    expect(screen.getByText("Not graded")).toBeInTheDocument();
+    // The grade appears in the one-line result bar and in the Summary tab.
+    expect(screen.getAllByText("Not graded").length).toBeGreaterThan(0);
+    // EX-5: row counts, parameters, outputs and plan operators are in the Details tab.
+    await user.click(screen.getByRole("tab", { name: "Details" }));
     expect(screen.getByText("Row counts (tables read)")).toBeInTheDocument();
     expect(screen.getByText("OUTPUT parameters")).toBeInTheDocument();
     expect(screen.getByText(/ExecutionLogID/)).toBeInTheDocument();
@@ -156,6 +165,7 @@ describe("ExecutePage null handling and validation", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ result: single })));
     const user = userEvent.setup();
     view();
+    fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
     await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
     expect(await screen.findByText("4 measured runs (warm-up of 1 dropped)")).toBeInTheDocument();
@@ -176,15 +186,20 @@ describe("ExecutePage null handling and validation", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ result: single })));
     const user = userEvent.setup();
     view();
+    fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
     await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
-    const panel = await screen.findByLabelText("Recommendations");
+    // The full list is in the Recommendations tab; Summary shows the top three.
+    await user.click(await screen.findByRole("tab", { name: "Recommendations" }));
+    const panel = await screen.findByRole("tabpanel", { name: "Recommendations" });
     expect(panel).toHaveTextContent("High priority");
     expect(panel).toHaveTextContent("Medium priority");
     expect(panel).toHaveTextContent("Other observations");
     expect(panel).toHaveTextContent("Standard checks");
     expect(panel).toHaveTextContent("Other observation here");
+    await user.click(screen.getByRole("tab", { name: "Details" }));
     expect(screen.getByLabelText("Grade legend")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Raw output" }));
     expect(screen.getByText(/parsed from this text/)).toBeInTheDocument();
   });
 
@@ -198,7 +213,8 @@ describe("ExecutePage null handling and validation", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ result })));
     const user = userEvent.setup();
     view();
-    await user.click(screen.getByRole("button", { name: "Compare Original vs Optimized" }));
+    fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
+    await user.click(screen.getByRole("checkbox", { name: "Compare with an optimized version" }));
     await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
     await user.type(screen.getByPlaceholderText(/Paste your Optimized SP/), "select 2");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
@@ -223,9 +239,11 @@ describe("ExecutePage null handling and validation", () => {
     }));
     const user = userEvent.setup();
     view();
+    fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
     expect(screen.queryByRole("button", { name: "Refactor Stored Procedure" })).toBeNull();
     await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select * from dbo.Customers");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
+    await user.click(await screen.findByRole("tab", { name: "Refactor" }));
     await user.click(await screen.findByRole("button", { name: "Refactor Stored Procedure" }));
     await screen.findByRole("option", { name: "Model One" });
     await user.click(screen.getByRole("button", { name: "Generate refactor" }));
@@ -245,9 +263,10 @@ describe("ExecutePage null handling and validation", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ result: single })));
     const user = userEvent.setup();
     view();
+    fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
     await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
-    await user.click(await screen.findByRole("button", { name: "Show" }));
+    await user.click(await screen.findByRole("tab", { name: "Raw output" }));
     await user.click(screen.getByRole("button", { name: "Copy raw output" }));
     expect(writeText).toHaveBeenCalledWith("Table 'SalesOrders'. Scan count 5, logical reads 6");
     expect(await screen.findByText("Copied")).toBeInTheDocument();
@@ -321,5 +340,121 @@ describe("ExecutePage SQL Server connection (PG-1, P9-01, DB-1)", () => {
     await user.type(screen.getByLabelText(/^(Login|User name)$/), "x");
     expect(screen.queryByRole("combobox", { name: "Database" })).toBeNull();
     expect(screen.getByRole("textbox", { name: "Database" })).toBeInTheDocument();
+  });
+});
+
+describe("ExecutePage guided steps (EX-1 to EX-5)", () => {
+  it("lays the page out as numbered steps and says why Execute is not ready", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const user = userEvent.setup();
+    view();
+    for (const name of ["Connect to Server", "What to run", "Run"]) {
+      expect(screen.getByRole("heading", { name })).toBeInTheDocument();
+    }
+    const run = screen.getByRole("button", { name: /Execute & Audit/ });
+    expect(run).toBeDisabled();
+    expect(run).toHaveAccessibleDescription("Connect and choose a database first.");
+
+    fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
+    expect(run).toHaveAccessibleDescription("Paste the SQL to run.");
+    await user.click(screen.getByRole("radio", { name: "Stored procedure" }));
+    expect(run).toHaveAccessibleDescription("Enter the stored procedure name.");
+    await user.type(screen.getByLabelText("Procedure name"), "dbo.Get");
+    expect(run).toBeEnabled();
+  });
+
+  it("folds the connection to one line once a database is chosen, and Change opens it again", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json({ databases: ["TestDB"] })));
+    const user = userEvent.setup();
+    view();
+    await user.type(screen.getByLabelText(/^(Login|User name)$/), "sa");
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    fireEvent.change(await screen.findByRole("combobox", { name: "Database" }), { target: { value: "TestDB" } });
+
+    expect(screen.getByText(/localhost · TestDB · SQL login sa/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Password")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Change" }));
+    expect(screen.getByLabelText("Password")).toBeInTheDocument();
+    expect((screen.getByRole("combobox", { name: "Database" }) as HTMLSelectElement).value).toBe("TestDB");
+  });
+
+  it("shows a one-line result and the results in tabs", async () => {
+    const analysis = {
+      performanceGrade: "B", gradeRationale: "r", summary: "s",
+      prodVerdict: { verdict: "READY", reason: "within targets", driver: null },
+      ioAnalysis: { totalLogicalReads: 120, totalPhysicalReads: 0, totalScanCount: 1, hotTables: [] },
+      timeAnalysis: { totalMs: 15, parseTimeMs: 1, executeTimeMs: 14, classification: "c", recommendation: "r" },
+      prosAndCons: { pros: [], cons: [] }, recommendations: [],
+    };
+    const exec = { recordNumber: 7, connectionEngine: "simulation", executedAt: "n", success: true, spLabel: "SQL Batch", stats: { rawOutput: "Table 'T'. Scan count 1", simulated: true } };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ result: { mode: "single", simulated: true, warnings: [], execution: exec, analysis } })));
+    const user = userEvent.setup();
+    view();
+    fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
+    await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
+    await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
+
+    expect(await screen.findByRole("heading", { name: "Results" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Result at a glance")).toHaveTextContent(/READY.*Grade B.*15 ms.*120 logical reads/);
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Summary", "Recommendations", "Details", "Raw output", "Refactor"]);
+    await user.click(screen.getByRole("tab", { name: "Raw output" }));
+    expect(screen.getByText("Saved to the audit log as record #7.")).toBeInTheDocument();
+  });
+
+  it("labels each raw output in compare mode, and announces the finished run", async () => {
+    const analysis = {
+      performanceGrade: "A", gradeRationale: "r", summary: "s",
+      ioAnalysis: { totalLogicalReads: 1, totalPhysicalReads: 0, totalScanCount: 1, hotTables: [] },
+      timeAnalysis: { totalMs: 5, parseTimeMs: null, executeTimeMs: null, classification: "c", recommendation: "r" },
+      prosAndCons: { pros: [], cons: [] }, recommendations: [],
+    };
+    const exec = { recordNumber: 9, connectionEngine: "simulation", executedAt: "n", success: true, spLabel: "SP", stats: { rawOutput: "raw", simulated: true } };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ result: {
+      mode: "compare", simulated: true, warnings: [],
+      original: { execution: exec, analysis }, optimized: { execution: exec, analysis }, comparison: { ...analysis, improvementPercent: 5 },
+    } })));
+    const user = userEvent.setup();
+    view();
+    fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
+    await user.click(screen.getByRole("checkbox", { name: "Compare with an optimized version" }));
+    await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
+    await user.type(screen.getByPlaceholderText(/Paste your Optimized SP/), "select 2");
+    await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
+    expect(await screen.findByText("Run finished. Comparison ready.")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Raw output" }));
+    expect(screen.getByText("Original: raw execution output")).toBeInTheDocument();
+    expect(screen.getByText("Optimized: raw execution output")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy optimized raw output" })).toBeInTheDocument();
+  });
+
+  it("folds the setup to one bar after a run, with Edit setup and Run again", async () => {
+    const analysis = {
+      performanceGrade: "C", gradeRationale: "r", summary: "s",
+      planFindings: [{ kind: "cost-concentration", severity: "high", operator: "Scan", table: "Customers", message: "m", recommendation: "Add an index on Customers(RegionID)" }],
+      ioAnalysis: { totalLogicalReads: 9000, totalPhysicalReads: 0, totalScanCount: 1, hotTables: [] },
+      timeAnalysis: { totalMs: 50, parseTimeMs: 1, executeTimeMs: 49, classification: "c", recommendation: "r" },
+      prosAndCons: { pros: [], cons: [] }, recommendations: ["Rewrite the cursor as a set-based query"],
+    };
+    const exec = { recordNumber: 11, connectionEngine: "simulation", executedAt: "n", success: true, spLabel: "SQL Batch", stats: { rawOutput: "raw", simulated: true } };
+    // A fresh response per call: a body can be read only once.
+    const fetchMock = vi.fn(async () => json({ result: { mode: "single", simulated: true, warnings: [], execution: exec, analysis } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    view();
+    fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
+    await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
+    await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
+
+    const bar = await screen.findByRole("region", { name: "Run setup" });
+    expect(bar).toHaveTextContent("Simulation · SQL batch");
+    expect(screen.queryByRole("heading", { name: "What to run" })).toBeNull();
+    const top = screen.getByLabelText("Top recommendations");
+    expect(top).toHaveTextContent("Add an index on Customers(RegionID)");
+    expect(top).toHaveTextContent("Rewrite the cursor as a set-based query");
+
+    await user.click(screen.getByRole("button", { name: "Run again" }));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await user.click(await screen.findByRole("button", { name: "Edit setup" }));
+    expect(screen.getByRole("heading", { name: "What to run" })).toBeInTheDocument();
   });
 });

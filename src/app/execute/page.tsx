@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Box, Container, Heading, Text, Button, Flex,
-  Spinner, Badge, Grid, Separator,
+  Spinner, Badge, Grid, Separator, Tabs,
 } from '@chakra-ui/react';
 import { GRADE_RULES, STANDARD_RECOMMENDATIONS, type AuditAnalysis, type Grade, type PlanFinding, type ProdVerdict } from '@/lib/audit-analyzer';
 import type { ExecParam } from '@/components/execute/target-editor';
@@ -78,6 +78,27 @@ function VerdictKey() {
         <Box key={name} as="span" color={t.token} fontWeight="semibold"><span aria-hidden="true">{t.symbol} </span>{name}</Box>
       ))}
     </Box>
+  );
+}
+
+/** EX-5: the run's outcome in one line, above the result tabs. */
+function VerdictBar({ analysis }: { analysis: AuditAnalysis }) {
+  const v = analysis.prodVerdict;
+  const tone = v ? verdictTone(v.verdict) : null;
+  const ms = analysis.timeAnalysis.totalMs;
+  const reads = analysis.ioAnalysis.totalLogicalReads;
+  return (
+    <Flex aria-label="Result at a glance" wrap="wrap" align="center" gap={{ base: 2, md: 5 }} p={4} bg="bg.panel"
+      borderWidth="1px" borderColor="border.subtle" borderRadius="xl">
+      {v && tone && (
+        <Text fontWeight="bold" color={tone.token}><span aria-hidden="true">{tone.symbol} </span>{v.verdict}</Text>
+      )}
+      <Text color={gradeToken(analysis.performanceGrade)} fontWeight="semibold">
+        {analysis.performanceGrade ? `Grade ${analysis.performanceGrade}` : 'Not graded'}
+      </Text>
+      <Text color="fg.default">{ms === null ? 'Time not captured' : `${ms.toLocaleString()} ms`}</Text>
+      <Text color="fg.default">{reads === null ? 'Reads not captured' : `${reads.toLocaleString()} logical reads`}</Text>
+    </Flex>
   );
 }
 
@@ -225,23 +246,39 @@ function OptimizedPanel({ original, optimized, originalText, optimizedText }: {
   );
 }
 
-function AnalysisPanel({ analysis, title, params, outputs }: {
+/** `part`: the Summary tab shows the verdict and key numbers, the Details tab the evidence behind them. */
+function AnalysisPanel({ analysis, title, params, outputs, part = 'all' }: {
   analysis: AuditAnalysis; title: string; params?: ExecParam[]; outputs?: Record<string, unknown>;
+  part?: 'summary' | 'recommendations' | 'details' | 'all';
 }) {
+  const summary = part === 'summary' || part === 'all';
+  const recommendations = part === 'recommendations' || part === 'all';
+  const details = part === 'details' || part === 'all';
+  // The Summary tab shows only the first few; the Recommendations tab has them all.
+  const top = [...new Set([
+    ...(analysis.planFindings ?? []).map((f) => f.recommendation),
+    ...analysis.recommendations.filter((r) => !STANDARD_RECOMMENDATIONS.includes(r)),
+  ])].slice(0, 3);
   return (
     <Box borderWidth="1px" borderColor="border.subtle" borderRadius="xl" overflow="hidden">
       <Box bg="bg.raised" px={6} py={4} borderBottomWidth="1px" borderColor="border.subtle">
         <Flex align="center" gap={4}>
-          <GradeBadge grade={analysis.performanceGrade} />
+          {summary && <GradeBadge grade={analysis.performanceGrade} />}
           <Box>
             <Heading size="md" color="fg.default">{title}</Heading>
             <Text fontSize="sm" color="fg.muted">{analysis.gradeRationale}</Text>
           </Box>
         </Flex>
-        <Box mt={3}><GradeLegend current={analysis.performanceGrade} /></Box>
+        {summary && (
+          <details className="connect-more grade-help">
+            <summary>How is the grade worked out?</summary>
+            <GradeLegend current={analysis.performanceGrade} />
+          </details>
+        )}
       </Box>
 
       <Box px={6} py={6} display="flex" flexDirection="column" gap={6}>
+        {summary && (<>
         {/* Verdict first (P8-04) */}
         {analysis.prodVerdict && <><VerdictCard verdict={analysis.prodVerdict} /><VerdictKey /></>}
 
@@ -258,20 +295,6 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
           <StatCard label="Total Time" value={analysis.timeAnalysis.totalMs} unit="ms" color={analysis.timeAnalysis.totalMs === null ? 'fg.muted' : analysis.timeAnalysis.totalMs > 1000 ? 'status.bad' : 'status.ok'} />
         </Grid>
 
-        <Separator borderColor="border.subtle" />
-
-        {/* Row counts for the real tables the run read (D-039) */}
-        {analysis.ioAnalysis.rowCounts && (
-          <Box>
-            <Text fontSize="sm" fontWeight="semibold" color="fg.default" mb={3} textTransform="uppercase" letterSpacing="wider">Row counts (tables read)</Text>
-            <Grid templateColumns={{ base: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' }} gap={3}>
-              {Object.entries(analysis.ioAnalysis.rowCounts).map(([table, rows]) => (
-                <StatCard key={table} label={table} value={rows} color={rows === 0 ? 'status.bad' : 'accent.default'} />
-              ))}
-            </Grid>
-          </Box>
-        )}
-
         {/* Repeated runs (P8-03) */}
         {analysis.multiRun && (
           <Box p={4} bg="bg.canvas" borderRadius="lg" borderLeftWidth="3px" borderColor="accent.default" aria-label="Repeated runs summary">
@@ -283,6 +306,35 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
               spread {analysis.multiRun.spreadPct === null ? 'n/a' : `${Math.round(analysis.multiRun.spreadPct)}%`}.
               Logical reads median {analysis.multiRun.logicalReads?.median ?? 'n/a'}.
             </Text>
+            <Text color="fg.muted" fontSize="xs" mt={1}>
+              The first run warms up the server&apos;s cache and plan, so it is not counted. The median is the typical run; p95 is close to the slowest.
+            </Text>
+          </Box>
+        )}
+
+        {part === 'summary' && top.length > 0 && (
+          <Box aria-label="Top recommendations">
+            <Text fontSize="sm" fontWeight="semibold" color="fg.default" mb={2} textTransform="uppercase" letterSpacing="wider">Top recommendations</Text>
+            <Box as="ol" pl={5} display="flex" flexDirection="column" gap={1}>
+              {top.map((r) => <Box as="li" key={r} color="fg.default" fontSize="sm">{r}</Box>)}
+            </Box>
+            <Text fontSize="xs" color="fg.muted" mt={2}>The Recommendations tab lists them all, by priority.</Text>
+          </Box>
+        )}
+        </>)}
+
+        {recommendations && <RecommendationsPanel analysis={analysis} />}
+
+        {details && (<>
+        {/* Row counts for the real tables the run read (D-039) */}
+        {analysis.ioAnalysis.rowCounts && (
+          <Box>
+            <Text fontSize="sm" fontWeight="semibold" color="fg.default" mb={3} textTransform="uppercase" letterSpacing="wider">Row counts (tables read)</Text>
+            <Grid templateColumns={{ base: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' }} gap={3}>
+              {Object.entries(analysis.ioAnalysis.rowCounts).map(([table, rows]) => (
+                <StatCard key={table} label={table} value={rows} color={rows === 0 ? 'status.bad' : 'accent.default'} />
+              ))}
+            </Grid>
           </Box>
         )}
 
@@ -305,7 +357,8 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
         {/* OUTPUT parameter values returned by the run */}
         {outputs && Object.keys(outputs).length > 0 && (
           <Box>
-            <Text fontSize="sm" fontWeight="semibold" color="fg.default" mb={3} textTransform="uppercase" letterSpacing="wider">OUTPUT parameters</Text>
+            <Text fontSize="sm" fontWeight="semibold" color="fg.default" mb={1} textTransform="uppercase" letterSpacing="wider">OUTPUT parameters</Text>
+            <Text fontSize="xs" color="fg.muted" mb={3}>Values the procedure handed back through its OUTPUT parameters.</Text>
             <Box as="pre" fontSize="xs" color="accent.default" bg="bg.canvas" p={3} borderRadius="lg" overflowX="auto" fontFamily="mono">
               {JSON.stringify(outputs, null, 2)}
             </Box>
@@ -405,17 +458,14 @@ function AnalysisPanel({ analysis, title, params, outputs }: {
             ))}
           </Box>
         </Grid>
-
-        <Separator borderColor="border.subtle" />
-
-        <RecommendationsPanel analysis={analysis} />
+        </>)}
       </Box>
     </Box>
   );
 }
 
-function RawStatsPanel({ execution }: { execution: ExecutionResult }) {
-  const [show, setShow] = useState(false);
+function RawStatsPanel({ execution, defaultOpen = false, label }: { execution: ExecutionResult; defaultOpen?: boolean; label?: string }) {
+  const [show, setShow] = useState(defaultOpen);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const raw = execution.stats.rawOutput;
   const copyRaw = async () => {
@@ -431,11 +481,11 @@ function RawStatsPanel({ execution }: { execution: ExecutionResult }) {
     <Box bg="bg.panel" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" overflow="hidden">
       <Flex justify="space-between" align="center" px={5} py={3} borderBottomWidth="1px" borderColor="border.subtle">
         <Box>
-          <Text fontSize="sm" fontWeight="semibold" color="fg.default">📄 Raw Execution Output</Text>
+          <Text fontSize="sm" fontWeight="semibold" color="fg.default">{label ? `${label}: raw execution output` : 'Raw execution output'}</Text>
           <Text fontSize="xs" color="fg.muted">The server&apos;s messages for this run: the STATISTICS IO and TIME lines and the plan XML. Every number on this page is parsed from this text.</Text>
         </Box>
         <Flex gap={2} align="center">
-          <Button size="xs" variant="outline" colorPalette="brand" aria-label="Copy raw output" onClick={copyRaw} disabled={!raw}>
+          <Button size="xs" variant="outline" colorPalette="brand" aria-label={label ? `Copy ${label.toLowerCase()} raw output` : 'Copy raw output'} onClick={copyRaw} disabled={!raw}>
             {copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : 'Copy'}
           </Button>
           <Button size="xs" variant="ghost" colorPalette="gray" onClick={() => setShow(!show)}>
@@ -456,7 +506,7 @@ function RawStatsPanel({ execution }: { execution: ExecutionResult }) {
             {execution.stats.rawOutput}
           </Box>
           {execution.recordNumber && (
-            <Text fontSize="xs" color="fg.muted" mt={3}>📁 Audit log saved</Text>
+            <Text fontSize="xs" color="fg.muted" mt={3}>Saved to the audit log as record #{execution.recordNumber}.</Text>
           )}
         </Box>
       )}
@@ -483,6 +533,10 @@ export default function ExecutePage() {
   const [databases, setDatabases] = useState<string[] | null>(null);
   const [loadingDbs, setLoadingDbs] = useState(false);
   const [dbNote, setDbNote] = useState<string | null>(null);
+  // EX-2: after Connect and choosing a database, the form folds to one summary line.
+  const [editingConn, setEditingConn] = useState(true);
+  // After a successful run, steps 1-3 fold to one bar so the results start near the top.
+  const [setupFolded, setSetupFolded] = useState(false);
   const [host, setHost] = useState('localhost');
   const [port, setPort] = useState('1433');
   const [database, setDatabase] = useState('');
@@ -501,7 +555,6 @@ export default function ExecutePage() {
     || (mode === 'compare' && kind === 'procedure' && !isDraftEmpty(kind, optimized) && targetError(kind, optimized))
     || null;
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'compare' | 'original' | 'optimized'>('compare');
   const abortRef = useRef<AbortController | null>(null);
 
   const [portError, setPortError] = useState<string | null>(null);
@@ -584,6 +637,21 @@ export default function ExecutePage() {
     ...(engine === 'mssql' && authType === 'windows' ? { authType, domain: domain.trim() } : {}),
   });
 
+  // EX-2: the connection folds to one line once a SQL Server database has been chosen from the list.
+  const connFolded = engine === 'mssql' && !editingConn && databases !== null && database.trim() !== '';
+  // EX-4: why Execute is not available yet, in words.
+  const runBlocker =
+    engine === 'mssql' && !database.trim() ? 'Connect and choose a database first.'
+    : isDraftEmpty(kind, original) ? (kind === 'procedure' ? 'Enter the stored procedure name.' : 'Paste the SQL to run.')
+    : mode === 'compare' && isDraftEmpty(kind, optimized) ? 'Enter the optimized version too.'
+    : inputProblem ? `Fix before running: ${inputProblem}`
+    : null;
+
+  const liveMessage = loading ? 'Running. Collecting the I/O and time statistics.'
+    : error ? `Execution failed: ${error}`
+    : result ? `Run finished. ${result.mode === 'single' ? (result.analysis.prodVerdict?.verdict ?? '') : 'Comparison ready.'}`.trim()
+    : '';
+
   /** A different server or login has a different list: drop the loaded one. */
   function changeLogin(apply: () => void) {
     apply();
@@ -605,6 +673,7 @@ export default function ExecutePage() {
       setDatabases(list);
       if (list.length === 0) setDbNote('This login cannot open any database.');
       else if (!list.includes(database)) setDatabase('');
+      else setEditingConn(false);
     } else if (res.status !== 401) {
       setDbNote(res.error ?? 'Could not list the databases');
     }
@@ -617,6 +686,7 @@ export default function ExecutePage() {
     setKind('batch');
     setOptimized({ ...emptyDraft(), sql });
     setResult(null);
+    setSetupFolded(false);
   }
 
   function handleCancel() {
@@ -673,9 +743,12 @@ export default function ExecutePage() {
     abortRef.current = null;
     if (res.ok && res.data) {
       setResult(res.data.result);
+      setSetupFolded(true);
     } else if (controller.signal.aborted) {
+      setSetupFolded(false);
       setError('Execution cancelled');
     } else if (res.status !== 401) {
+      setSetupFolded(false);
       setError(res.error ?? 'Execution failed');
     }
     setLoading(false);
@@ -694,44 +767,42 @@ export default function ExecutePage() {
           </div>
         </header>
 
-        {/* Mode toggle */}
-        <Flex gap={3} mb={6}>
-          <Button
-            size="sm" colorPalette="brand"
-            variant={mode === 'single' ? 'solid' : 'outline'}
-            onClick={() => setMode('single')}
-          >
-            Single SP
-          </Button>
-          <Button
-            size="sm" colorPalette="brand"
-            variant={mode === 'compare' ? 'solid' : 'outline'}
-            onClick={() => setMode('compare')}
-          >
-            Compare Original vs Optimized
-          </Button>
-          {mode === 'single' && engine !== 'simulation' && (
-            <Text fontSize="xs" color="fg.muted">
-              Runs several times: a warm-up that is not counted, then the measured runs set in Settings (2 by default).
+        {setupFolded ? (
+          <Box as="section" aria-label="Run setup" className="setup-bar">
+            <Text color="fg.default">
+              <strong>{engine === 'mssql' ? `SQL Server · ${database}` : 'Simulation'}</strong>
+              {' · '}
+              {kind === 'procedure'
+                ? `${original.name.trim()} (${original.params.length} parameter${original.params.length === 1 ? '' : 's'})`
+                : 'SQL batch'}
+              {mode === 'compare' ? ' · compared with an optimized version' : ''}
             </Text>
-          )}
-        </Flex>
-
-        {/* Target kind toggle */}
-        <Flex gap={3} mb={6} role="group" aria-label="Target kind">
-          <Button size="sm" colorPalette="brand" variant={kind === 'procedure' ? 'solid' : 'outline'}
-            aria-pressed={kind === 'procedure'} onClick={() => setKind('procedure')}>
-            Procedure
-          </Button>
-          <Button size="sm" colorPalette="brand" variant={kind === 'batch' ? 'solid' : 'outline'}
-            aria-pressed={kind === 'batch'} onClick={() => setKind('batch')}>
-            Batch
-          </Button>
-        </Flex>
-
+            <Flex gap={2} wrap="wrap">
+              <Button variant="outline" colorPalette="gray" onClick={() => setSetupFolded(false)}>Edit setup</Button>
+              {loading && (
+                <Button variant="outline" color="status.bad" borderColor="status.bad" onClick={handleCancel}>Cancel</Button>
+              )}
+              <Button colorPalette="brand" onClick={handleExecute} loading={loading} loadingText="Running..." disabled={runBlocker !== null || loading}>
+                Run again
+              </Button>
+            </Flex>
+          </Box>
+        ) : (<>
         {/* Connection: laid out like SQL Server's "Connect to Server" dialog. */}
         <Box bg="bg.panel" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" p={6} mb={6} as="section" aria-labelledby="connect-title">
-          <Heading as="h3" id="connect-title" size="sm" color="fg.default" mb={5}>Connect to Server</Heading>
+          <Heading as="h3" id="connect-title" size="sm" color="fg.default" mb={connFolded ? 3 : 5}>
+            <span className="step-no" aria-hidden="true">1</span>Connect to Server
+          </Heading>
+          {connFolded ? (
+            <Flex align="center" gap={3} wrap="wrap">
+              <Text color="status.ok" fontWeight="semibold"><span aria-hidden="true">✓ </span>Connected</Text>
+              <Text color="fg.default">
+                {host}{port.trim() && port.trim() !== '1433' ? `,${port.trim()}` : ''} · {database} ·{' '}
+                {authType === 'windows' ? `Windows login ${domain}\\${username}` : `SQL login ${username}`}
+              </Text>
+              <Button size="sm" variant="outline" colorPalette="gray" onClick={() => setEditingConn(true)}>Change</Button>
+            </Flex>
+          ) : (<>
           <div className="connect-form">
             <label htmlFor="exec-engine">Server type</label>
             <select id="exec-engine" className="select" value={engine} onChange={(e) => setEngine(e.target.value as 'simulation' | 'mssql')}>
@@ -788,7 +859,8 @@ export default function ExecutePage() {
 
                 <label htmlFor="exec-database">Database</label>
                 {databases && databases.length > 0 ? (
-                  <select id="exec-database" className="select" value={database} onChange={(e) => setDatabase(e.target.value)}>
+                  <select id="exec-database" className="select" value={database}
+                    onChange={(e) => { setDatabase(e.target.value); if (e.target.value) setEditingConn(false); }}>
                     <option value="">Select a database</option>
                     {databases.map((name) => <option key={name} value={name}>{name}</option>)}
                   </select>
@@ -798,11 +870,14 @@ export default function ExecutePage() {
                 )}
 
                 <span />
-                <label className="connect-check">
+                <details className="connect-more">
+                  <summary>More options</summary>
+                  <label className="connect-check">
                   <input type="checkbox" className="checkbox" checked={trustCert}
                     onChange={(e) => { const v = e.target.checked; changeLogin(() => setTrustCert(v)); }} />
                   Trust server certificate
-                </label>
+                  </label>
+                </details>
                 {authType === 'windows' && trustCert && (
                   <>
                     <span />
@@ -834,15 +909,41 @@ export default function ExecutePage() {
               </Text>
             </Box>
           )}
+          </>)}
         </Box>
 
-        {/* SP Input */}
-        <Grid templateColumns={mode === 'compare' ? '1fr 1fr' : '1fr'} gap={5} mb={6}>
+        {/* Step 2: what to run */}
+        <Box as="section" aria-labelledby="what-title" bg="bg.panel" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" p={6} mb={6}>
+          <Heading as="h3" id="what-title" size="sm" color="fg.default" mb={4}>
+            <span className="step-no" aria-hidden="true">2</span>What to run
+          </Heading>
+          <Flex gap={6} wrap="wrap" align="center" mb={2}>
+            <fieldset className="choice-group">
+              <legend className="sr-only">What to run</legend>
+              <label className="choice">
+                <input type="radio" name="exec-kind" checked={kind === 'procedure'} onChange={() => setKind('procedure')} /> Stored procedure
+              </label>
+              <label className="choice">
+                <input type="radio" name="exec-kind" checked={kind === 'batch'} onChange={() => setKind('batch')} /> SQL batch
+              </label>
+            </fieldset>
+            <label className="choice">
+              <input type="checkbox" checked={mode === 'compare'} onChange={(e) => setMode(e.target.checked ? 'compare' : 'single')} />
+              Compare with an optimized version
+            </label>
+          </Flex>
+          <Text fontSize="xs" color="fg.muted" mb={4}>
+            {kind === 'procedure'
+              ? 'Runs a stored procedure that already exists on the server, with the parameter values you enter below.'
+              : 'Runs the SQL you paste. It runs in a transaction that is rolled back afterwards, unless the script commits.'}
+            {mode === 'compare' ? ' Both versions run, one after the other, and are compared.' : ''}
+          </Text>
+        <Grid templateColumns={{ base: '1fr', lg: mode === 'compare' ? '1fr 1fr' : '1fr' }} gap={5}>
           <Box bg="bg.panel" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" p={5}>
             <Flex align="center" gap={2} mb={3}>
               {mode === 'compare' && <Badge variant="outline" color="accent.default" borderColor="accent.default">ORIGINAL</Badge>}
               <Text fontSize="sm" fontWeight="semibold" color="fg.default" textTransform="uppercase" letterSpacing="wider">
-                {mode === 'compare' ? 'Current SP' : 'Stored Procedure'}
+                {mode === 'compare' ? 'Current version' : kind === 'procedure' ? 'Stored procedure' : 'SQL batch'}
               </Text>
             </Flex>
             <TargetEditor
@@ -861,7 +962,7 @@ export default function ExecutePage() {
             <Box bg="bg.panel" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" p={5}>
               <Flex align="center" gap={2} mb={3}>
                 <Badge variant="outline" color="status.ok" borderColor="status.ok">OPTIMIZED</Badge>
-                <Text fontSize="sm" fontWeight="semibold" color="fg.default" textTransform="uppercase" letterSpacing="wider">Optimized SP</Text>
+                <Text fontSize="sm" fontWeight="semibold" color="fg.default" textTransform="uppercase" letterSpacing="wider">Optimized version</Text>
               </Flex>
               <TargetEditor
                 kind={kind} draft={optimized} onChange={setOptimized} color="fg.default"
@@ -877,125 +978,158 @@ export default function ExecutePage() {
           )}
         </Grid>
 
-        {/* Execute button */}
-        <Flex justify="flex-end" gap={3} mb={8}>
-          {loading && (
-            <Button size="lg" variant="outline" color="status.bad" borderColor="status.bad" onClick={handleCancel}>Cancel</Button>
-          )}
-          <Button
-            colorPalette="brand"
-            size="lg"
-            px={10}
-            onClick={handleExecute}
-            loading={loading}
-            loadingText="Executing..."
-            disabled={isDraftEmpty(kind, original) || (mode === 'compare' && isDraftEmpty(kind, optimized)) || !!inputProblem || loading}
-          >
-            ▶ Execute & Audit
-          </Button>
-          {inputProblem && (
-            <Text fontSize="sm" color="status.bad" w="100%" textAlign="right">Fix before running: {inputProblem}</Text>
-          )}
-        </Flex>
+        </Box>
 
-        {/* Loading */}
-        {loading && (
-          <Flex justify="center" align="center" py={16} gap={4} direction="column" role="status">
-            <Spinner size="xl" color="status.warn" borderWidth="3px" />
-            <Text color="fg.muted">
-              Executing SP{mode === 'compare' ? 's' : ''} and collecting STATISTICS IO / TIME data...
-            </Text>
+        {/* Step 3: run */}
+        <Box as="section" aria-labelledby="run-title" className="run-bar" bg="bg.panel" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" p={6} mb={6}>
+          <Heading as="h3" id="run-title" size="sm" color="fg.default" mb={4}>
+            <span className="step-no" aria-hidden="true">3</span>Run
+          </Heading>
+          <Flex gap={3} align="center" wrap="wrap">
+            <Button
+              colorPalette="brand" size="lg" px={10}
+              onClick={handleExecute} loading={loading} loadingText="Running..."
+              disabled={runBlocker !== null || loading}
+              aria-describedby={runBlocker ? 'run-blocker' : undefined}
+            >
+              Execute &amp; Audit
+            </Button>
+            {loading && (
+              <Button size="lg" variant="outline" color="status.bad" borderColor="status.bad" onClick={handleCancel}>Cancel</Button>
+            )}
+            {!loading && runBlocker && (
+              <Text id="run-blocker" fontSize="sm" color={inputProblem ? 'status.bad' : 'fg.muted'}>{runBlocker}</Text>
+            )}
           </Flex>
-        )}
+          {mode === 'single' && engine !== 'simulation' && (
+            <Text fontSize="xs" color="fg.muted" mt={3}>
+              Runs several times: a warm-up that is not counted, then the measured runs set in Settings (2 by default).
+            </Text>
+          )}
+        </Box>
+        </>)}
 
-        {/* Error */}
-        {error && (
-          <Box bg="bg.raised" borderWidth="1px" borderColor="status.bad" borderRadius="xl" p={5} mb={6} role="alert">
-            <Text color="status.bad" fontWeight="semibold">⚠️ Execution Failed</Text>
-            <Text color="status.bad" fontSize="sm" mt={1}>{error}</Text>
-          </Box>
-        )}
+        {/* Always present, so screen readers announce what changes in it. */}
+        <p className="sr-only" aria-live="polite">{liveMessage}</p>
 
-        {/* Results */}
-        {result && !loading && (
-          <Box display="flex" flexDirection="column" gap={6}>
-            {result.warnings && result.warnings.length > 0 && (
-              <Box bg="bg.raised" borderWidth="1px" borderColor="status.warn" borderRadius="xl" p={4} role="status">
-                <Text color="status.warn" fontWeight="semibold" fontSize="sm">Warnings</Text>
-                {result.warnings.map((w, i) => <Text key={i} color="fg.default" fontSize="sm">{w}</Text>)}
-              </Box>
-            )}
-            {(result.simulated ??
-              (result.mode === 'single' ? result.execution.stats.simulated : result.original.execution.stats.simulated)) && (
-              <Box><Badge variant="outline" color="status.warn" borderColor="status.warn">Simulated</Badge></Box>
-            )}
+        {/* Step 4: results */}
+        {(loading || error || result) && (
+          <Box as="section" aria-labelledby="results-title" mb={6}>
+            <Heading as="h3" id="results-title" size="sm" color="fg.default" mb={4}>
+              <span className="step-no" aria-hidden="true">4</span>Results
+            </Heading>
+            <div>
+              {loading && (
+                <Flex justify="center" align="center" py={16} gap={4} direction="column" role="status">
+                  <Spinner size="xl" color="accent.default" borderWidth="3px" />
+                  <Text color="fg.muted">
+                    Running {mode === 'compare' ? 'both versions' : 'the SQL'} and collecting the I/O and time statistics...
+                  </Text>
+                </Flex>
+              )}
+              {error && (
+                <Box bg="bg.raised" borderWidth="1px" borderColor="status.bad" borderRadius="xl" p={5} mb={6} role="alert">
+                  <Text color="status.bad" fontWeight="semibold">Execution failed</Text>
+                  <Text color="status.bad" fontSize="sm" mt={1}>{error}</Text>
+                </Box>
+              )}
+            </div>
 
-            {result.mode === 'single' ? (
-              <>
-                <AnalysisPanel analysis={result.analysis} title={`Execution Analysis — ${result.execution.spLabel}`} params={usedParams} outputs={result.execution.outputs} />
-                <RawStatsPanel execution={result.execution} />
-                {result.execution.success && ranSource && (
-                  <RefactorPanel
-                    key={result.execution.recordNumber}
-                    source={ranSource.source} engine={ranSource.engine} connection={ranSource.connection}
-                    analysis={result.analysis} onUseAsOptimized={useAsOptimized}
-                  />
+            {result && !loading && (
+              <Box display="flex" flexDirection="column" gap={5}>
+                {result.warnings && result.warnings.length > 0 && (
+                  <Box bg="bg.raised" borderWidth="1px" borderColor="status.warn" borderRadius="xl" p={4} role="status">
+                    <Text color="status.warn" fontWeight="semibold" fontSize="sm">Warnings</Text>
+                    {result.warnings.map((w, i) => <Text key={i} color="fg.default" fontSize="sm">{w}</Text>)}
+                  </Box>
                 )}
-              </>
-            ) : (
-              <>
-                {/* Comparison improvement strip */}
-                {result.comparison.improvementPercent != null && (
-                  <Box p={5} borderRadius="xl" borderWidth="1px"
-                    bg={result.comparison.improvementPercent > 0 ? 'bg.raised' : 'bg.raised'}
-                    borderColor={result.comparison.improvementPercent > 0 ? 'status.ok' : 'status.bad'}>
-                    <Flex align="center" gap={4}>
-                      <Box fontSize="3xl">{result.comparison.improvementPercent > 20 ? '🚀' : result.comparison.improvementPercent > 0 ? '📈' : '📉'}</Box>
-                      <Box>
+                {(result.simulated ??
+                  (result.mode === 'single' ? result.execution.stats.simulated : result.original.execution.stats.simulated)) && (
+                  <Box><Badge variant="outline" color="status.warn" borderColor="status.warn">Simulated</Badge></Box>
+                )}
+
+                {result.mode === 'single' ? (
+                  <>
+                    <VerdictBar analysis={result.analysis} />
+                    <Tabs.Root key={result.execution.recordNumber} defaultValue="summary" variant="line" colorPalette="brand" lazyMount>
+                      <Tabs.List aria-label="Result views">
+                        <Tabs.Trigger value="summary">Summary</Tabs.Trigger>
+                        <Tabs.Trigger value="recommendations">Recommendations</Tabs.Trigger>
+                        <Tabs.Trigger value="details">Details</Tabs.Trigger>
+                        <Tabs.Trigger value="raw">Raw output</Tabs.Trigger>
+                        {result.execution.success && ranSource && <Tabs.Trigger value="refactor">Refactor</Tabs.Trigger>}
+                      </Tabs.List>
+                      <Tabs.Content value="summary">
+                        <AnalysisPanel part="summary" analysis={result.analysis} title={`Execution Analysis — ${result.execution.spLabel}`} />
+                      </Tabs.Content>
+                      <Tabs.Content value="recommendations">
+                        <AnalysisPanel part="recommendations" analysis={result.analysis} title={`Recommendations — ${result.execution.spLabel}`} />
+                      </Tabs.Content>
+                      <Tabs.Content value="details">
+                        <AnalysisPanel part="details" analysis={result.analysis} title={`Details — ${result.execution.spLabel}`} params={usedParams} outputs={result.execution.outputs} />
+                      </Tabs.Content>
+                      <Tabs.Content value="raw">
+                        <RawStatsPanel execution={result.execution} defaultOpen />
+                      </Tabs.Content>
+                      {result.execution.success && ranSource && (
+                        <Tabs.Content value="refactor">
+                          <RefactorPanel
+                            key={result.execution.recordNumber}
+                            source={ranSource.source} engine={ranSource.engine} connection={ranSource.connection}
+                            analysis={result.analysis} onUseAsOptimized={useAsOptimized}
+                          />
+                        </Tabs.Content>
+                      )}
+                    </Tabs.Root>
+                  </>
+                ) : (
+                  <>
+                    {result.comparison.improvementPercent != null && (
+                      <Box p={5} borderRadius="xl" borderWidth="1px" bg="bg.raised"
+                        borderColor={result.comparison.improvementPercent > 0 ? 'status.ok' : 'status.bad'}>
                         <Text fontWeight="bold" color={result.comparison.improvementPercent > 0 ? 'status.ok' : 'status.bad'} fontSize="lg">
+                          <span aria-hidden="true">{result.comparison.improvementPercent > 0 ? '▲ ' : '▼ '}</span>
                           {result.comparison.improvementPercent > 0
                             ? `${result.comparison.improvementPercent}% I/O Improvement`
                             : `${Math.abs(result.comparison.improvementPercent)}% I/O Regression`}
                         </Text>
                         <Text color="fg.muted" fontSize="sm">{result.comparison.comparisonSummary}</Text>
                       </Box>
-                    </Flex>
-                  </Box>
-                )}
-
-                {/* Tabs */}
-                <Flex gap={2}>
-                  {(['compare', 'original', 'optimized'] as const).map(tab => (
-                    <Button key={tab} size="sm"
-                      variant={activeTab === tab ? 'solid' : 'outline'}
-                      colorPalette="brand"
-                      onClick={() => setActiveTab(tab)}
-                    >
-                      {tab === 'compare' ? 'Comparison' : tab === 'original' ? 'Original' : 'Optimized'}
-                    </Button>
-                  ))}
-                </Flex>
-
-                {activeTab === 'compare' && submittedSql && (
-                  <OptimizedPanel
-                    original={result.original.analysis} optimized={result.optimized.analysis}
-                    originalText={submittedSql.original} optimizedText={submittedSql.optimized}
-                  />
-                )}
-                {activeTab === 'compare' && <AnalysisPanel analysis={result.comparison} title="Comparative Audit" />}
-                {activeTab === 'original' && (
-                  <>
-                    <AnalysisPanel analysis={result.original.analysis} title="Original SP Audit" outputs={result.original.execution.outputs} />
-                    <RawStatsPanel execution={result.original.execution} />
+                    )}
+                    <Tabs.Root key={result.original.execution.recordNumber} defaultValue="compare" variant="line" colorPalette="brand" lazyMount>
+                      <Tabs.List aria-label="Result views">
+                        <Tabs.Trigger value="compare">Comparison</Tabs.Trigger>
+                        <Tabs.Trigger value="original">Original</Tabs.Trigger>
+                        <Tabs.Trigger value="optimized">Optimized</Tabs.Trigger>
+                        <Tabs.Trigger value="raw">Raw output</Tabs.Trigger>
+                      </Tabs.List>
+                      <Tabs.Content value="compare">
+                        <Box display="flex" flexDirection="column" gap={5}>
+                          {submittedSql && (
+                            <OptimizedPanel
+                              original={result.original.analysis} optimized={result.optimized.analysis}
+                              originalText={submittedSql.original} optimizedText={submittedSql.optimized}
+                            />
+                          )}
+                          <AnalysisPanel analysis={result.comparison} title="Comparative Audit" />
+                        </Box>
+                      </Tabs.Content>
+                      <Tabs.Content value="original">
+                        <AnalysisPanel analysis={result.original.analysis} title="Original SP Audit" outputs={result.original.execution.outputs} />
+                      </Tabs.Content>
+                      <Tabs.Content value="optimized">
+                        <AnalysisPanel analysis={result.optimized.analysis} title="Optimized SP Audit" outputs={result.optimized.execution.outputs} />
+                      </Tabs.Content>
+                      <Tabs.Content value="raw">
+                        <Box display="flex" flexDirection="column" gap={5}>
+                          <RawStatsPanel execution={result.original.execution} defaultOpen label="Original" />
+                          <RawStatsPanel execution={result.optimized.execution} defaultOpen label="Optimized" />
+                        </Box>
+                      </Tabs.Content>
+                    </Tabs.Root>
                   </>
                 )}
-                {activeTab === 'optimized' && (
-                  <>
-                    <AnalysisPanel analysis={result.optimized.analysis} title="Optimized SP Audit" outputs={result.optimized.execution.outputs} />
-                    <RawStatsPanel execution={result.optimized.execution} />
-                  </>
-                )}
-              </>
+              </Box>
             )}
           </Box>
         )}
