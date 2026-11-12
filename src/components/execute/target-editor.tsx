@@ -1,7 +1,7 @@
 'use client';
 
-import { Fragment, useId, useState, type ReactNode } from 'react';
-import { Box, Button, Flex, Input, Text, Textarea } from '@chakra-ui/react';
+import { Fragment, useMemo, useState, type ReactNode } from 'react';
+import { Box, Button, Combobox, Flex, Input, Portal, Text, Textarea, createListCollection, useFilter } from '@chakra-ui/react';
 
 export const PARAM_TYPES = [
   'int', 'bigint', 'decimal', 'nvarchar', 'varchar', 'bit', 'datetime', 'date', 'uniqueidentifier',
@@ -160,8 +160,13 @@ export function TargetEditor({
   loadingProcedures?: boolean;
   onRefreshProcedures?: () => void;
 }) {
-  const listId = useId();
   const [chosen, setChosen] = useState('');
+  // What the list is filtered by: the typed text, or nothing when the list is opened from its arrow.
+  const [query, setQuery] = useState('');
+  const { contains } = useFilter({ sensitivity: 'base' });
+  const matches = useMemo(() => (procedures ?? []).filter((p) => contains(p, query)), [procedures, query, contains]);
+  // shortcut: shows the first 200 matches, so a database with thousands of procedures stays fast; typing narrows it.
+  const collection = useMemo(() => createListCollection({ items: matches.slice(0, 200) }), [matches]);
   const [newSetName, setNewSetName] = useState('');
   if (kind === 'batch') {
     return (
@@ -181,19 +186,52 @@ export function TargetEditor({
     <Box>
       <Field
         caption="Procedure name" error={procError ?? procedureNote}
-        hint={procedures && procedures.length > 0 ? `${procedures.length} stored procedures in this database: pick one from the list, or type to search.` : undefined}
+        hint={procedures && procedures.length > 0 ? `${procedures.length} stored procedures in this database: open the list, or type to filter it.` : undefined}
       >
-        <Flex gap={2} mb={4}>
-          {/* A searchable list: typing filters the procedures; any name can still be typed. */}
-          <Input
-            size="md" value={draft.name} aria-label="Procedure name" aria-invalid={!!procError}
-            list={procedures && procedures.length > 0 ? listId : undefined}
-            onChange={(e) => onChange({ ...draft, name: e.target.value })}
-            placeholder={procedures && procedures.length > 0 ? 'Choose or type a stored procedure' : 'dbo.MyProcedure'}
-            bg="bg.canvas" borderColor="border.subtle" color="fg.default"
-          />
-          {procedures && procedures.length > 0 && (
-            <datalist id={listId}>{procedures.map((p) => <option key={p} value={p} />)}</datalist>
+        <Flex gap={2} mb={4} align="flex-start">
+          {procedures && procedures.length > 0 ? (
+            // A selection box you can type into: typing filters the procedures; any name can still be entered.
+            <Combobox.Root
+              collection={collection} flex="1" size="md" openOnClick allowCustomValue
+              inputValue={draft.name}
+              onInputValueChange={(e) => { onChange({ ...draft, name: e.inputValue }); setQuery(e.inputValue); }}
+              onValueChange={(e) => { if (e.value[0]) onChange({ ...draft, name: e.value[0] }); }}
+              // Opening with a click or the arrow shows the whole list; opening by typing keeps the filter.
+              onOpenChange={(e) => { if (e.open && e.reason !== 'input-change') setQuery(''); }}
+            >
+              <Combobox.Control>
+                <Combobox.Input aria-label="Procedure name" aria-invalid={!!procError} placeholder="Choose or type a stored procedure"
+                  bg="bg.canvas" borderColor="border.subtle" color="fg.default" />
+                <Combobox.IndicatorGroup>
+                  <Combobox.ClearTrigger aria-label="Clear the procedure name" />
+                  <Combobox.Trigger aria-label="Show the stored procedures" />
+                </Combobox.IndicatorGroup>
+              </Combobox.Control>
+              <Portal>
+                <Combobox.Positioner>
+                  <Combobox.Content bg="bg.panel" borderColor="border.subtle" maxH="320px">
+                    <Combobox.Empty px={3} py={2} color="fg.muted">No stored procedure matches &ldquo;{draft.name}&rdquo;.</Combobox.Empty>
+                    {collection.items.map((name) => (
+                      <Combobox.Item key={name} item={name} fontFamily="mono" fontSize="sm">
+                        {name}
+                        <Combobox.ItemIndicator />
+                      </Combobox.Item>
+                    ))}
+                    {matches.length > collection.items.length && (
+                      <Text px={3} py={2} fontSize="xs" color="fg.muted">
+                        Showing {collection.items.length} of {matches.length}. Type to narrow the list.
+                      </Text>
+                    )}
+                  </Combobox.Content>
+                </Combobox.Positioner>
+              </Portal>
+            </Combobox.Root>
+          ) : (
+            <Input
+              size="md" value={draft.name} aria-label="Procedure name" aria-invalid={!!procError}
+              onChange={(e) => onChange({ ...draft, name: e.target.value })}
+              placeholder="dbo.MyProcedure" bg="bg.canvas" borderColor="border.subtle" color="fg.default"
+            />
           )}
           {onRefreshProcedures && (
             <Button size="md" variant="outline" colorPalette="brand" flexShrink={0} onClick={onRefreshProcedures}

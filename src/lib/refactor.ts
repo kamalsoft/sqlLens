@@ -116,6 +116,12 @@ export function refactorChecks(original: string, refactored: string, formatted: 
   ];
 }
 
+/** A CREATE / ALTER / CREATE OR ALTER PROCEDURE statement at the start of a line. */
+const PROC_HEADER = /^\s*(?:CREATE(?:\s+OR\s+ALTER)?|ALTER)\s+PROC(?:EDURE)?\b/im;
+// shortcut: not string-aware; a "--" or "/*" inside a literal, or CREATE PROCEDURE inside a multi-line string,
+// can mislead the header check. Rare in practice; use the T-SQL tokenizer if it causes false rejections.
+const stripComments = (sql: string) => sql.replace(/--[^\n]*|\/\*[\s\S]*?\*\//g, "");
+
 /** Turns the parsed answer and the SQL block into the result the page shows. */
 export function finishRefactor(
   model: RefactorModelResult,
@@ -135,6 +141,20 @@ export function finishRefactor(
     return { ...base, status: "truncated", refactoredSql: "", formatted: false, checks: [] };
   }
   if (!raw) return { ...base, status: "none", refactoredSql: "", formatted: false, checks: [] };
+
+  // The original handed back unchanged (comments, case and spacing aside) is not a refactor.
+  // shortcut: comments are stripped without regard to string literals, and case is ignored inside them, so a change
+  // only inside a literal can read as "unchanged" (the rewrite is dropped: the safe direction).
+  const plain = (sql: string) => stripComments(sql).replace(/\s+/g, " ").trim().toLowerCase();
+  if (plain(raw) === plain(original)) {
+    return { ...base, status: "none", statusDetail: "the model returned the original SQL unchanged", refactoredSql: "", formatted: false, checks: [] };
+  }
+
+  // A procedure must come back as a procedure. Small models sometimes return garbled text
+  // (for example "CRETELECT ..."), which must not be shown as a usable rewrite.
+  if (PROC_HEADER.test(stripComments(original)) && !PROC_HEADER.test(stripComments(raw))) {
+    return { ...base, status: "invalid", refactoredSql: "", formatted: false, checks: [] };
+  }
 
   const added = newWriteTargets(original, raw);
   if (added.length > 0) {

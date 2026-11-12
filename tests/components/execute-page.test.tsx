@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, act, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, act, waitFor, within } from "@testing-library/react";
 import { ChakraProvider, defaultSystem } from "@chakra-ui/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import userEvent from "./user";
@@ -69,8 +69,11 @@ describe("ExecutePage", () => {
     await user.click(screen.getByRole("button", { name: "Connect" }));
     expect(fetchMock.mock.calls[0][0]).toBe("/api/execute/databases");
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).engine).toBe("mssql");
-    expect(await screen.findByText(/Connected\. 2 databases available/)).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Database" })).toBeInTheDocument();
+    // The connection folds; the database is chosen under What to run, which gets the focus.
+    expect(await screen.findByText(/localhost · SQL login sa · 2 databases/)).toBeInTheDocument();
+    const picker = screen.getByRole("combobox", { name: "Database" });
+    expect(within(screen.getByRole("region", { name: "What to run" })).getByRole("combobox", { name: "Database" })).toBe(picker);
+    await waitFor(() => expect(picker).toHaveFocus());
   });
 
   it("Cancel aborts the in-flight execute fetch", async () => {
@@ -234,7 +237,6 @@ describe("ExecutePage null handling and validation", () => {
     const single = { mode: "single", simulated: true, warnings: [], execution: exec, analysis: analysis() };
     const refactored = "SELECT CustomerID FROM dbo.Customers;";
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-      if (url === "/api/review/models") return json({ models: [{ id: "m1", name: "Model One", compatible: true }] });
       if (url === "/api/refactor") {
         return json({ result: {
           status: "provided", refactoredSql: refactored, formatted: true, checks: [], summary: "s", changes: [],
@@ -246,14 +248,12 @@ describe("ExecutePage null handling and validation", () => {
     const user = userEvent.setup();
     view();
     fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
-    expect(screen.queryByRole("button", { name: "Refactor Stored Procedure" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Generate refactor" })).toBeNull();
     await user.click(screen.getByRole("radio", { name: "SQL batch" }));
     await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select * from dbo.Customers");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
     await user.click(await screen.findByRole("tab", { name: "Refactor" }));
-    await user.click(await screen.findByRole("button", { name: "Refactor Stored Procedure" }));
-    await screen.findByRole("option", { name: "Model One" });
-    await user.click(screen.getByRole("button", { name: "Generate refactor" }));
+    await user.click(await screen.findByRole("button", { name: "Generate refactor" }));
     await user.click(await screen.findByRole("button", { name: "Use as Optimized" }));
     expect(screen.getByPlaceholderText(/Paste your Optimized SP/)).toHaveValue(refactored);
     expect(screen.getByPlaceholderText(/Paste your Stored Procedure/)).toHaveValue("select * from dbo.Customers");
@@ -347,6 +347,7 @@ describe("ExecutePage SQL Server connection (PG-1, P9-01, DB-1)", () => {
     await user.type(screen.getByLabelText(/^(Login|User name)$/), "sa");
     await user.click(screen.getByRole("button", { name: "Connect" }));
     expect(await screen.findByRole("combobox", { name: "Database" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Change" }));
     await user.type(screen.getByLabelText(/^(Login|User name)$/), "x");
     expect(screen.queryByRole("combobox", { name: "Database" })).toBeNull();
     expect(screen.getByRole("textbox", { name: "Database" })).toBeInTheDocument();
@@ -376,7 +377,7 @@ describe("ExecutePage guided steps (EX-1 to EX-5)", () => {
     expect(run).toBeEnabled();
   });
 
-  it("folds the connection to one line once a database is chosen, and Change opens it again", async () => {
+  it("folds the connection to one line after Connect, and Change opens it again", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => json({ databases: ["TestDB"] })));
     const user = userEvent.setup();
     view();
@@ -384,7 +385,7 @@ describe("ExecutePage guided steps (EX-1 to EX-5)", () => {
     await user.click(screen.getByRole("button", { name: "Connect" }));
     fireEvent.change(await screen.findByRole("combobox", { name: "Database" }), { target: { value: "TestDB" } });
 
-    expect(screen.getByText(/localhost · TestDB · SQL login sa/)).toBeInTheDocument();
+    expect(screen.getByText(/localhost · SQL login sa · 1 database/)).toBeInTheDocument();
     expect(screen.queryByLabelText("Password")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Change" }));
     expect(screen.getByLabelText("Password")).toBeInTheDocument();
@@ -488,9 +489,28 @@ describe("ExecutePage guided steps (EX-1 to EX-5)", () => {
     expect(await screen.findByText(/2 stored procedures in this database/)).toBeInTheDocument();
     const call = fetchMock.mock.calls.find(([url]) => url === "/api/execute/procedures") as unknown as [string, RequestInit];
     expect(JSON.parse(call[1].body as string).connection).toMatchObject({ database: "TestDB" });
-    const name = screen.getByLabelText("Procedure name") as HTMLInputElement;
-    const options = Array.from(document.querySelectorAll(`datalist#${CSS.escape(name.getAttribute("list") ?? "")} option`)).map((o) => o.getAttribute("value"));
-    expect(options).toEqual(["dbo.usp_GetSummary", "sales.usp_Close"]);
+    // A selection box: the arrow opens the full list, typing filters it, choosing fills the name.
+    const name = screen.getByRole("combobox", { name: "Procedure name" });
+    await user.click(screen.getByRole("button", { name: "Show the stored procedures" }));
+    const list = await screen.findByRole("listbox");
+    expect(within(list).getAllByRole("option").map((o) => o.textContent)).toEqual(["dbo.usp_GetSummary", "sales.usp_Close"]);
+    await user.type(name, "close");
+    expect(within(screen.getByRole("listbox")).getAllByRole("option").map((o) => o.textContent)).toEqual(["sales.usp_Close"]);
+    await user.click(screen.getByRole("option", { name: "sales.usp_Close" }));
+    expect(name).toHaveValue("sales.usp_Close");
+
+    // Typing into the closed box filters straight away, and a name that is not on the list is kept.
+    await user.clear(name);
+    fireEvent.keyDown(name, { key: "Escape" });
+    await user.type(name, "s");
+    expect(within(await screen.findByRole("listbox")).getAllByRole("option").map((o) => o.textContent)).toEqual(["dbo.usp_GetSummary", "sales.usp_Close"]);
+    await user.type(name, "ales");
+    expect(within(screen.getByRole("listbox")).getAllByRole("option").map((o) => o.textContent)).toEqual(["sales.usp_Close"]);
+    await user.clear(name);
+    await user.type(name, "dbo.usp_NotListed");
+    fireEvent.keyDown(name, { key: "Escape" });
+    await user.click(screen.getByRole("heading", { name: "What to run" }));
+    expect(name).toHaveValue("dbo.usp_NotListed");
 
     procs = ["dbo.usp_GetSummary", "sales.usp_Close", "dbo.usp_New"];
     await user.click(screen.getByRole("button", { name: "Refresh the stored procedure list" }));

@@ -36,6 +36,8 @@ export type AppConfig = {
   /** UX-A: show the Compare and Refactor screens. Off by default; when off the pages say so and the menu hides them. */
   showCompare: boolean;
   showRefactor: boolean;
+  /** The model the Execute screen's refactor uses; empty = an installed, compatible model with a chat template, instruction-tuned names (Instruct, Chat, -it) first, then the largest parameter estimate. */
+  refactorModel: string;
 };
 
 export const defaultAppConfig: AppConfig = {
@@ -63,6 +65,7 @@ export const defaultAppConfig: AppConfig = {
   measuredRuns: 2,
   showCompare: false,
   showRefactor: false,
+  refactorModel: "",
 };
 
 type Rule = (v: unknown) => boolean;
@@ -148,6 +151,7 @@ const rules: Record<keyof AppConfig, Rule> = {
   measuredRuns: int(1, 20),
   showCompare: bool,
   showRefactor: bool,
+  refactorModel: (v) => typeof v === "string" && v.length <= 1024,
 };
 
 /**

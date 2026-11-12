@@ -333,7 +333,9 @@ describe("POST /api/review", () => {
     const refactored = "CREATE PROCEDURE dbo.p @Id INT AS BEGIN SET NOCOUNT ON; SELECT o.Id, o.Total FROM dbo.Orders AS o WHERE o.CustomerId = @Id; END";
 
     it("validates input", async () => {
-      expect((await refactor(post("/api/refactor", { sql }, cookie))).status).toBe(400);
+      // modelId is optional (the Settings choice or the best installed model is used), but not empty.
+      expect((await refactor(post("/api/refactor", { modelId: "", sql }, cookie))).status).toBe(400);
+      expect((await refactor(post("/api/refactor", { modelId: 42, sql }, cookie))).status).toBe(400);
       expect((await refactor(post("/api/refactor", { modelId: "acme/tiny", sql: "please optimise" }, cookie))).status).toBe(400);
       expect(
         (await refactor(post("/api/refactor", { modelId: "acme/tiny", sql, instructions: "x".repeat(2001) }, cookie))).status,

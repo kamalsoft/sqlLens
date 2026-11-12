@@ -12,3 +12,12 @@ process.env.SQLLENS_AUDIT_LOG_DIR = mkdtempSync(path.join(os.tmpdir(), "sqllens-
 afterEach(() => {
   cleanup();
 });
+
+// jsdom has no ResizeObserver; Chakra's popover positioning (Combobox, Dialog) needs one.
+if (typeof globalThis.ResizeObserver === "undefined") {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}

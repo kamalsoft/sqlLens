@@ -21,6 +21,7 @@ describe('evidenceInstructions (RF-4)', () => {
     const text = evidenceInstructions(analysis({
       planFindings: [{ kind: 'cost-concentration', severity: 'high', operator: 'Clustered Index Scan', table: 'Customers', message: 'Scan holds 60% of reads.', recommendation: 'Add a seekable index.' }],
     }));
+    expect(text).toContain('runs on Microsoft SQL Server: write the refactor as T-SQL');
     expect(text).toContain('Verdict: OPTIMIZE. Customers scan is 60% of reads (driver: Customers)');
     expect(text).toContain('Total logical reads: 12000.');
     expect(text).toContain('Elapsed: 41 ms.');

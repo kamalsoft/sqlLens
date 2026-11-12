@@ -6,7 +6,10 @@ import { MAX_INSTRUCTIONS_LENGTH } from './refactor-shared';
  * evidence instead of guessing. Plain text; buildRefactorPrompt neutralises tag-like text in it.
  */
 export function evidenceInstructions(analysis: AuditAnalysis): string {
-  const lines: string[] = ['Measured evidence from an execution of this procedure:'];
+  const lines: string[] = [
+    'The procedure runs on Microsoft SQL Server: write the refactor as T-SQL for SQL Server only.',
+    'Measured evidence from an execution of this procedure:',
+  ];
   // Older stored analyses lack some parts; leave out what is not there.
   const v = analysis.prodVerdict;
   if (v) lines.push(`- Verdict: ${v.verdict}. ${v.reason}${v.driver ? ` (driver: ${v.driver})` : ''}`);

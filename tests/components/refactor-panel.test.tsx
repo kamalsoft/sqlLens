@@ -34,7 +34,6 @@ const refactor = {
 
 function setup(source: RefactorSource, engine: "simulation" | "mssql" = "simulation", routes: Record<string, () => Response> = {}) {
   const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async (url) => {
-    if (url === "/api/review/models") return json({ models: [{ id: "m1", name: "Model One", compatible: true }] });
     if (routes[url]) return routes[url]();
     if (url === "/api/refactor") return json(refactor);
     return json({ error: "unexpected" }, 500);
@@ -51,20 +50,20 @@ function setup(source: RefactorSource, engine: "simulation" | "mssql" = "simulat
 }
 
 async function generate(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: "Refactor Stored Procedure" }));
-  await screen.findByRole("option", { name: "Model One" });
   await user.click(screen.getByRole("button", { name: "Generate refactor" }));
 }
 
 describe("RefactorPanel (RF-2/3/4/6)", () => {
   it("refactors the batch as run, sends the run's evidence, and shows each section with copy buttons", async () => {
     const { callsTo, onUse, user } = setup({ kind: "batch", sql: "SELECT * FROM dbo.Customers" });
-    expect(screen.queryByRole("button", { name: "Generate refactor" })).not.toBeInTheDocument();
+    // The model is chosen in Settings, so the panel offers no model list and sends no model id.
+    expect(screen.queryByRole("combobox", { name: /model/i })).toBeNull();
+    expect(screen.getByRole("link", { name: "Change in Settings" })).toHaveAttribute("href", "/settings");
     await generate(user);
 
     expect(await screen.findByLabelText("Refactored SQL")).toHaveTextContent("WHERE RegionID = @RegionID");
     const [body] = callsTo("/api/refactor");
-    expect(body.modelId).toBe("m1");
+    expect(body).not.toHaveProperty("modelId");
     expect(body.sql).toBe("SELECT * FROM dbo.Customers");
     expect(body.instructions).toContain("Verdict: OPTIMIZE. Customers scan is 60% of reads (driver: Customers)");
     expect(body.instructions).toContain("Table Customers: 9315 logical reads, scan count 11.");
@@ -119,30 +118,24 @@ describe("RefactorPanel (RF-2/3/4/6)", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Unable to parse model response");
   });
 
-  it("asks before closing while the model runs, and closing cancels the request (UX-D)", async () => {
+  it("leaving while the model runs cancels the request", async () => {
     let signal: AbortSignal | undefined;
-    const hanging = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === "/api/review/models") return json({ models: [{ id: "m1", name: "Model One", compatible: true }] });
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
       signal = init?.signal ?? undefined;
       return new Promise<Response>((_, reject) => signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError"))));
-    });
-    vi.stubGlobal("fetch", hanging);
-    render(
+    }));
+    const view = render(
       <ChakraProvider value={defaultSystem}>
         <RefactorPanel source={{ kind: "batch", sql: "SELECT 1" }} engine="simulation" connection={{}} analysis={analysis} />
       </ChakraProvider>,
     );
     const user = userEvent.setup();
     await generate(user);
-    expect(await screen.findByRole("status")).toHaveTextContent(/Running the local model/);
-
-    await user.click(screen.getByRole("button", { name: "Close" }));
-    await user.click(await screen.findByRole("button", { name: "Keep it running" }));
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent(/Sending the SQL batch \(1 lines, 8 characters\) with this run's evidence \(verdict OPTIMIZE, 1 hot table, 0 plan findings\)/);
+    expect(status).toHaveTextContent(/Waiting for the model's answer: 0:0\d elapsed/);
     expect(signal?.aborted).toBe(false);
-    expect(screen.getByText("Evidence sent to the model")).toBeVisible();
-
-    await user.click(screen.getByRole("button", { name: "Close" }));
-    await user.click(await screen.findByRole("button", { name: "Cancel the refactor and close" }));
+    view.unmount();
     expect(signal?.aborted).toBe(true);
   });
 });

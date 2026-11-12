@@ -31,6 +31,7 @@ type AppSettings = {
   measuredRuns: number;
   showCompare: boolean;
   showRefactor: boolean;
+  refactorModel: string;
 };
 
 // Mirrors C6 defaults in docs/team/contracts.md.
@@ -58,6 +59,7 @@ const defaultSettings: AppSettings = {
   measuredRuns: 2,
   showCompare: false,
   showRefactor: false,
+  refactorModel: "",
 };
 
 const knownKeys = Object.keys(defaultSettings).concat("prompt") as Array<keyof AppSettings>;
@@ -119,9 +121,16 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState<{ field: string | null; message: string } | null>(null);
+  // Installed models that can run here, for the Refactor model list.
+  const [models, setModels] = useState<{ id: string; name: string; parameterEstimate: number | null }[]>([]);
 
   useEffect(() => {
     let cancelled = false;
+    void api<{ models?: { id: string; name: string; compatible: boolean; parameterEstimate: number | null }[] }>(
+      "/api/review/models", { cache: "no-store" }, "Unable to load installed models",
+    ).then((result) => {
+      if (!cancelled && result.ok) setModels((result.data?.models ?? []).filter((m) => m.compatible));
+    });
     void api<Partial<AppSettings>>("/api/appconfig", { cache: "no-store" }, "Unable to load settings").then(
       (result) => {
         if (cancelled) return;
@@ -218,6 +227,21 @@ export default function SettingsPage() {
           <Field label="Default Model" name="defaultModel" error={error}>
             <input id="setting-defaultModel" className="input" value={settings.defaultModel} onChange={(event) => update("defaultModel", event.target.value)} disabled={disabled} />
           </Field>
+          <Field label="Refactor Model" name="refactorModel" error={error}>
+            <select id="setting-refactorModel" className="select" value={settings.refactorModel}
+              onChange={(event) => update("refactorModel", event.target.value)} disabled={disabled}>
+              <option value="">Automatic: the best instruction-tuned model</option>
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}{m.parameterEstimate ? ` (about ${(m.parameterEstimate / 1e9).toFixed(1)}B parameters)` : ""}
+                </option>
+              ))}
+              {settings.refactorModel && !models.some((m) => m.id === settings.refactorModel) && (
+                <option value={settings.refactorModel}>{settings.refactorModel} (not installed)</option>
+              )}
+            </select>
+            <small className="field-hint">Used by Refactor on the Execute &amp; Audit SP screen. Pick an instruction-tuned model (Instruct or Chat): a base model does not follow the refactor instructions and can repeat itself.</small>
+          </Field>
           <Field label="Temperature" name="temperature" error={error}>
             <input id="setting-temperature" className="input" type="number" step={0.1} value={settings.temperature} onChange={num("temperature")} disabled={disabled} />
           </Field>
@@ -281,17 +305,17 @@ export default function SettingsPage() {
           <Field label="Target: Max Logical Reads" name="maxLogicalReads" error={error}>
             <input id="setting-maxLogicalReads" className="input" type="number" min={1} placeholder="Not set"
               value={settings.maxLogicalReads ?? ""} onChange={optionalNum("maxLogicalReads")} disabled={disabled} />
-            <small className="field-hint">A run over this is marked OPTIMIZE. Leave empty for no target.</small>
+            <small className="field-hint">A run over this is marked OPTIMIZE. With all three empty, runs are judged against the grade C limits (5,000 reads, 1,000 ms).</small>
           </Field>
           <Field label="Target: Max Elapsed Time (ms)" name="maxElapsedMs" error={error}>
             <input id="setting-maxElapsedMs" className="input" type="number" min={1} placeholder="Not set"
               value={settings.maxElapsedMs ?? ""} onChange={optionalNum("maxElapsedMs")} disabled={disabled} />
-            <small className="field-hint">A run over this is marked OPTIMIZE. Leave empty for no target.</small>
+            <small className="field-hint">A run over this is marked OPTIMIZE.</small>
           </Field>
           <Field label="Target: Max Scan Count" name="maxScanCount" error={error}>
             <input id="setting-maxScanCount" className="input" type="number" min={1} placeholder="Not set"
               value={settings.maxScanCount ?? ""} onChange={optionalNum("maxScanCount")} disabled={disabled} />
-            <small className="field-hint">A run over this is marked OPTIMIZE. Leave empty for no target.</small>
+            <small className="field-hint">A run over this is marked OPTIMIZE.</small>
           </Field>
           <Field label="Live Execution" name="allowLiveExecution" error={error} full>
             <div className="checkbox-row">

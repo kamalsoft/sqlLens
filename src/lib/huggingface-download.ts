@@ -21,6 +21,18 @@ const REQUIRED_FILES = [
   "onnx/model_quantized.onnx",
 ] as const;
 
+/**
+ * Small files fetched when the repository has them. Without the tokenizer config and chat template an
+ * instruction-tuned model cannot be prompted in its chat format, and it answers like a base model.
+ */
+const OPTIONAL_FILES = [
+  "tokenizer_config.json",
+  "chat_template.jinja",
+  "chat_template.json",
+  "special_tokens_map.json",
+  "generation_config.json",
+] as const;
+
 export async function downloadRepository(
   owner: string,
   repository: string,
@@ -79,7 +91,7 @@ export async function downloadRepository(
     }
   }
 
-  const files = REQUIRED_FILES.filter((file) => available.has(file));
+  const files: string[] = [...REQUIRED_FILES, ...OPTIONAL_FILES.filter((file) => available.has(file))];
 
   for (const filename of files) {
     const target = path.join(destination, filename);
@@ -114,11 +126,6 @@ export async function downloadRepository(
   return {
     destination,
     files,
-    missingOptionalFiles: missingRequired.filter(
-      (file) =>
-        file !== "config.json" &&
-        file !== "tokenizer.json" &&
-        file !== "onnx/model_quantized.onnx",
-    ),
+    missingOptionalFiles: OPTIONAL_FILES.filter((file) => !available.has(file)),
   };
 }

@@ -12,6 +12,7 @@ Refactoring rules:
 - Keep SET NOCOUNT ON. Keep every existing TRY...CATCH and transaction. Add them only where the procedure writes data.
 - Remove NOLOCK unless the original's comments say dirty reads are acceptable. List the change either way.
 - Do not put CREATE INDEX or CREATE VIEW in the refactored SQL. Recommend them in the JSON.
+- If the input is a stored procedure, return the whole procedure starting with CREATE OR ALTER PROCEDURE, with the same name and parameters. An answer without it is discarded.
 - If no change is safe, return changes: [] and omit the rewritten block. Explain why in limitations.
 
 User instructions:
