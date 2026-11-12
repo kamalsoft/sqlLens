@@ -154,10 +154,11 @@ export async function POST(request: Request) {
       throw error;
     }
 
+    const message = "Return the JSON comparison now.";
     const run = await runModel(
       model,
       prompt,
-      "Return the JSON comparison now.",
+      message,
       {
         maxNewTokens: config.maxNewTokens,
         temperature: config.temperature,
@@ -195,6 +196,8 @@ export async function POST(request: Request) {
         originalAuditId,
         optimizedAuditId,
         modelId: model.id,
+        // AD-1: what the model was given, for the audit record page.
+        prompt: { template: path.basename(promptPath), text: prompt, message },
       },
       response: { result, metrics, originalAuditId, optimizedAuditId },
       schemaVersion: COMPARE_SCHEMA_VERSION,

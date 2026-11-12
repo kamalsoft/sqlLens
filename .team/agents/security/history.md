@@ -19,3 +19,18 @@ Append-only learnings (date, task ID, fact, evidence path:line). Scribe promotes
 ## 2026-11-12 listProcedures + POST /api/execute/procedures (features/execute-redesign, uncommitted)
 - SIGN-OFF WITH CONDITIONS. Fixed query text, no user input; gates identical to /databases except database required; catalogNames keeps timeout race + pool.close in finally; generic 502, logError name/code only.
 - Conditions: catalogNames must only receive literal queries (private, comment says fixed); timeout/cleanup tested for listProcedures only if covered.
+
+## 2026-11-12 AD-1..AD-3 (features/audit-record-page, uncommitted) - SIGN-OFF WITH CONDITIONS
+- request.prompt stored for review/compare/refactor; lookupShare returns response_payload only, so share links do not expose prompt/request.
+- logSqlText only gates executor logging (sp-executor.ts:89); audit rows already store request.sql, so prompt adds no new class of data.
+- sourceAuditId checked with getAudit(id, sessionId) + type check (refactor/route.ts:47-58); relatedAudits filters session_id in both queries with bound params (audit-repo.ts:168-178). No IDOR/SQLi found.
+- Condition: prompt duplicates SQL (maxSqlLength up to 5,000,000) so rows roughly double; accepted as size note, consider cap later.
+- Page renders JSON in <pre> text, no dangerouslySetInnerHTML.
+
+## 2026-11-12 — Inference worker process (uncommitted, features/audit-record-page)
+- Verdict: SIGNED OFF WITH CONDITIONS.
+- fork: fixed path, no shell, execArgv [], env allowlist PATH/HOME/NODE_ENV (src/lib/inference.ts:208-216). OK.
+- Test hook SQLLENS_TRANSFORMERS_MODULE gated on NODE_ENV==="test" (inference.ts:209); requires server env control already. OK.
+- IPC carries SQL/prompt; worker logs nothing; stdout ignored, stderr inherited. OK.
+- Crash 502 message = signal/exit code only (inference.ts:65,231; model-run.ts:90-91). OK.
+- Conditions: worker generic error message (inference-worker.mjs:66) relayed to API/status may carry local paths; a stuck native call delays disconnect-exit (inference-worker.mjs:74).

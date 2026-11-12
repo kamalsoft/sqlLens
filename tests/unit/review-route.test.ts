@@ -32,6 +32,11 @@ import { GET as reviewModels } from "@/app/api/review/models/route";
 import { setPipelineFactoryForTests, type TextGenerator } from "@/lib/inference";
 import { resetRateLimits } from "@/lib/request-guard";
 import { createTestSession } from "../helpers/auth";
+import { getAudit, insertAudit, relatedAudits } from "@/db/audit-repo";
+import { getSessionFromRequest } from "@/lib/auth";
+
+/** The session id behind a test cookie. */
+const sessionOf = (c: string) => getSessionFromRequest(new Request("http://localhost/", { headers: { cookie: c } }))!.sessionId;
 
 const v1Json = {
   summary: "s",
@@ -173,7 +178,13 @@ describe("POST /api/review", () => {
     setPipelineFactoryForTests(async () => generatorReturning(JSON.stringify(v2Json)));
     const r2 = await review(post("/api/review", valid, cookie));
     expect(r2.status).toBe(200);
-    expect(await r2.json()).toMatchObject({ schemaVersion: "v2", model: "acme/tiny" });
+    const body2 = await r2.json();
+    expect(body2).toMatchObject({ schemaVersion: "v2", model: "acme/tiny" });
+    // AD-1: the stored record keeps the prompt it was given.
+    const prompt = (getAudit(body2.id, sessionOf(cookie))!.request as { prompt: { template: string; text: string; message: string } }).prompt;
+    expect(prompt.text.length).toBeGreaterThan(0);
+    expect(prompt.template).toMatch(/\.md$/);
+    expect(prompt.message).toBe("Return the JSON analysis now.");
 
     setPipelineFactoryForTests(async () =>
       generatorReturning("```json\n" + JSON.stringify(v1Json) + "\n```"),
@@ -361,6 +372,32 @@ describe("POST /api/review", () => {
       expect(result.viewRecommendations.map((v: { name: string }) => v.name)).toEqual(["dbo.vOrderTotals"]);
       expect(result.viewRecommendations[0].createStatement).toMatch(/^CREATE VIEW \[dbo\]\.\[vOrderTotals\]\nAS\nSELECT/);
       expect(result.limitations).toContain("1 view recommendation(s) removed: not a read-only SELECT over tables in the SQL.");
+    });
+
+    it("stores the prompt it sent and links the run it came from (AD-1, AD-2)", async () => {
+      setPipelineFactoryForTests(async () => generatorReturning(`${answer()}\n<rewritten_procedure>\n${refactored}\n</rewritten_procedure>`));
+      const run = insertAudit({ sessionId: sessionOf(cookie), type: "EXECUTE", request: { original: { kind: "batch", sql } }, response: {} });
+      const res = await refactor(post("/api/refactor", { modelId: "acme/tiny", sql, sourceAuditId: run.id }, cookie));
+      expect(res.status).toBe(200);
+      const { id } = await res.json();
+      const stored = getAudit(id, sessionOf(cookie))!;
+      const request = stored.request as { sourceAuditId: string; prompt: { template: string; text: string; message: string } };
+      expect(request.sourceAuditId).toBe(run.id);
+      expect(request.prompt.template).toBe("refactor.md");
+      expect(request.prompt.text).toContain(sql.trim());
+      expect(request.prompt.message).toMatch(/^Return the JSON object now/);
+      // Both records point at each other.
+      expect(relatedAudits(stored, sessionOf(cookie)).source?.id).toBe(run.id);
+      expect(relatedAudits(getAudit(run.id, sessionOf(cookie))!, sessionOf(cookie)).refactors.map((r) => r.id)).toEqual([id]);
+    });
+
+    it("refuses a source run that is not one of this session's execution records", async () => {
+      const other = insertAudit({ sessionId: sessionOf(createTestSession()), type: "EXECUTE", request: {}, response: {} });
+      const review = insertAudit({ sessionId: sessionOf(cookie), type: "REVIEW", request: {}, response: {} });
+      for (const sourceAuditId of [other.id, review.id, "no-such-id", 42]) {
+        const res = await refactor(post("/api/refactor", { modelId: "acme/tiny", sql, sourceAuditId }, cookie));
+        expect(res.status, String(sourceAuditId)).toBe(400);
+      }
     });
 
     it("removes refactored SQL that adds writes", async () => {

@@ -95,6 +95,40 @@ describe("audit detail", () => {
     expect(within(group).getByRole("button", { name: "Pending" })).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("lays out a refactor record: navigation, facts, report, related run, prompt, request and response (AD-1..AD-3)", async () => {
+    mockRecord({
+      ...base, type: "REFACTOR", modelId: "onnx-community/Qwen2.5-1.5B-Instruct", recordNumber: 116,
+      request: { sql: "CREATE PROCEDURE dbo.p AS SELECT 1", sourceAuditId: "run57",
+        prompt: { template: "refactor.md", text: "You are a SQL Server expert...", message: "Return the JSON object now" } },
+      response: { summary: "Seek instead of scan", status: "provided", refactoredSql: "CREATE PROCEDURE dbo.p AS SELECT 1;", changes: ["a"], indexRecommendations: [{}], viewRecommendations: [], otherRecommendations: [] },
+      related: { source: { id: "run57", recordNumber: 57 }, refactors: [] },
+    });
+    render(<AuditDetailPage />);
+    expect(await screen.findByRole("heading", { name: "Refactor" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to Audit" })).toHaveAttribute("href", "/audit");
+    // A refactor opens the run it came from, with its saved result and refactor.
+    expect(screen.getByRole("link", { name: "Open in Execute & Audit SP" })).toHaveAttribute("href", "/execute?record=run57");
+    expect(within(screen.getByRole("region", { name: "Record" })).getByText("onnx-community/Qwen2.5-1.5B-Instruct")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Report" })).getByText("Seek instead of scan")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "#57" })).toHaveAttribute("href", "/audit/run57");
+    const prompt = screen.getByRole("region", { name: "Prompt" });
+    expect(within(prompt).getByText("refactor.md")).toBeInTheDocument();
+    expect(within(prompt).getByLabelText("Prompt text")).toHaveTextContent("You are a SQL Server expert...");
+    expect(screen.getByLabelText("Stored request")).toHaveTextContent('"sourceAuditId": "run57"');
+    expect(screen.getByLabelText("Stored response")).toHaveTextContent('"summary": "Seek instead of scan"');
+  });
+
+  it("says why an older or execution record has no prompt", async () => {
+    mockRecord({ ...base, type: "REFACTOR", request: { sql: "SELECT 1" }, response: { summary: "s", status: "none" } });
+    render(<AuditDetailPage />);
+    expect(await screen.findByText(/Not recorded: this record was made before prompts were saved/)).toBeInTheDocument();
+    cleanup();
+    mockRecord({ ...base, type: "EXECUTE", modelId: null, response: { mode: "single", analysis: {} } });
+    render(<AuditDetailPage />);
+    expect(await screen.findByText(/this record is a SQL execution, which does not use a model/)).toBeInTheDocument();
+    expect(screen.getByText("none: no model is used for this record")).toBeInTheDocument();
+  });
+
   it("renders EXECUTE metrics with null as not captured", async () => {
     mockRecord({ ...base, type: "EXECUTE", response: { mode: "single", analysis: {
       performanceGrade: null, ioAnalysis: { totalLogicalReads: 120, totalPhysicalReads: null, totalScanCount: null }, timeAnalysis: { totalMs: null },

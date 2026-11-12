@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { insertAudit } from "@/db/audit-repo";
+import { getAudit, insertAudit } from "@/db/audit-repo";
 import { chooseRefactorModel, getInstalledModels } from "@/lib/installed-models";
 import { readAppConfig } from "@/lib/app-config";
 import { requireSession } from "@/lib/auth";
@@ -41,6 +41,20 @@ export async function POST(request: Request) {
 
     if (body.modelId !== undefined && (!isString(body.modelId) || !body.modelId)) {
       return badRequest("modelId must be a non-empty string", "modelId");
+    }
+
+    // AD-2: the execution this refactor came from; it must be one of this session's own run records.
+    const source = body.sourceAuditId;
+    if (source !== undefined && source !== null && (typeof source !== "string" || !source)) {
+      return badRequest("sourceAuditId must be an audit record id", "sourceAuditId");
+    }
+    let sourceAuditId: string | null = null;
+    if (typeof source === "string") {
+      const run = getAudit(source, auth.session.sessionId);
+      if (!run || (run.type !== "EXECUTE" && run.type !== "EXECUTE_COMPARE")) {
+        return badRequest("sourceAuditId is not one of your execution records", "sourceAuditId");
+      }
+      sourceAuditId = run.id;
     }
 
     const config = await readAppConfig();
@@ -83,10 +97,11 @@ export async function POST(request: Request) {
       throw error;
     }
 
+    const message = "Return the JSON object now, then the refactored SQL in the <rewritten_procedure> block.";
     const run = await runModel(
       model,
       prompt,
-      "Return the JSON object now, then the refactored SQL in the <rewritten_procedure> block.",
+      message,
       {
         maxNewTokens: config.maxNewTokens,
         temperature: config.temperature,
@@ -123,7 +138,11 @@ export async function POST(request: Request) {
     const saved = insertAudit({
       sessionId: auth.session.sessionId,
       type: "REFACTOR",
-      request: { sql, instructions, modelId: model.id },
+      request: {
+        sql, instructions, modelId: model.id, sourceAuditId,
+        // AD-1: what the model was given, for the audit record page.
+        prompt: { template: path.basename(promptPath), text: prompt, message },
+      },
       response: result,
       schemaVersion: "refactor-v1",
       modelId: model.id,
