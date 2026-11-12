@@ -55,7 +55,7 @@ Each item is the former README checkbox, with its status and evidence. Items mar
 | Complete PostgreSQL execution through `pg` | P2-03 | `[IN-PROGRESS]` | Implemented; no live-server test recorded |
 | Capture execution plans, `STATISTICS IO`, and `STATISTICS TIME` | P2-01 | `[IN-PROGRESS]` | Parser tests exist |
 | Normalize CPU, elapsed, logical and physical reads, and scan counts | P2-01, P4-04 | `[IN-PROGRESS]` | Metric comparison tests exist |
-| Add configurable connection testing | P2-04 | `[IN-PROGRESS]` | `/api/connections/test` exists |
+| Add configurable connection testing | P2-04 | `[IN-PROGRESS]` | `/api/connections/test` exists (API only; since 2026-11-11 the Execute screen's Connect checks the login via `/api/execute/databases`) |
 | Add query timeout, cancellation, and safe parameter handling | P2-05, P2-07 | `[IN-PROGRESS]` | Timeout and abort errors handled; mixed-batch guard (D-034) |
 | Persist execution results and audit records | P2-06 | `[IN-PROGRESS]` | Migration `003` and audit repository |
 
@@ -148,11 +148,11 @@ Ordered by risk first, then by what blocks a release. Each item names its plan t
 18. Approve or decline P0-04 (docs draft) and run P0-03's first real-database migration after a backup.
 19. Backup and restore runbook for `sqllens.db`; dependency update policy; threat model for non-localhost use.
 20. Merge overlapping skills: `sqllens-api-route-patterns`, `sqllens-auth-sessions`, `sqllens-security-redaction`.
-21. Remove the PostgreSQL feature (decided 2026-11-10: the app will not ship PostgreSQL). Covers `src/lib/execution/postgres.ts`, `src/lib/telemetry/postgres*`, the `pg` dependency, the PostgreSQL engine option in the UI and API, its tests and docs. Until removed, PostgreSQL batches allow `PREPARE TRANSACTION`, which can leave locks on the server (D-036, Security condition 2). Needs a decision record and Security sign-off.
+21. Remove the PostgreSQL feature (decided 2026-11-10: the app will not ship PostgreSQL). Covers `src/lib/execution/postgres.ts`, `src/lib/telemetry/postgres*`, the `pg` dependency, the PostgreSQL engine option in the UI and API, its tests and docs. Until removed, PostgreSQL batches allow `PREPARE TRANSACTION`, which can leave locks on the server (D-036, Security condition 2). Needs a decision record and Security sign-off. The Execute screen already stopped offering PostgreSQL (PG-1, 2026-11-11); Settings "Default Engine" still lists it and no longer drives the Execute default (SQL Server is selected), so remove or repurpose that setting in the same change.
 
 **Priority 6: Refactor panel follow-ups (review of commit dd5276d, 2026-11-11)**
 22. Share the safety gates of `POST /api/execute/definition` and `POST /api/execute/parameters` (session, rate limit, engine, name, connection, live execution) in one function, so a change to one cannot miss the other.
-23. Share the connect, timeout and cleanup code of `listProcedureParams` and `getProcedureDefinition` in `src/lib/execution/mssql.ts`.
+23. Share the connect, timeout and cleanup code of `listProcedureParams`, `getProcedureDefinition` and `listDatabases` in `src/lib/execution/mssql.ts` (and the gates of the three catalog routes in item 22, now including `POST /api/execute/databases`).
 24. ~~Add a component test that the refactor panel aborts its running `/api/refactor` request.~~ Done: `tests/components/refactor-panel.test.tsx` checks that closing the refactor dialog while it runs aborts the request (UX-D).
 
 ## Roadmap Overview Matrix

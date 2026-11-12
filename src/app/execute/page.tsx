@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Box, Container, Heading, Text, Button, Flex,
-  Spinner, Badge, Grid, Input, Separator,
+  Spinner, Badge, Grid, Separator,
 } from '@chakra-ui/react';
 import { GRADE_RULES, STANDARD_RECOMMENDATIONS, type AuditAnalysis, type Grade, type PlanFinding, type ProdVerdict } from '@/lib/audit-analyzer';
 import type { ExecParam } from '@/components/execute/target-editor';
@@ -34,7 +34,6 @@ type ExecuteResult =
       optimized: Side;
       comparison: ComparisonAnalysis;
     };
-type TestInfo = { ok: boolean; message: string };
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -475,7 +474,15 @@ export default function ExecutePage() {
   const [kind, setKind] = useState<'procedure' | 'batch'>('batch');
   const [original, setOriginal] = useState<TargetDraft>(emptyDraft());
   const [optimized, setOptimized] = useState<TargetDraft>(emptyDraft());
-  const [engine, setEngine] = useState<'simulation' | 'mssql' | 'postgres'>('simulation');
+  // PG-1: SQL Server first and selected; PostgreSQL is no longer offered here.
+  const [engine, setEngine] = useState<'simulation' | 'mssql'>('mssql');
+  // P9-01: SQL Server login type; Windows logs in with NTLM as DOMAIN\\user.
+  const [authType, setAuthType] = useState<'sql' | 'windows'>('sql');
+  const [domain, setDomain] = useState('');
+  // DB-1: databases the login can open, once loaded; null until then.
+  const [databases, setDatabases] = useState<string[] | null>(null);
+  const [loadingDbs, setLoadingDbs] = useState(false);
+  const [dbNote, setDbNote] = useState<string | null>(null);
   const [host, setHost] = useState('localhost');
   const [port, setPort] = useState('1433');
   const [database, setDatabase] = useState('');
@@ -485,8 +492,6 @@ export default function ExecutePage() {
   const [trustCert, setTrustCert] = useState(true);
 
   const [loading, setLoading] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [testInfo, setTestInfo] = useState<TestInfo | null>(null);
   const [result, setResult] = useState<ExecuteResult | null>(null);
   const [usedParams, setUsedParams] = useState<ExecParam[]>([]);
   const [submittedSql, setSubmittedSql] = useState<{ original: string; optimized: string } | null>(null);
@@ -576,28 +581,34 @@ export default function ExecutePage() {
   const connection = () => ({
     host, port: Number(port), database, username, password,
     ...(engine === 'mssql' ? { trustServerCertificate: trustCert } : {}),
+    ...(engine === 'mssql' && authType === 'windows' ? { authType, domain: domain.trim() } : {}),
   });
 
-  async function handleTest() {
-    if (engine === 'simulation') return;
+  /** A different server or login has a different list: drop the loaded one. */
+  function changeLogin(apply: () => void) {
+    apply();
+    setDatabases(null);
+    setDbNote(null);
+  }
+
+  async function loadDatabases() {
     if (!validatePort()) return;
-    setTesting(true);
-    setTestInfo(null);
-    const res = await api<{ serverVersion?: string }>(
-      '/api/connections/test',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ engine, connection: connection() }),
-      },
-      'Connection test failed'
+    setLoadingDbs(true);
+    setDbNote(null);
+    const res = await api<{ databases?: string[] }>(
+      '/api/execute/databases',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ engine, connection: connection() }) },
+      'Could not list the databases',
     );
     if (res.ok) {
-      setTestInfo({ ok: true, message: `Connected${res.data?.serverVersion ? `: ${res.data.serverVersion}` : ''}` });
+      const list = res.data?.databases ?? [];
+      setDatabases(list);
+      if (list.length === 0) setDbNote('This login cannot open any database.');
+      else if (!list.includes(database)) setDatabase('');
     } else if (res.status !== 401) {
-      setTestInfo({ ok: false, message: res.error ?? 'Connection test failed' });
+      setDbNote(res.error ?? 'Could not list the databases');
     }
-    setTesting(false);
+    setLoadingDbs(false);
   }
 
   /** RF-6: a refactored batch goes into the Optimized editor; nothing runs until Execute is pressed. */
@@ -718,101 +729,108 @@ export default function ExecutePage() {
           </Button>
         </Flex>
 
-        {/* Connection Config */}
-        <Box bg="bg.panel" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" p={6} mb={6}>
-          <Text fontSize="sm" fontWeight="semibold" color="fg.default" mb={4} textTransform="uppercase" letterSpacing="wider">
-            🔌 Database Connection
-          </Text>
-          <Grid templateColumns={{ base: '1fr', md: 'repeat(3, 1fr)' }} gap={4}>
-            <Box>
-              <Text fontSize="xs" color="fg.muted" mb={1}>Engine</Text>
-              <select
-                value={engine}
-                onChange={(e) =>
-                  setEngine(e.target.value as 'simulation' | 'mssql' | 'postgres')
-                }
-                className="w-full rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-2 text-[var(--text)] outline-none ring-0 focus:border-[var(--accent-default)]"
-              >
-                <option value="simulation">🧪 Simulation (no DB needed)</option>
-                <option value="mssql">🗄 SQL Server (mssql)</option>
-                <option value="postgres">🐘 PostgreSQL (pg)</option>
-              </select>
-            </Box>
+        {/* Connection: laid out like SQL Server's "Connect to Server" dialog. */}
+        <Box bg="bg.panel" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" p={6} mb={6} as="section" aria-labelledby="connect-title">
+          <Heading as="h3" id="connect-title" size="sm" color="fg.default" mb={5}>Connect to Server</Heading>
+          <div className="connect-form">
+            <label htmlFor="exec-engine">Server type</label>
+            <select id="exec-engine" className="select" value={engine} onChange={(e) => setEngine(e.target.value as 'simulation' | 'mssql')}>
+              <option value="mssql">SQL Server</option>
+              <option value="simulation">Simulation (no database needed)</option>
+            </select>
 
             {engine !== 'simulation' && (
               <>
-                <Box>
-                  <Text fontSize="xs" color="fg.muted" mb={1}>Host</Text>
-                  <Input size="sm" value={host} onChange={e => setHost(e.target.value)} bg="bg.raised" borderColor="border.subtle" color="fg.default" placeholder="localhost" />
-                </Box>
-                <Box>
-                  <Text fontSize="xs" color="fg.muted" mb={1}>Port</Text>
-                  <Input size="sm" value={port} onChange={e => setPort(e.target.value)} bg="bg.raised" borderColor="border.subtle" color="fg.default" placeholder="1433" aria-label="Port" aria-invalid={portError !== null} />
-                  {portError && <Text fontSize="xs" color="status.bad" mt={1} role="alert">{portError}</Text>}
-                </Box>
-                <Box>
-                  <Text fontSize="xs" color="fg.muted" mb={1}>Database</Text>
-                  <Input size="sm" value={database} onChange={e => setDatabase(e.target.value)} bg="bg.raised" borderColor="border.subtle" color="fg.default" placeholder="MyDatabase" />
-                </Box>
-                <Box>
-                  <Text fontSize="xs" color="fg.muted" mb={1}>Username</Text>
-                  <Input size="sm" value={username} onChange={e => setUsername(e.target.value)} bg="bg.raised" borderColor="border.subtle" color="fg.default" placeholder="sa" />
-                </Box>
-                <Box>
-                  <Text fontSize="xs" color="fg.muted" mb={1}>Password</Text>
-                  <Box position="relative">
-                    <Input size="sm" type={showPassword ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} bg="bg.raised" borderColor="border.subtle" color="fg.default" placeholder="••••••••" pr={9} />
-                    <Button
-                      type="button"
-                      aria-label={showPassword ? 'Hide password' : 'Show password'}
-                      aria-pressed={showPassword}
-                      onClick={() => setShowPassword(!showPassword)}
-                      position="absolute"
-                      right={1}
-                      top="50%"
-                      transform="translateY(-50%)"
-                      size="xs"
-                      variant="ghost"
-                      colorPalette="gray"
-                      px={1}
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" />
-                        <circle cx="12" cy="12" r="3" />
-                        {showPassword && <line x1="3" y1="3" x2="21" y2="21" />}
-                      </svg>
-                    </Button>
-                  </Box>
-                </Box>
-                {engine === 'mssql' && (
-                  <Flex align="center" gap={3} pt={4}>
-                    <input
-                      type="checkbox"
-                      checked={trustCert}
-                      onChange={(e) => setTrustCert(e.target.checked)}
-                      className="h-4 w-4 rounded border-[var(--panel-border)] bg-[var(--panel-strong)] text-[var(--accent-default)]"
-                    />
-                    <Text fontSize="xs" color="fg.muted">Trust Server Certificate</Text>
-                  </Flex>
+                <label htmlFor="exec-host">Server name</label>
+                <div className="connect-row">
+                  <input id="exec-host" className="input" value={host} placeholder="localhost"
+                    onChange={(e) => { const v = e.target.value; changeLogin(() => setHost(v)); }} />
+                  <input id="exec-port" className="input connect-port" value={port} placeholder="1433" aria-label="Port" aria-invalid={portError !== null}
+                    onChange={(e) => { const v = e.target.value; changeLogin(() => setPort(v)); }} />
+                </div>
+                {portError && <><span /><p className="connect-error" role="alert">{portError}</p></>}
+
+                <label htmlFor="exec-auth">Authentication</label>
+                <select id="exec-auth" className="select" value={authType}
+                  onChange={(e) => { const v = e.target.value as 'sql' | 'windows'; changeLogin(() => setAuthType(v)); }}>
+                  <option value="sql">SQL Server Authentication</option>
+                  <option value="windows">Windows Authentication</option>
+                </select>
+
+                {authType === 'windows' && (
+                  <>
+                    <label htmlFor="exec-domain">Domain</label>
+                    <input id="exec-domain" className="input" value={domain} placeholder="CORP"
+                      onChange={(e) => { const v = e.target.value; changeLogin(() => setDomain(v)); }} />
+                  </>
                 )}
+
+                <label htmlFor="exec-user">{authType === 'windows' ? 'User name' : 'Login'}</label>
+                <input id="exec-user" className="input" value={username} placeholder={authType === 'windows' ? 'jsmith' : 'sa'} autoComplete="username"
+                  onChange={(e) => { const v = e.target.value; changeLogin(() => setUsername(v)); }} />
+
+                <label htmlFor="exec-password">Password</label>
+                <div className="connect-password">
+                  <input id="exec-password" className="input" type={showPassword ? 'text' : 'password'} value={password} placeholder="••••••••" autoComplete="current-password"
+                    onChange={(e) => { const v = e.target.value; changeLogin(() => setPassword(v)); }} />
+                  <Button
+                    type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} aria-pressed={showPassword}
+                    onClick={() => setShowPassword(!showPassword)} size="xs" variant="ghost" colorPalette="gray" px={1}
+                    position="absolute" right={2} top="50%" transform="translateY(-50%)"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" />
+                      <circle cx="12" cy="12" r="3" />
+                      {showPassword && <line x1="3" y1="3" x2="21" y2="21" />}
+                    </svg>
+                  </Button>
+                </div>
+
+                <label htmlFor="exec-database">Database</label>
+                {databases && databases.length > 0 ? (
+                  <select id="exec-database" className="select" value={database} onChange={(e) => setDatabase(e.target.value)}>
+                    <option value="">Select a database</option>
+                    {databases.map((name) => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                ) : (
+                  <input id="exec-database" className="input" value={database} placeholder="Connect to list databases, or type a name"
+                    onChange={(e) => setDatabase(e.target.value)} />
+                )}
+
+                <span />
+                <label className="connect-check">
+                  <input type="checkbox" className="checkbox" checked={trustCert}
+                    onChange={(e) => { const v = e.target.checked; changeLogin(() => setTrustCert(v)); }} />
+                  Trust server certificate
+                </label>
+                {authType === 'windows' && trustCert && (
+                  <>
+                    <span />
+                    <p className="connect-warn" role="note">
+                      Your Windows login will go to a server whose certificate is not checked, so a server pretending to be this one
+                      could capture it. Turn this off if the server has a trusted certificate.
+                    </p>
+                  </>
+                )}
+
+                <span />
+                <div className="connect-actions">
+                  <Button colorPalette="brand" onClick={() => void loadDatabases()} loading={loadingDbs} loadingText="Connecting..."
+                    disabled={loadingDbs || !host.trim() || !username.trim() || (authType === 'windows' && !domain.trim())}>
+                    Connect
+                  </Button>
+                  {dbNote && <p className="connect-error" role="alert">{dbNote}</p>}
+                  {!dbNote && databases && databases.length > 0 && (
+                    <p className="connect-ok" role="status">Connected. {databases.length} database{databases.length === 1 ? '' : 's'} available; choose one above.</p>
+                  )}
+                </div>
               </>
             )}
-          </Grid>
-          {engine !== 'simulation' && (
-            <Flex mt={4} gap={3} align="center">
-              <Button size="sm" variant="outline" colorPalette="brand" onClick={handleTest}
-                loading={testing} loadingText="Testing..." disabled={testing || !host.trim() || !database.trim()}>
-                Test connection
-              </Button>
-              {testInfo && (
-                <Text fontSize="sm" role="status" color={testInfo.ok ? 'status.ok' : 'status.bad'}>{testInfo.message}</Text>
-              )}
-            </Flex>
-          )}
+          </div>
           {engine === 'simulation' && (
             <Box mt={4} p={3} bg="bg.raised" borderRadius="lg" borderWidth="1px" borderColor="accent.default">
               <Text fontSize="sm" color="accent.default">
-                🧪 <strong>Simulation Mode:</strong> Generates realistic SQL Server statistical output based on SP pattern analysis. No database connection required.
+                <strong>Simulation mode:</strong> generates realistic SQL Server statistical output based on SP pattern analysis. No database connection required.
               </Text>
             </Box>
           )}

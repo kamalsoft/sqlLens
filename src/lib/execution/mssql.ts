@@ -2,7 +2,7 @@ import sql from 'mssql';
 import { parseMssqlStatistics } from '../telemetry/mssql';
 import { assertNoDynamicExec, splitGoBatches } from './sql-scan';
 import {
-  coerceParam, ExecAbortError, ExecTimeoutError, onAbort, TLS_WARNING,
+  coerceParam, ExecAbortError, ExecTimeoutError, NTLM_TLS_WARNING, onAbort, TLS_WARNING,
   type DriverOutcome, type ExecConnection, type ExecOptions, type ExecTarget, type ParamType,
 } from './types';
 
@@ -25,13 +25,17 @@ export function buildMssqlConfig(conn: ExecConnection, timeoutMs: number) {
   const trustServerCertificate = conn.trustServerCertificate ?? false;
   const warnings: string[] = [];
   if (!encrypt || trustServerCertificate) warnings.push(TLS_WARNING);
+  if (conn.authType === 'windows' && trustServerCertificate) warnings.push(NTLM_TLS_WARNING);
   return {
     config: {
       server: conn.host,
       port: conn.port ?? 1433,
-      database: conn.database,
+      // An empty database (database listing) connects to the login's default database.
+      database: conn.database || undefined,
       user: conn.username,
       password: conn.password,
+      // P9-01: with a domain, the driver logs in with NTLM as DOMAIN\user instead of a SQL login.
+      ...(conn.authType === 'windows' ? { domain: conn.domain } : {}),
       requestTimeout: timeoutMs,
       connectionTimeout: Math.min(timeoutMs, 15_000),
       // One connection: session SET options must apply to the statements that follow.
@@ -256,6 +260,30 @@ export async function getProcedureDefinition(
       const r = await req.query(`SELECT OBJECT_DEFINITION(OBJECT_ID(@procName, N'P')) AS [definition]`);
       const text = (r.recordset?.[0] as { definition?: unknown } | undefined)?.definition;
       return typeof text === 'string' && text.trim() ? text : null;
+    })();
+    run.catch(() => {});
+    const limit = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new ExecTimeoutError()), timeoutMs); });
+    return await Promise.race([run, limit]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    try { await pool.close(); } catch { /* already closed */ }
+  }
+}
+
+/**
+ * DB-1: the databases this login can open, online ones only, for the database picker. Read-only.
+ */
+export async function listDatabases(conn: ExecConnection, timeoutMs: number): Promise<string[]> {
+  const { config } = buildMssqlConfig(conn, timeoutMs);
+  const pool = new sql.ConnectionPool(config);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const run = (async () => {
+      await pool.connect();
+      const r = await pool.request().query(
+        `SELECT name FROM sys.databases WHERE state_desc = N'ONLINE' AND HAS_DBACCESS(name) = 1 ORDER BY name`,
+      );
+      return ((r.recordset ?? []) as { name: unknown }[]).map((row) => row.name).filter((n): n is string => typeof n === 'string');
     })();
     run.catch(() => {});
     const limit = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new ExecTimeoutError()), timeoutMs); });

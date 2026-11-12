@@ -18,15 +18,38 @@ const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof
 
 const HOST_RE = /^[A-Za-z0-9._:\-[\]]{1,255}$/;
 
-export function parseConnection(raw: unknown, field = 'connection'): Parsed<ExecConnection> {
+/** A Windows domain name (NetBIOS or DNS form). */
+const DOMAIN_RE = /^[A-Za-z0-9][A-Za-z0-9.-]{0,254}$/;
+
+/**
+ * `databaseOptional`: listing databases needs only the server and the login.
+ * `engine`: Windows login is accepted only for `mssql`, so it is never silently dropped for another engine.
+ */
+export function parseConnection(
+  raw: unknown, field = 'connection', opts: { databaseOptional?: boolean; engine?: string } = {},
+): Parsed<ExecConnection> {
   if (!isObj(raw)) return fail('connection is required for a real engine', field);
-  const { host, port, database, username, password, encrypt, trustServerCertificate } = raw;
+  const { host, port, database, username, password, encrypt, trustServerCertificate, authType, domain } = raw;
   if (!isString(host) || !HOST_RE.test(host)) return fail('host is invalid', `${field}.host`);
   if (port !== undefined && port !== null && !(isNumber(port) && Number.isInteger(port) && port >= 1 && port <= 65535)) {
     return fail('port must be an integer between 1 and 65535', `${field}.port`);
   }
-  if (!isString(database) || database.length === 0 || database.length > 128 || database.includes('\0')) {
+  const noDatabase = opts.databaseOptional && (database === undefined || database === '');
+  if (!noDatabase && (!isString(database) || database.length === 0 || database.length > 128 || database.includes('\0'))) {
     return fail('database is invalid', `${field}.database`);
+  }
+  if (authType !== undefined && authType !== 'sql' && authType !== 'windows') {
+    return fail('authType must be "sql" or "windows"', `${field}.authType`);
+  }
+  if (authType === 'windows' && opts.engine !== 'mssql') {
+    return fail('Windows authentication is available for SQL Server only', `${field}.authType`);
+  }
+  if (authType === 'windows' && !(isString(domain) && DOMAIN_RE.test(domain))) {
+    return fail('domain is required for Windows authentication', `${field}.domain`);
+  }
+  // An NTLM exchange over an unencrypted connection can be captured and cracked offline.
+  if (authType === 'windows' && encrypt === false) {
+    return fail('Windows authentication needs an encrypted connection', `${field}.encrypt`);
   }
   if (!isString(username) || username.length === 0 || username.length > 256 || username.includes('\0')) {
     return fail('username is invalid', `${field}.username`);
@@ -41,7 +64,8 @@ export function parseConnection(raw: unknown, field = 'connection'): Parsed<Exec
   return {
     ok: true,
     value: {
-      host, database, username, password,
+      host, database: noDatabase ? '' : (database as string), username, password,
+      ...(authType === 'windows' ? { authType, domain: domain as string } : {}),
       ...(isNumber(port) ? { port } : {}),
       ...(encrypt !== undefined ? { encrypt } : {}),
       ...(trustServerCertificate !== undefined ? { trustServerCertificate } : {}),
@@ -109,7 +133,7 @@ export function parseExecuteRequest(body: Record<string, unknown>, maxSqlLength:
 
   let connection: ExecConnection | undefined;
   if (engine !== 'simulation') {
-    const c = parseConnection(connRaw);
+    const c = parseConnection(connRaw, 'connection', { engine });
     if (!c.ok) return c;
     connection = c.value;
   }

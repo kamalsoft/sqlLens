@@ -31,7 +31,7 @@ export async function POST(request: Request) {
   if (typeof name !== 'string' || !PROCEDURE_NAME_RE.test(name.trim())) {
     return badRequest('Procedure name must look like dbo.MyProcedure', 'name');
   }
-  const conn = parseConnection(body.body.connection);
+  const conn = parseConnection(body.body.connection, 'connection', { engine: 'mssql' });
   if (!conn.ok) return badRequest(conn.error, conn.field);
 
   try {

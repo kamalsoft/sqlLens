@@ -19,6 +19,7 @@ const h = vi.hoisted(() => {
     countRows: [] as unknown[],
     countFail: false,
     definition: null as unknown,
+    databases: [] as unknown[],
   };
   return { state };
 });
@@ -45,7 +46,11 @@ vi.mock('mssql', () => {
       return { recordsets: s.recordsets };
     }
     batch(t: string) { return this.run(t); }
-    async query(t: string) { s.texts.push(t); return { recordset: [{ definition: s.definition }] }; }
+    async query(t: string) {
+      s.texts.push(t);
+      if (/sys\.databases/.test(t)) return { recordset: s.databases };
+      return { recordset: [{ definition: s.definition }] };
+    }
     async execute(n: string) { return { ...(await this.run(`EXEC ${n}`)), output: s.procOutput }; }
   }
   class ConnectionPool {
@@ -73,7 +78,7 @@ vi.mock('mssql', () => {
   };
 });
 
-import { buildMssqlConfig, executeMssql, getProcedureDefinition, testMssqlConnection } from '@/lib/execution/mssql';
+import { buildMssqlConfig, executeMssql, getProcedureDefinition, listDatabases, testMssqlConnection } from '@/lib/execution/mssql';
 import { ExecAbortError, ExecTimeoutError, TLS_WARNING } from '@/lib/execution/types';
 
 const conn = { host: 'db.example.com', database: 'app', username: 'sa', password: 'Sup3rSecret!' };
@@ -83,7 +88,7 @@ const TIME = ' SQL Server Execution Times:\n   CPU time = 5 ms,  elapsed time = 
 const IO_TEMP = "Table '#StagedSales_000001'. Scan count 1, logical reads 0, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.\nTable 'Worktable'. Scan count 0, logical reads 0, physical reads 0, read-ahead reads 0, lob logical reads 0, lob physical reads 0, lob read-ahead reads 0.";
 
 beforeEach(() => {
-  Object.assign(h.state, { calls: [], inputs: [], outputs: [], procOutput: {}, texts: [], infos: [], recordsets: [], failBatch: null, hang: false, cancelled: 0, release: null, trancount: 2, countRows: [], countFail: false, definition: null });
+  Object.assign(h.state, { calls: [], inputs: [], outputs: [], procOutput: {}, texts: [], infos: [], recordsets: [], failBatch: null, hang: false, cancelled: 0, release: null, trancount: 2, countRows: [], countFail: false, definition: null, databases: [] });
 });
 
 describe('mssql TLS defaults (P6-08)', () => {
@@ -284,5 +289,14 @@ describe('getProcedureDefinition (RF-5)', () => {
   it('returns null when the catalog has no readable definition', async () => {
     h.state.definition = null;
     expect(await getProcedureDefinition(conn, 'dbo.nope', 1000)).toBeNull();
+  });
+});
+
+describe('listDatabases (DB-1)', () => {
+  it('lists the online databases the login can open, read-only, then closes', async () => {
+    h.state.databases = [{ name: 'master' }, { name: 'TestDB' }, { name: null }];
+    expect(await listDatabases({ ...conn, database: '' }, 1000)).toEqual(['master', 'TestDB']);
+    expect(h.state.texts[0]).toMatch(/^SELECT name FROM sys\.databases WHERE state_desc = N'ONLINE' AND HAS_DBACCESS\(name\) = 1/);
+    expect(h.state.calls).toEqual(['connect', 'close']);
   });
 });

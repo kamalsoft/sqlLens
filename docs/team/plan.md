@@ -145,7 +145,7 @@ Blocked tasks: none — all decisions D-016–D-032 APPROVED 2026-10-24. Live DB
 #### P2-08 Execute page UI
 - Owner/Reviewer: frontend / sql-engine · Deps: P2-04, P2-05, P2-07 · Risk: M
 - Files: `src/app/execute/page.tsx`
-- AC: procedure/batch toggle; parameter editor; "Test connection" button; Cancel button; "Simulated" badge; `null` metrics shown as "not captured"; `any` types removed (lint).
+- AC: procedure/batch toggle; parameter editor; "Test connection" button (superseded 2026-11-11: the Connect button of the "Connect to Server" form checks the login via `POST /api/execute/databases`); Cancel button; "Simulated" badge; `null` metrics shown as "not captured"; `any` types removed (lint).
 - Tests: component tests · Docs: none
 
 ## Phase 3 — Local Transformers integration
@@ -436,7 +436,7 @@ Contingent flow (each step has a branch):
 
 Not in this phase: automatic deployment, changing the procedure, or any write to the target database beyond the existing rolled-back run.
 
-## Phase 9 — Windows authentication for MSSQL (PROPOSED, blocked by D-038)
+## Phase 9 — Windows authentication for MSSQL (D-038 approved option A; P9-01 implemented 2026-11-11, awaiting Security sign-off)
 
 #### P9-01 NTLM (Windows) login for MSSQL connections
 - Owner/Reviewer: backend / security · Deps: D-038 · Risk: H (credentials and auth on the SQL connection)

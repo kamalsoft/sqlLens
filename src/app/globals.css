@@ -1577,3 +1577,95 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* A small field label above an input (Execute screen connection fields). */
+.field-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.field-label-inline {
+  display: inline;
+  margin-bottom: 0;
+}
+
+/* Execute: "Connect to Server", laid out like SQL Server's dialog (label column, one field per row). */
+.connect-form {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 12px 16px;
+  align-items: center;
+  max-width: 720px;
+}
+
+.connect-form > label {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.connect-row {
+  display: flex;
+  gap: 8px;
+}
+
+.connect-port {
+  flex: 0 0 96px;
+  width: 96px;
+}
+
+.connect-password {
+  position: relative;
+}
+
+.connect-password .input {
+  padding-right: 2.6rem;
+}
+
+.connect-form > .connect-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.connect-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.connect-error,
+.connect-ok {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.connect-error {
+  color: var(--status-bad);
+}
+
+.connect-ok {
+  color: var(--status-ok);
+}
+
+.connect-warn {
+  margin: 0;
+  color: var(--status-warn);
+  font-size: 0.82rem;
+}
+
+@media (max-width: 700px) {
+  .connect-form {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .connect-form > span:empty {
+    display: none;
+  }
+}

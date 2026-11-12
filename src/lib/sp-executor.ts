@@ -69,7 +69,7 @@ export function scrubConnection(message: string, config: Partial<ExecConnection>
   let out = String(message);
   const escape = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const secrets = [config.password, config.username].filter((v): v is string => !!v);
-  const others = [config.host, config.database].filter((v): v is string => !!v && v.length >= 3);
+  const others = [config.host, config.database, config.domain].filter((v): v is string => !!v && v.length >= 3);
   for (const v of secrets) {
     // Short secrets match whole tokens only, so messages are not shredded; longer ones match anywhere.
     out = v.length >= 3

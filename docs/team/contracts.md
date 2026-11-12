@@ -70,7 +70,8 @@ Migrations auto-apply to the real DB at startup (backup: `../../sqllens_db/sqlle
 ## C12. Execution request (P2-05) — `POST /api/execute`
 ```ts
 { mode: "single" | "compare"; engine: "simulation"|"mssql"|"postgres";
-  connection?: { host: string; port?: number; database: string; username: string; password: string; encrypt?: boolean; trustServerCertificate?: boolean };
+  connection?: { host: string; port?: number; database: string; username: string; password: string; encrypt?: boolean; trustServerCertificate?: boolean;
+                authType?: 'sql' | 'windows'; domain?: string };  // P9-01: windows = NTLM as DOMAIN\\username, mssql only, needs encrypt; domain required
   original: ExecTarget; optimized?: ExecTarget }
 type ExecTarget = { kind: "procedure"; name: string; params: { name: string; type: "int"|"bigint"|"decimal"|"nvarchar"|"varchar"|"bit"|"datetime"|"date"|"uniqueidentifier"; value: string|number|boolean|null }[] }
                | { kind: "batch"; sql: string }   // always executed inside a rolled-back transaction

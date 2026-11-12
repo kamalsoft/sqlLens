@@ -23,7 +23,7 @@ export async function POST(request: Request) {
 
   const engine = body.body.engine;
   if (engine !== 'mssql' && engine !== 'postgres') return badRequest('engine must be mssql or postgres', 'engine');
-  const conn = parseConnection(body.body.connection);
+  const conn = parseConnection(body.body.connection, 'connection', { engine });
   if (!conn.ok) return badRequest(conn.error, conn.field);
 
   try {

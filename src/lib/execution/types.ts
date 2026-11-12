@@ -23,9 +23,13 @@ export type EngineName = RealEngine | 'simulation';
 export interface ExecConnection {
   host: string;
   port?: number;
+  /** Empty only when listing databases: the login's default database is used. */
   database: string;
   username: string;
   password: string;
+  /** P9-01 (D-038): `windows` logs in with NTLM as DOMAIN\username; default `sql`. MSSQL only. */
+  authType?: 'sql' | 'windows';
+  domain?: string;
   encrypt?: boolean;
   trustServerCertificate?: boolean;
 }
@@ -35,6 +39,8 @@ export interface ExecOptions { timeoutMs: number; signal?: AbortSignal }
 export interface DriverOutcome { stats: ExecutionStats; warnings: string[]; outputs?: Record<string, unknown> }
 
 export const TLS_WARNING = 'TLS verification disabled';
+/** P9-01: a Windows login goes to a server whose certificate is not checked, so the server could be an impostor. */
+export const NTLM_TLS_WARNING = 'Windows login sent to a server whose TLS certificate is not verified';
 
 export class ExecTimeoutError extends Error {
   constructor() { super('Query timed out'); this.name = 'ExecTimeoutError'; }
