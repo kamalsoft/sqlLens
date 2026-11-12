@@ -154,6 +154,7 @@ Ordered by risk first, then by what blocks a release. Each item names its plan t
 22. Share the safety gates of `POST /api/execute/definition` and `POST /api/execute/parameters` (session, rate limit, engine, name, connection, live execution) in one function, so a change to one cannot miss the other.
 23. Share the connect, timeout and cleanup code of `listProcedureParams`, `getProcedureDefinition` and `listDatabases` in `src/lib/execution/mssql.ts` (and the gates of the three catalog routes in item 22, now including `POST /api/execute/databases` and `POST /api/execute/procedures`). `listDatabases` and `listProcedures` already share `catalogNames`.
 24. ~~Add a component test that the refactor panel aborts its running `/api/refactor` request.~~ Done: `tests/components/refactor-panel.test.tsx` checks that closing the refactor dialog while it runs aborts the request (UX-D).
+25. Model downloads (`src/lib/huggingface-download.ts`): check `content-length` and stream each file to disk with a size cap (about 1 MB for the optional tokenizer and chat files) instead of reading it into memory; show `missingOptionalFiles` on Manage Models. Security condition, 2026-11-12.
 
 ## Roadmap Overview Matrix
 

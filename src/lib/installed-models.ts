@@ -18,6 +18,8 @@ export type InstalledModel = {
   parameterEstimate: number | null;
   /** True when the estimate is known and under 1B. */
   small: boolean;
+  /** True when the tokenizer has a chat template, so prompts are sent in the chat format the model was tuned on. */
+  chatTemplate: boolean;
 };
 
 const ONNX_MODEL_NAMES = new Set([
@@ -26,6 +28,22 @@ const ONNX_MODEL_NAMES = new Set([
   "model_q4.onnx",
   "model_fp16.onnx",
 ]);
+
+/** A chat template in tokenizer_config.json, or a separate chat_template.jinja / chat_template.json. */
+async function hasChatTemplate(directory: string): Promise<boolean> {
+  for (const file of ["chat_template.jinja", "chat_template.json"]) {
+    try {
+      await stat(path.join(directory, file));
+      return true;
+    } catch { /* not there */ }
+  }
+  try {
+    const config = JSON.parse(await readFile(path.join(directory, "tokenizer_config.json"), "utf8")) as { chat_template?: unknown };
+    return typeof config.chat_template === "string" || Array.isArray(config.chat_template);
+  } catch {
+    return false;
+  }
+}
 
 function expandHome(value: string): string {
   return value === "~"
@@ -94,6 +112,7 @@ export async function getInstalledModels(): Promise<InstalledModel[]> {
       }
 
       const parameterEstimate = await readParameterEstimate(directory);
+      const chatTemplate = await hasChatTemplate(directory);
       models.push({
         id,
         name: id,
@@ -101,6 +120,7 @@ export async function getInstalledModels(): Promise<InstalledModel[]> {
         compatible: true,
         parameterEstimate,
         small: isSmallModel(parameterEstimate),
+        chatTemplate,
       });
     } catch {
       // Ignore incomplete or non-ONNX model directories.
@@ -110,4 +130,27 @@ export async function getInstalledModels(): Promise<InstalledModel[]> {
   return models.sort((left, right) =>
     left.name.localeCompare(right.name),
   );
+}
+
+/** Instruction-tuned models follow the refactor prompt; a base model of the same size only continues text. */
+const INSTRUCT_NAME = /instruct|[-_]chat\b|[-_]it\b/i;
+
+/**
+ * The model a refactor uses: the configured one when it is installed and compatible, otherwise the best
+ * automatic choice. Automatic ranks models with a chat template first (without one, prompts cannot be sent
+ * in the chat format), then instruction-tuned names (Instruct, -chat, -it) over base models, then the larger
+ * parameter estimate. A model of unknown size ranks last on size; ties keep the list's name order.
+ * Null when no compatible model is installed.
+ */
+export function chooseRefactorModel<
+  T extends { id: string; compatible: boolean; parameterEstimate: number | null; chatTemplate?: boolean },
+>(models: T[], configured: string): T | null {
+  const usable = models.filter((m) => m.compatible);
+  const chosen = configured ? usable.find((m) => m.id === configured) : undefined;
+  if (chosen) return chosen;
+  const rank = (m: T) => [m.chatTemplate === false ? 0 : 1, INSTRUCT_NAME.test(m.id) ? 1 : 0, m.parameterEstimate ?? 0];
+  return [...usable].sort((a, b) => {
+    const [ra, rb] = [rank(a), rank(b)];
+    return rb[0] - ra[0] || rb[1] - ra[1] || rb[2] - ra[2];
+  })[0] ?? null;
 }

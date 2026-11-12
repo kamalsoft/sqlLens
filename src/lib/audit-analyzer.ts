@@ -345,15 +345,18 @@ export function prodVerdict(stats: ExecutionStats, targets: Targets, runs: RunSu
   const { logicalReads: reads, elapsed: ms } = metricsOf(stats);
   // evidenceGap has already ruled out missing reads and time.
   if (reads === null || ms === null) throw new Error('evidenceGap must report missing reads or time');
-  if (targets.maxLogicalReads === null && targets.maxElapsedMs === null && targets.maxScanCount === null) {
-    return { verdict: 'INSUFFICIENT EVIDENCE', reason: 'no targets set', driver: null };
-  }
+  // D-044: with no targets set, judge against the grade C limits ("investigate before scaling") and say so.
+  // Grade limits are "under" (reads < 5000), targets are "at most" (reads <= target).
+  const gradeLimits = targets.maxLogicalReads === null && targets.maxElapsedMs === null && targets.maxScanCount === null;
+  const t: Targets = gradeLimits ? { maxLogicalReads: GRADE_RULES.C.reads, maxElapsedMs: GRADE_RULES.C.ms, maxScanCount: null } : targets;
+  const over = (value: number, limit: number) => (gradeLimits ? value >= limit : value > limit);
+  const limitName = gradeLimits ? 'the grade C limit of' : 'target';
   const scan = ioSum(stats, 'scanCount');
-  if (targets.maxLogicalReads !== null && reads > targets.maxLogicalReads) {
-    return { verdict: 'OPTIMIZE', reason: `logical reads ${reads} over target ${targets.maxLogicalReads}`, driver: hottest(stats, 'logicalReads') };
+  if (t.maxLogicalReads !== null && over(reads, t.maxLogicalReads)) {
+    return { verdict: 'OPTIMIZE', reason: `logical reads ${reads} over ${limitName} ${t.maxLogicalReads}`, driver: hottest(stats, 'logicalReads') };
   }
-  if (targets.maxElapsedMs !== null && ms > targets.maxElapsedMs) {
-    return { verdict: 'OPTIMIZE', reason: `elapsed ${ms}ms over target ${targets.maxElapsedMs}ms`, driver: null };
+  if (t.maxElapsedMs !== null && over(ms, t.maxElapsedMs)) {
+    return { verdict: 'OPTIMIZE', reason: `elapsed ${ms}ms over ${limitName} ${t.maxElapsedMs}ms`, driver: null };
   }
   if (targets.maxScanCount !== null && scan !== null && scan > targets.maxScanCount) {
     return { verdict: 'OPTIMIZE', reason: `scan count ${scan} over target ${targets.maxScanCount}`, driver: hottest(stats, 'scanCount') };
@@ -362,7 +365,11 @@ export function prodVerdict(stats: ExecutionStats, targets: Targets, runs: RunSu
   if (runs && runs.spreadPct !== null && runs.spreadPct > UNSTABLE_SPREAD_PCT) {
     return { verdict: 'UNSTABLE', reason: `elapsed varies ${Math.round(runs.spreadPct)}% across ${runs.runs} runs`, driver: null };
   }
-  return { verdict: 'READY', reason: 'all captured metrics within targets', driver: null };
+  return {
+    verdict: 'READY',
+    reason: gradeLimits ? 'within the grade C limits (no targets set in Settings)' : 'all captured metrics within targets',
+    driver: null,
+  };
 }
 
 function hottest(stats: ExecutionStats, key: 'logicalReads' | 'scanCount'): string | null {

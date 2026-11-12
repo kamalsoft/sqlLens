@@ -1639,18 +1639,13 @@ body {
   margin-top: 4px;
 }
 
-.connect-error,
-.connect-ok {
+.connect-error {
   margin: 0;
   font-size: 0.82rem;
 }
 
 .connect-error {
   color: var(--status-bad);
-}
-
-.connect-ok {
-  color: var(--status-ok);
 }
 
 .connect-warn {
@@ -1829,4 +1824,8 @@ body {
 
 .grade-help {
   margin-top: 10px;
+}
+
+.what-database {
+  margin-bottom: 16px;
 }

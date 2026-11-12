@@ -174,14 +174,22 @@ export function asStringItems(value: unknown, path = "rewriteNotes"): string[] {
   );
 }
 
+/** Small models often write a column list as "a, b": accept it. Verification against the SQL follows. */
+function asColumnList(value: unknown, path: string): string[] {
+  if (typeof value === "string") return value.split(",").map((c) => c.trim()).filter(Boolean);
+  return asStringList(value, path);
+}
+
 export function asIndexRecommendations(value: unknown): IndexRecommendation[] {
-  return orDefault<unknown[]>(value, [], (v) => asArray(v, "indexRecommendations")).map((raw, i) => {
+  // A single recommendation written as an object instead of a one-item list is accepted too.
+  const items = value && typeof value === "object" && !Array.isArray(value) ? [value] : value;
+  return orDefault<unknown[]>(items, [], (v) => asArray(v, "indexRecommendations")).map((raw, i) => {
     const p = `indexRecommendations[${i}]`;
     const r = asObject(raw, p);
     return {
       table: asString(r.table, `${p}.table`),
-      keyColumns: asStringList(r.keyColumns, `${p}.keyColumns`),
-      includeColumns: orDefault(r.includeColumns, [], (v) => asStringList(v, `${p}.includeColumns`)),
+      keyColumns: asColumnList(r.keyColumns, `${p}.keyColumns`),
+      includeColumns: orDefault(r.includeColumns, [], (v) => asColumnList(v, `${p}.includeColumns`)),
       reason: orDefault(r.reason, "", (v) => asString(v, `${p}.reason`)),
       evidence: orDefault(r.evidence, "", (v) => asString(v, `${p}.evidence`)),
     };

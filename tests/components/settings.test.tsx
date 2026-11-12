@@ -43,7 +43,7 @@ afterEach(() => {
 
 describe("SettingsPage", () => {
   it("renders controlled fields from GET and no API key field", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json(200, loaded)));
+    vi.stubGlobal("fetch", vi.fn(async () => json(200, loaded)));
     const user = userEvent.setup();
     render(<SettingsPage />);
 
@@ -135,5 +135,32 @@ describe("SettingsPage", () => {
     expect(body.maxLogicalReads).toBeNull();
     expect(saved).toHaveBeenCalledTimes(1);
     window.removeEventListener("sqllens:settings-saved", saved);
+  });
+
+  it("offers the installed models for refactors, automatic by default, and saves the choice", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/review/models") {
+        return json(200, { models: [
+          { id: "coder-1.5b", name: "Qwen Coder 1.5B", compatible: true, parameterEstimate: 1.5e9 },
+          { id: "gguf-7b", name: "Too big", compatible: false, parameterEstimate: 7e9 },
+        ] });
+      }
+      return json(200, init?.method === "PUT" ? { ...loaded, ...JSON.parse(init.body as string) } : loaded);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+
+    const select = (await screen.findByLabelText("Refactor Model")) as HTMLSelectElement;
+    await waitFor(() => expect(select.options.length).toBe(2));
+    expect(select.value).toBe("");
+    expect(Array.from(select.options).map((o) => o.textContent)).toEqual([
+      "Automatic: the best instruction-tuned model", "Qwen Coder 1.5B (about 1.5B parameters)",
+    ]);
+    fireEvent.change(select, { target: { value: "coder-1.5b" } });
+    await user.click(screen.getByRole("button", { name: "Save Settings" }));
+    expect(await screen.findByText("Settings saved.")).toBeInTheDocument();
+    const body = JSON.parse(fetchMock.mock.calls.find(([, init]) => init?.method === "PUT")![1]!.body as string);
+    expect(body.refactorModel).toBe("coder-1.5b");
   });
 });

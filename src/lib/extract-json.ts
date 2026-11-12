@@ -301,6 +301,20 @@ export function dropTruncatedRewrite(text: string): string | null {
   return openDepth(before) === 1 ? `${before}"rewrittenProcedure": ""}` : null;
 }
 
+/**
+ * Without the tags, small models often put the SQL in a ```sql (or ```tsql) fence after the JSON.
+ * The fence counts only once the JSON object before it is complete.
+ */
+function fencedSqlBlock(text: string): { json: string; rewrite: string | null; closed: boolean } {
+  const fence = /```t?sql[^\S\r\n]*\r?\n/i.exec(text);
+  if (!fence) return { json: text, rewrite: null, closed: true };
+  const before = text.slice(0, fence.index);
+  if (!before.includes("{") || hasUnclosedObject(before)) return { json: text, rewrite: null, closed: true };
+  const after = text.slice(fence.index + fence[0].length);
+  const close = after.indexOf("```");
+  return { json: before, rewrite: (close === -1 ? after : after.slice(0, close)).trim(), closed: close !== -1 };
+}
+
 const REWRITE_OPEN = "<rewritten_procedure>";
 const REWRITE_CLOSE = "</rewritten_procedure>";
 
@@ -310,10 +324,15 @@ const REWRITE_CLOSE = "</rewritten_procedure>";
  * counts once the JSON object before it is complete. `closed` is false when
  * the closing tag is missing (the answer ended inside the rewrite).
  */
-export function splitRewriteBlock(text: string): { json: string; rewrite: string | null; closed: boolean } {
+export function splitRewriteBlock(
+  text: string,
+  // Refactor only: Review keeps rewrittenProcedure in its JSON and must not take a stray ```sql example.
+  opts: { sqlFence?: boolean } = {},
+): { json: string; rewrite: string | null; closed: boolean } {
   const open = text.toLowerCase().indexOf(REWRITE_OPEN);
-  const before = open === -1 ? "" : text.slice(0, open);
-  if (open === -1 || !before.includes("{") || hasUnclosedObject(before)) {
+  if (open === -1) return opts.sqlFence ? fencedSqlBlock(text) : { json: text, rewrite: null, closed: true };
+  const before = text.slice(0, open);
+  if (!before.includes("{") || hasUnclosedObject(before)) {
     return { json: text, rewrite: null, closed: true };
   }
   const after = text.slice(open + REWRITE_OPEN.length);

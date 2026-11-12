@@ -20,6 +20,9 @@
   "maxElapsedMs": null,
   "maxScanCount": null,
   "maxRuns": 5,
+  "measuredRuns": 3,
+  "showCompare": false,
+  "showRefactor": false,
   "prompt": {
     "analysisSP": "~/dev/dbPro/sqlens/data/prompts/analysisSP.md",
     "explainStatistic": "~/dev/dbPro/sqlens/data/prompts/explainStatistic.md"

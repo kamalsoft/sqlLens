@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { insertAudit } from "@/db/audit-repo";
+import { chooseRefactorModel, getInstalledModels } from "@/lib/installed-models";
 import { readAppConfig } from "@/lib/app-config";
 import { requireSession } from "@/lib/auth";
 import { extractJson, hasUnclosedObject, splitRewriteBlock } from "@/lib/extract-json";
@@ -38,7 +39,9 @@ export async function POST(request: Request) {
     if (!parsed.ok) return parsed.response;
     const body = parsed.body;
 
-    if (!isString(body.modelId) || !body.modelId) return badRequest("modelId is required", "modelId");
+    if (body.modelId !== undefined && (!isString(body.modelId) || !body.modelId)) {
+      return badRequest("modelId must be a non-empty string", "modelId");
+    }
 
     const config = await readAppConfig();
     const checked = validateSqlInput(body.sql, config.maxSqlLength);
@@ -55,7 +58,16 @@ export async function POST(request: Request) {
       return badRequest(`instructions exceed ${MAX_INSTRUCTIONS_LENGTH} characters`, "instructions");
     }
 
-    const resolved = await resolveModel(body.modelId);
+    // Without a modelId (the Execute screen), use the model chosen in Settings, or the best one installed.
+    let modelId = body.modelId as string | undefined;
+    if (!modelId) {
+      const best = chooseRefactorModel(await getInstalledModels(), config.refactorModel);
+      if (!best) {
+        return NextResponse.json({ error: "No compatible model is installed. Install one in Manage Models." }, { status: 404 });
+      }
+      modelId = best.id;
+    }
+    const resolved = await resolveModel(modelId);
     if (!resolved.ok) return resolved.response;
     const model = resolved.model;
 
@@ -84,7 +96,7 @@ export async function POST(request: Request) {
     );
     if (!run.ok) return run.response;
 
-    const block = splitRewriteBlock(run.text);
+    const block = splitRewriteBlock(run.text, { sqlFence: true });
     let answer;
     try {
       answer = extractJson(block.json, validateRefactor, { finished: !run.hitTokenLimit });

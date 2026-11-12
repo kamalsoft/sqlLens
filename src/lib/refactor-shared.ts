@@ -22,8 +22,11 @@ export type RefactorModelResult = {
 
 export type RefactorCheck = { id: string; label: string; passed: boolean; detail?: string };
 
-/** provided, none (no SQL returned), unsafe (adds writes; removed) or truncated (cut off; removed). */
-export type RefactorStatus = "provided" | "none" | "unsafe" | "truncated";
+/**
+ * provided, none (no SQL returned), unsafe (adds writes; removed), truncated (cut off; removed), or invalid
+ * (the original is a procedure but the answer has no CREATE/ALTER PROCEDURE, e.g. garbled output; removed).
+ */
+export type RefactorStatus = "provided" | "none" | "unsafe" | "truncated" | "invalid";
 
 export type RefactorResult = RefactorModelResult & {
   status: RefactorStatus;

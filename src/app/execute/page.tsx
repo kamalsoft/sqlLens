@@ -644,7 +644,7 @@ export default function ExecutePage() {
   });
 
   // EX-2: the connection folds to one line once a SQL Server database has been chosen from the list.
-  const connFolded = engine === 'mssql' && !editingConn && databases !== null && database.trim() !== '';
+  const connFolded = engine === 'mssql' && !editingConn && databases !== null && databases.length > 0;
   // EX-4: why Execute is not available yet, in words.
   const runBlocker =
     engine === 'mssql' && !database.trim() ? 'Connect and choose a database first.'
@@ -703,8 +703,13 @@ export default function ExecutePage() {
       const list = res.data?.databases ?? [];
       setDatabases(list);
       if (list.length === 0) setDbNote('This login cannot open any database.');
-      else if (!list.includes(database)) setDatabase('');
-      else { setEditingConn(false); void loadProcedures(database); }
+      else {
+        setEditingConn(false);
+        if (list.includes(database)) void loadProcedures(database);
+        else setDatabase('');
+        // The form folds and its Connect button goes away: hand keyboard focus to the next choice.
+        requestAnimationFrame(() => document.getElementById('exec-database')?.focus());
+      }
     } else if (res.status !== 401) {
       setDbNote(res.error ?? 'Could not list the databases');
     }
@@ -825,11 +830,12 @@ export default function ExecutePage() {
             <span className="step-no" aria-hidden="true">1</span>Connect to Server
           </Heading>
           {connFolded ? (
-            <Flex align="center" gap={3} wrap="wrap">
+            <Flex align="center" gap={3} wrap="wrap" role="status">
               <Text color="status.ok" fontWeight="semibold"><span aria-hidden="true">✓ </span>Connected</Text>
               <Text color="fg.default">
-                {host}{port.trim() && port.trim() !== '1433' ? `,${port.trim()}` : ''} · {database} ·{' '}
+                {host}{port.trim() && port.trim() !== '1433' ? `,${port.trim()}` : ''} ·{' '}
                 {authType === 'windows' ? `Windows login ${domain}\\${username}` : `SQL login ${username}`}
+                {databases ? ` · ${databases.length} database${databases.length === 1 ? '' : 's'}` : ''}
               </Text>
               <Button size="sm" variant="outline" colorPalette="gray" onClick={() => setEditingConn(true)}>Change</Button>
             </Flex>
@@ -889,23 +895,6 @@ export default function ExecutePage() {
                   </Button>
                 </div>
 
-                <label htmlFor="exec-database">Database</label>
-                {databases && databases.length > 0 ? (
-                  <select id="exec-database" className="select" value={database}
-                    onChange={(e) => {
-                      const db = e.target.value;
-                      setDatabase(db);
-                      setProcedures(null);
-                      if (db) { setEditingConn(false); void loadProcedures(db); }
-                    }}>
-                    <option value="">Select a database</option>
-                    {databases.map((name) => <option key={name} value={name}>{name}</option>)}
-                  </select>
-                ) : (
-                  <input id="exec-database" className="input" value={database} placeholder="Connect to list databases, or type a name"
-                    onChange={(e) => { setDatabase(e.target.value); setProcedures(null); setProcNote(null); procRequest.current++; }} />
-                )}
-
                 <span />
                 <details className="connect-more">
                   <summary>More options</summary>
@@ -932,9 +921,6 @@ export default function ExecutePage() {
                     Connect
                   </Button>
                   {dbNote && <p className="connect-error" role="alert">{dbNote}</p>}
-                  {!dbNote && databases && databases.length > 0 && (
-                    <p className="connect-ok" role="status">Connected. {databases.length} database{databases.length === 1 ? '' : 's'} available; choose one above.</p>
-                  )}
                 </div>
               </>
             )}
@@ -954,6 +940,28 @@ export default function ExecutePage() {
           <Heading as="h3" id="what-title" size="sm" color="fg.default" mb={4}>
             <span className="step-no" aria-hidden="true">2</span>What to run
           </Heading>
+          {engine === 'mssql' && (
+            <div className="connect-form what-database">
+              <label htmlFor="exec-database">Database</label>
+              {databases && databases.length > 0 ? (
+                <select id="exec-database" className="select" value={database}
+                  onChange={(e) => {
+                    const db = e.target.value;
+                    setDatabase(db);
+                    setProcedures(null);
+                    setProcNote(null);
+                    procRequest.current++;
+                    if (db) void loadProcedures(db);
+                  }}>
+                  <option value="">Select a database</option>
+                  {databases.map((name) => <option key={name} value={name}>{name}</option>)}
+                </select>
+              ) : (
+                <input id="exec-database" className="input" value={database} placeholder="Connect above to list databases, or type a name"
+                  onChange={(e) => { setDatabase(e.target.value); setProcedures(null); setProcNote(null); procRequest.current++; }} />
+              )}
+            </div>
+          )}
           <Flex gap={6} wrap="wrap" align="center" mb={2}>
             <fieldset className="choice-group">
               <legend className="sr-only">What to run</legend>

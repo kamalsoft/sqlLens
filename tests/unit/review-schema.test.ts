@@ -55,7 +55,11 @@ describe("review schema v1", () => {
     expect(validateReviewV1({ ...v1, indexRecommendations: [row] }).indexRecommendations).toEqual([
       { table: "dbo.t", keyColumns: ["a"], includeColumns: [], reason: "", evidence: "" },
     ]);
-    expect(() => validateReviewV1({ ...v1, indexRecommendations: [{ table: "t", keyColumns: "a" }] })).toThrow(
+    // A column list written as text ("a, b") is accepted; a non-list, non-text value still fails.
+    expect(validateReviewV1({ ...v1, indexRecommendations: [{ table: "t", keyColumns: "a, b", includeColumns: "c" }] }).indexRecommendations[0])
+      .toMatchObject({ keyColumns: ["a", "b"], includeColumns: ["c"] });
+    expect(validateReviewV1({ ...v1, indexRecommendations: { table: "t", keyColumns: ["a"] } }).indexRecommendations).toHaveLength(1);
+    expect(() => validateReviewV1({ ...v1, indexRecommendations: [{ table: "t", keyColumns: 5 }] })).toThrow(
       /indexRecommendations\[0\]\.keyColumns/,
     );
   });

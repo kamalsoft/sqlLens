@@ -95,8 +95,28 @@ describe('P8-02 prod-readiness verdict', () => {
   const NO = { maxLogicalReads: null, maxElapsedMs: null, maxScanCount: null };
   const TARGETS = { maxLogicalReads: 100, maxElapsedMs: 1000, maxScanCount: 5 };
 
-  it('returns INSUFFICIENT EVIDENCE when no targets are set', () => {
-    expect(analyzeExecution(result({}, 100), NO).prodVerdict.reason).toBe('no targets set');
+  it('judges against the grade C limits when no targets are set, and says so (D-044)', () => {
+    expect(analyzeExecution(result({ totalElapsedMs: 11 }, 100), NO).prodVerdict)
+      .toEqual({ verdict: 'READY', reason: 'within the grade C limits (no targets set in Settings)', driver: null });
+    const reads = analyzeExecution(result({ totalElapsedMs: 11 }, 14139), NO).prodVerdict;
+    expect(reads).toMatchObject({ verdict: 'OPTIMIZE', reason: 'logical reads 14139 over the grade C limit of 5000', driver: 'T' });
+    // The grade boundary is "under 5000", so exactly 5000 is over the default limit (and grades D).
+    expect(analyzeExecution(result({ totalElapsedMs: 11 }, 5000), NO).prodVerdict.verdict).toBe('OPTIMIZE');
+    expect(analyzeExecution(result({ totalElapsedMs: 1000 }, 100), NO).prodVerdict.reason).toBe('elapsed 1000ms over the grade C limit of 1000ms');
+  });
+
+  it('under the grade limits, unstable timing still gives UNSTABLE and missing evidence still comes first', () => {
+    const runs = { runs: 4, warmupRuns: 1, elapsedMs: { min: 10, median: 20, p95: 40, max: 40 }, logicalReads: { min: 100, median: 100, p95: 100, max: 100 }, spreadPct: 150 };
+    expect(analyzeExecution(result({ totalElapsedMs: 11 }, 100), NO, runs).prodVerdict.verdict).toBe('UNSTABLE');
+    const empty = analyzeExecution(result({ totalElapsedMs: 11, tableRows: { T: 0 } }, 100), NO).prodVerdict;
+    expect(empty.verdict).toBe('INSUFFICIENT EVIDENCE');
+    // 4999 reads is under the grade C limit; the scan count has no default limit.
+    expect(analyzeExecution(result({ totalElapsedMs: 11 }, 4999), NO).prodVerdict.verdict).toBe('READY');
+  });
+
+  it('uses the targets from Settings instead of the grade limits once any target is set', () => {
+    const reads = analyzeExecution(result({ totalElapsedMs: 11 }, 6000), { ...NO, maxElapsedMs: 50 }).prodVerdict;
+    expect(reads).toEqual({ verdict: 'READY', reason: 'all captured metrics within targets', driver: null });
   });
 
   it('returns INSUFFICIENT EVIDENCE when reads or time are missing', () => {

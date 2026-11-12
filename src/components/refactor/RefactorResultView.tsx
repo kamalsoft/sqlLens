@@ -16,6 +16,7 @@ const STATUS_MESSAGES: Record<Exclude<RefactorStatus, "provided">, string> = {
   none: "The model did not return refactored SQL. Try again, add instructions, or use a larger model.",
   unsafe: "The refactored SQL was removed because it modifies data the original procedure does not.",
   truncated: "The refactored SQL was cut off at the new-token limit, so it was removed. Raise maxNewTokens in Settings.",
+  invalid: "The model's answer was not a SQL Server stored procedure (no CREATE or ALTER PROCEDURE statement), so it was removed. Try again, or use a larger model.",
 };
 
 /** What to show when /api/refactor fails, or null for 401 (the client is already redirecting to login). */

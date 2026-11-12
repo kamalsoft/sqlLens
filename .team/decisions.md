@@ -247,7 +247,7 @@ User decision: A (2026-11-10, "I signoff the change request and approve it. go a
 Security review (2026-11-10, verdict APPROVED WITH CONDITIONS): condition 2 (PostgreSQL `PREPARE TRANSACTION` is no longer blocked) is an accepted risk until the PostgreSQL feature is removed (ROADMAP backlog item 21). User accepted the risk (2026-11-10, "yes"). Conditions 1, 3 and 4 are met: auth on `/api/execute` is verified, the stale comments are fixed, and `data/appconfig.json` stays out of the PR.
 
 ### D-037 Prod-readiness verdict for stored procedure runs
-Status: APPROVED (option C: P8-02 verdict now, P8-03 multi-run later)
+Status: APPROVED (option C: P8-02 verdict now, P8-03 multi-run later). Amended by D-044: with no targets set, the grade C limits are used instead of "no targets set".
 Context (evidence): live run 2026-11-11 reported grade A from elapsed time alone while logical reads, physical reads and scan count were "Not captured" (`src/lib/audit-analyzer.ts`, grade from time only). The user needs evidence to decide "ready for prod" or "optimize first".
 Options:
 A Verdict from measured evidence only: `READY` / `OPTIMIZE` / `INSUFFICIENT EVIDENCE`, against user-set thresholds (max logical reads, max elapsed, max scans). Multi-run statistics added later (P8-03).
@@ -301,3 +301,7 @@ Status: APPROVED (user, 2026-11-11: "\"allowLiveExecution\": false, set this val
 Change: `data/appconfig.json` is committed with `"allowLiveExecution": true`. This supersedes condition C3 of the 2026-11-11 security review ("`data/appconfig.json` stays out of every commit"). The file holds no credentials; connection details are typed on the Execute screen and never stored.
 Risk: anyone who clones the repository and signs in can run SQL against a database whose credentials they supply. The endpoints still need a session, and batches still run in a rolled-back transaction.
 Related: the Execute screen's Runs field is removed; each single-mode run on a real engine executes a warm-up plus `measuredRuns` (default 2) measured runs, capped by `maxRuns` (user choice "3 runs", 2026-11-11). A procedure that writes data writes once per run.
+
+### D-044 Grade C limits when no prod-readiness targets are set (amends D-037)
+Status: APPROVED (user, 2026-11-12, option "Use grade limits when unset", after asking why every run said "INSUFFICIENT EVIDENCE: no targets set")
+Change: when `maxLogicalReads`, `maxElapsedMs` and `maxScanCount` are all unset, `prodVerdict` (`src/lib/audit-analyzer.ts`) judges the run against the grade C limits from `GRADE_RULES` (under 5,000 logical reads, under 1,000 ms; no scan limit) instead of returning `INSUFFICIENT EVIDENCE: no targets set`. The reason names the limit ("over the grade C limit of 5000", "within the grade C limits (no targets set in Settings)"), so it is never mistaken for a user target. Setting any target switches back to the user's targets. Evidence checks (missing metrics, empty or unread tables) still come first.
