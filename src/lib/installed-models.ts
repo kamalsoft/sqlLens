@@ -136,7 +136,7 @@ export async function getInstalledModels(): Promise<InstalledModel[]> {
 const INSTRUCT_NAME = /instruct|[-_]chat\b|[-_]it\b/i;
 
 /**
- * The model a refactor uses: the configured one when it is installed and compatible, otherwise the best
+ * The model a refactor or review uses: the configured one when it is installed and compatible, otherwise the best
  * automatic choice. Automatic ranks models with a chat template first (without one, prompts cannot be sent
  * in the chat format), then instruction-tuned names (Instruct, -chat, -it) over base models, then the larger
  * parameter estimate. A model of unknown size ranks last on size; ties keep the list's name order.

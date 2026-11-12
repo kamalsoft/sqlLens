@@ -136,7 +136,7 @@ describe("POST /api/review", () => {
     ["missing sql", { modelId: "acme/tiny" }],
     ["NUL in sql", { modelId: "acme/tiny", sql: "a\0b" }],
     ["non-SQL text", { modelId: "acme/tiny", sql: "please review my essay" }],
-    ["missing modelId", { sql: "SELECT 1" }],
+    ["empty modelId", { modelId: "", sql: "SELECT 1" }],
     ["bad schemaVersion", { ...valid, schemaVersion: "v9" }],
   ])("400 for %s", async (_name, body) => {
     expect((await review(post("/api/review", body, cookie))).status).toBe(400);
@@ -288,23 +288,20 @@ describe("POST /api/review", () => {
     );
   });
 
-  it("recovers an answer that stopped inside its final string value", async () => {
-    const stopped =
-      '{"summary": "s", "issues": [{"severity": "high", "title": "t", "explanation": "e"}],\n' +
-      '"rewrittenProcedure": "CREATE PROCEDURE dbo.p\nAS\nBEGIN\n  SELECT 1;\nEND;';
-    setPipelineFactoryForTests(async () => generatorReturning(stopped));
-    const res = await review(post("/api/review", { ...valid, schemaVersion: "v1" }, cookie));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.result.rewrittenProcedure).toBe("CREATE PROCEDURE dbo.p\nAS\nBEGIN\n  SELECT 1;\nEND;");
+  it("returns findings only: a rewrite in the JSON or after it is dropped (RV-2)", async () => {
+    const block = "CREATE PROCEDURE dbo.p AS\nBEGIN\n  SET NOCOUNT ON;\nEND";
+    const json = JSON.stringify({ summary: "s", issues: [], rewriteNotes: ["Added NOCOUNT"], rewrittenProcedure: block });
+    setPipelineFactoryForTests(async () => generatorReturning(`${json}\n<rewritten_procedure>\n${block}\n</rewritten_procedure>`));
+    const { result } = await (await review(post("/api/review", { ...valid, schemaVersion: "v1" }, cookie))).json();
+    expect(result).toMatchObject({ summary: "s", rewrittenProcedure: "", rewriteNotes: [] });
+    expect(result).not.toHaveProperty("rewriteStatus");
 
-    expect(body.result.rewriteStatus).toBe("provided");
-
-    // Cut off by the token budget inside the rewrite: keep the review, drop the partial SQL.
+    // An old-style answer cut off inside its rewrite string: the findings are still recovered.
+    const stopped = '{"summary": "s", "issues": [{"severity": "high", "title": "t", "explanation": "e"}],\n"rewrittenProcedure": "CREATE PROCEDURE dbo.p\nAS';
     setPipelineFactoryForTests(async () => generatorReturning(stopped, { hitTokenLimit: true }));
     const cut = await review(post("/api/review", { ...valid, schemaVersion: "v1" }, cookie));
     expect(cut.status).toBe(200);
-    expect((await cut.json()).result).toMatchObject({ rewriteStatus: "truncated", rewrittenProcedure: "", rewriteNotes: [] });
+    expect((await cut.json()).result).toMatchObject({ summary: "s", rewrittenProcedure: "" });
 
     // Cut off earlier (inside the issues list): never recovered.
     const early = '{"summary": "s", "issues": [{"severity": "high", "title": "t", "explanation": "e"}, {"sev';
@@ -312,18 +309,18 @@ describe("POST /api/review", () => {
     expect((await review(post("/api/review", { ...valid, schemaVersion: "v1" }, cookie))).status).toBe(502);
   });
 
-  it("takes the rewrite from the plain-SQL block after the JSON", async () => {
-    const json = JSON.stringify({ summary: "s", issues: [], rewriteNotes: ["Added NOCOUNT"] });
-    const block = "CREATE PROCEDURE dbo.p AS\nBEGIN\n  SET NOCOUNT ON;\n  SELECT 'it''s \"quoted\"';\nEND";
-    setPipelineFactoryForTests(async () => generatorReturning(`${json}\n<rewritten_procedure>\n${block}\n</rewritten_procedure>`));
-    const ok = await (await review(post("/api/review", { ...valid, schemaVersion: "v1" }, cookie))).json();
-    expect(ok.result).toMatchObject({ rewriteStatus: "provided", rewrittenProcedure: block, rewriteNotes: ["Added NOCOUNT"] });
-
-    // Block left open because the token limit was hit: review kept, rewrite dropped.
-    const open = `${json}\n<rewritten_procedure>\nCREATE PROCEDURE dbo.p AS\nBEGIN\n  SET NOCOUNT ON;`;
-    setPipelineFactoryForTests(async () => generatorReturning(open, { hitTokenLimit: true }));
-    const cut = await (await review(post("/api/review", { ...valid, schemaVersion: "v1" }, cookie))).json();
-    expect(cut.result).toMatchObject({ rewriteStatus: "truncated", rewrittenProcedure: "" });
+  it("without modelId uses the Review model from Settings, else the automatic choice; reviewSchema applies (RV-1)", async () => {
+    setPipelineFactoryForTests(async () => generatorReturning(JSON.stringify({ summary: "s", issues: [] })));
+    writeConfig({ reviewModel: "acme/small", reviewSchema: "v1" });
+    const chosen = await (await review(post("/api/review", { sql: "SELECT 1" }, cookie))).json();
+    expect(chosen).toMatchObject({ model: "acme/small", schemaVersion: "v1" });
+    // An explicit schemaVersion beats the setting: v2 is asked for, and this v1 answer is a fallback.
+    expect(await (await review(post("/api/review", { sql: "SELECT 1", schemaVersion: "v2" }, cookie))).json()).toMatchObject({ schemaVersion: "v1", schemaFallback: true });
+    // A Review model that is no longer installed falls back to the automatic choice.
+    writeConfig({ reviewModel: "gone/model" });
+    expect((await (await review(post("/api/review", { sql: "SELECT 1", schemaVersion: "v1" }, cookie))).json()).model).toMatch(/^acme\//);
+    writeConfig({ reviewModel: "" });
+    expect((await (await review(post("/api/review", { sql: "SELECT 1", schemaVersion: "v1" }, cookie))).json()).model).toMatch(/^acme\//);
   });
 
   describe("POST /api/refactor", () => {
@@ -422,32 +419,6 @@ describe("POST /api/review", () => {
       expect(res.status).toBe(502);
       expect((await res.json()).details.responseText).toBe("I cannot help with that.");
     });
-  });
-
-  it("removes a rewrite that writes to tables the original does not", async () => {
-    const sql = "CREATE PROCEDURE dbo.p AS SELECT o.Id FROM dbo.Orders AS o";
-    const answer = JSON.stringify({
-      summary: "s",
-      issues: [],
-      rewriteNotes: ["Persist results"],
-      rewrittenProcedure: "CREATE PROCEDURE dbo.p AS BEGIN SELECT o.Id FROM dbo.Orders AS o; INSERT INTO dbo.Orders (Id) SELECT 1; END",
-    });
-    setPipelineFactoryForTests(async () => generatorReturning(answer));
-    const res = await review(post("/api/review", { modelId: "acme/tiny", sql, schemaVersion: "v1" }, cookie));
-    const { result } = await res.json();
-    expect(result).toMatchObject({ rewriteStatus: "unsafe", rewriteDetail: "Writes to orders", rewrittenProcedure: "", rewriteNotes: [] });
-  });
-
-  it("removes a rewrite that is not SQL and reports why", async () => {
-    const answer = JSON.stringify({
-      summary: "s",
-      issues: [],
-      rewriteNotes: ["<one change made in the rewrite and why>"],
-      rewrittenProcedure: "<the complete restructured procedure>",
-    });
-    setPipelineFactoryForTests(async () => generatorReturning(answer));
-    const { result } = await (await review(post("/api/review", { ...valid, schemaVersion: "v1" }, cookie))).json();
-    expect(result).toMatchObject({ rewriteStatus: "invalid", rewrittenProcedure: "", rewriteNotes: [] });
   });
 
   it("504 on timeout, then 429 while the slow generation still runs", async () => {

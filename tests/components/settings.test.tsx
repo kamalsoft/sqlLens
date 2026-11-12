@@ -158,9 +158,14 @@ describe("SettingsPage", () => {
       "Automatic: the best instruction-tuned model", "Qwen Coder 1.5B (about 1.5B parameters)",
     ]);
     fireEvent.change(select, { target: { value: "coder-1.5b" } });
+    // RV-1: the Review screen's model and result format live here too.
+    const review = (await screen.findByLabelText("Review Model")) as HTMLSelectElement;
+    expect(review.value).toBe("");
+    fireEvent.change(review, { target: { value: "coder-1.5b" } });
+    fireEvent.change(screen.getByLabelText("Review Result Format"), { target: { value: "v1" } });
     await user.click(screen.getByRole("button", { name: "Save Settings" }));
     expect(await screen.findByText("Settings saved.")).toBeInTheDocument();
     const body = JSON.parse(fetchMock.mock.calls.find(([, init]) => init?.method === "PUT")![1]!.body as string);
-    expect(body.refactorModel).toBe("coder-1.5b");
+    expect(body).toMatchObject({ refactorModel: "coder-1.5b", reviewModel: "coder-1.5b", reviewSchema: "v1" });
   });
 });

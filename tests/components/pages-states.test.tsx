@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { ChakraProvider, defaultSystem } from "@chakra-ui/react";
 import userEvent from "./user";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -17,7 +18,6 @@ function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
-const models = { models: [{ id: "m1", name: "Model One", compatible: true }] };
 
 afterEach(() => {
   cleanup();
@@ -29,16 +29,16 @@ describe("Review page states", () => {
   it("shows pending, disables the button, then the API error", async () => {
     let resolve!: (r: Response) => void;
     const fetchMock = vi.fn().mockImplementation((url: string) =>
-      url === "/api/review/models" ? Promise.resolve(json(200, models)) : new Promise<Response>((r) => (resolve = r))
+      url === "/api/audit" ? Promise.resolve(json(200, { audits: [] })) : new Promise<Response>((r) => (resolve = r))
     );
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
-    render(<ReviewPage />);
+    render(<ChakraProvider value={defaultSystem}><ReviewPage /></ChakraProvider>);
 
-    await user.type(await screen.findByPlaceholderText(/CREATE PROCEDURE/), "select 1");
+    await user.type(await screen.findByLabelText("Stored procedure"), "select 1");
     await user.click(screen.getByRole("button", { name: "Analyze SP" }));
 
-    expect(await screen.findByText("Running local analysis")).toBeInTheDocument();
+    expect(await screen.findByRole("status")).toHaveTextContent(/Sending the procedure \(1 line, 8 characters\)/);
     expect(screen.getByRole("button", { name: /Analyzing/ })).toBeDisabled();
 
     resolve(json(429, { error: "Rate limit exceeded" }));
@@ -48,7 +48,7 @@ describe("Review page states", () => {
 
   it("redirects to /login?next= on 401", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json(401, { error: "Authentication required" })));
-    render(<ReviewPage />);
+    render(<ChakraProvider value={defaultSystem}><ReviewPage /></ChakraProvider>);
     await waitFor(() => expect(replace).toHaveBeenCalledWith("/login?next=%2Freview"));
   });
 });

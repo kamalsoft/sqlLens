@@ -34,3 +34,11 @@ Append-only learnings (date, task ID, fact, evidence path:line). Scribe promotes
 - IPC carries SQL/prompt; worker logs nothing; stdout ignored, stderr inherited. OK.
 - Crash 502 message = signal/exit code only (inference.ts:65,231; model-run.ts:90-91). OK.
 - Conditions: worker generic error message (inference-worker.mjs:66) relayed to API/status may carry local paths; a stuck native call delays disconnect-exit (inference-worker.mjs:74).
+
+## 2026-11-12 - features/review-redesign (RV-1..RV-4) uncommitted diff
+- Verdict: SIGNED OFF WITH CONDITIONS.
+- Scoping OK: listAudits/getAudit filter by session_id (src/db/audit-repo.ts:141,205); review executionAuditId uses getAudit(id, sessionId).
+- RunPicker preview derives from normalizeTelemetry allow-list (timings, io rows capped, plan capped); no rawOutput. Subset of own /api/audit/<id>.
+- reviewModel <=1024 string, reviewSchema enum; resolveModel still validates chosen id.
+- Review no longer returns model SQL; rewrite-check remains in src/lib/refactor.ts:96,159 for /api/refactor.
+- Conditions: test that no-modelId path + config.reviewModel not installed falls back; test that review response has empty rewrittenProcedure even when model emits a rewrite block.

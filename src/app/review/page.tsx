@@ -1,33 +1,18 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { Box, Button, Container, Flex, Heading, Tabs, Text, Textarea } from "@chakra-ui/react";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { useApi } from "@/components/api-client";
 import { ReviewResultView } from "@/components/review/ReviewResultView";
+import { RunPicker } from "@/components/review/RunPicker";
 import { NOT_SQL_ERROR, looksLikeSql } from "@/lib/validation/sql-input";
 import {
   type ReviewV1,
   type ReviewV2,
   type SchemaVersion,
 } from "@/lib/review-schema";
-
-type Model = {
-  id: string;
-  name: string;
-  directory?: string;
-  compatible: boolean;
-  parameterEstimate?: number | null;
-  small?: boolean;
-};
-
-type ModelStatus = {
-  id: string;
-  loaded: boolean;
-  loading: boolean;
-  lastError: string | null;
-};
-
-type AuditItem = { id: string; type: string; createdAt: string };
 
 type ReviewResponse = {
   id?: string;
@@ -40,6 +25,7 @@ type ReviewResponse = {
 };
 
 type ReviewOutput = {
+  model: string | null;
   schemaVersion: SchemaVersion;
   result: ReviewV1 | ReviewV2;
   lowConfidence: boolean;
@@ -62,16 +48,9 @@ function formatRawOutput(text: string): string {
   }
 }
 
-function sizeLabel(model: Model): string | null {
-  if (typeof model.parameterEstimate !== "number") return null;
-  const b = model.parameterEstimate / 1e9;
-  const size = `~${Number(b.toFixed(b < 10 ? 1 : 0))}B parameters`;
-  return model.small ? `${size} — small model; Auto uses v1` : `${size}; Auto uses v2`;
-}
-
 function failureMessage(status: number, error: string | null): string {
   if (status === 429) return `The reviewer is busy. ${error ?? "Wait for the current review to finish, then retry."}`;
-  if (status === 504) return "The model timed out. Try a smaller input or a smaller model.";
+  if (status === 504) return "The model timed out. Try a shorter procedure, or raise inferenceTimeoutMs in Settings.";
   if (status === 502) {
     const generic = "The model's output could not be parsed as a valid review.";
     return error && error !== "Unable to parse model response" ? `${generic} ${error}` : generic;
@@ -79,99 +58,66 @@ function failureMessage(status: number, error: string | null): string {
   return error ?? "Stored procedure analysis failed";
 }
 
+/** m:ss for the model-wait clock. */
+function formatElapsed(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+/**
+ * RV-5: review a stored procedure with the local model chosen in Settings (Review model), optionally
+ * with the measured telemetry of one of the user's Execute & Audit SP runs. Findings only: a rewrite
+ * comes from Refactor on Execute & Audit SP.
+ */
 export default function ReviewPage() {
   const api = useApi();
-  const [models, setModels] = useState<Model[]>([]);
-  const [modelId, setModelId] = useState("");
   const [sql, setSql] = useState("");
-  const [result, setResult] = useState<ReviewOutput | null>(null);
-  const [schemaVersion, setSchemaVersion] = useState<SchemaVersion | "auto">("auto");
-  const [statuses, setStatuses] = useState<ModelStatus[]>([]);
-  const [audits, setAudits] = useState<AuditItem[]>([]);
   const [executionAuditId, setExecutionAuditId] = useState("");
+  const [result, setResult] = useState<ReviewOutput | null>(null);
   const [rawOutput, setRawOutput] = useState<{ text: string; validation: string } | null>(null);
   const [error, setError] = useState("");
-  const [loadingModels, setLoadingModels] = useState(true);
-  const [analyzing, setAnalyzing] = useState(false);
+  const [step, setStep] = useState<string | null>(null);
+  const [started, setStarted] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const analyzing = step !== null;
   // UX-B: leaving while the model runs asks first, and cancels the request when the user agrees.
   const abortRef = useRef<AbortController | null>(null);
   useLeaveGuard(analyzing, "A review", () => abortRef.current?.abort());
   useEffect(() => () => abortRef.current?.abort(), []);
-
   useEffect(() => {
-    let cancelled = false;
-    void api<{ models?: Model[] }>(
-      "/api/review/models",
-      { cache: "no-store" },
-      "Unable to load installed models"
-    ).then((res) => {
-      if (cancelled) return;
-      if (res.ok) {
-        const installedModels = res.data?.models ?? [];
-        setModels(installedModels);
-        setModelId(installedModels[0]?.id ?? "");
-      } else if (res.status !== 401) {
-        setError(res.error ?? "Unable to load installed models");
-      }
-      setLoadingModels(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [api]);
+    if (started === null) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [started]);
 
-  // Optional extras: degrade silently if the endpoints are unavailable.
-  useEffect(() => {
-    let cancelled = false;
-    void api<{ models?: ModelStatus[] }>("/api/models/status", { cache: "no-store" }).then((res) => {
-      if (!cancelled && res.ok) setStatuses(res.data?.models ?? []);
-    });
-    void api<{ audits?: AuditItem[] }>("/api/audit", { cache: "no-store" }).then((res) => {
-      if (!cancelled && res.ok) {
-        setAudits((res.data?.audits ?? []).filter((audit) => audit.type === "EXECUTE"));
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [api]);
+  const procedure = sql.trim();
+  const notReady = !procedure ? "Paste a stored procedure first." : !looksLikeSql(procedure) ? NOT_SQL_ERROR : "";
 
   async function analyzeProcedure() {
-    const procedure = sql.trim();
-
-    if (!modelId) {
-      setError("Select an installed model.");
+    if (notReady) {
+      setError(notReady);
       return;
     }
-
-    if (!procedure) {
-      setError("Paste a stored procedure before analyzing.");
-      return;
-    }
-
-    if (!looksLikeSql(procedure)) {
-      setError(NOT_SQL_ERROR);
-      return;
-    }
-
-    setAnalyzing(true);
     setError("");
     setResult(null);
     setRawOutput(null);
-
-    abortRef.current = new AbortController();
+    const lines = procedure.split("\n").length;
+    setStep(
+      `Sending the procedure (${lines.toLocaleString()} line${lines === 1 ? "" : "s"}, ${procedure.length.toLocaleString()} characters)` +
+        (executionAuditId ? " with the chosen run's telemetry" : "") +
+        " to the Review model chosen in Settings.",
+    );
+    setStarted(Date.now());
+    setNow(Date.now());
+    const controller = new AbortController();
+    abortRef.current = controller;
     const res = await api<ReviewResponse>(
       "/api/review",
       {
         method: "POST",
-        signal: abortRef.current.signal,
+        signal: controller.signal,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          modelId,
-          sql: procedure,
-          ...(schemaVersion === "auto" ? {} : { schemaVersion }),
-          ...(executionAuditId ? { executionAuditId } : {}),
-        }),
+        body: JSON.stringify({ sql: procedure, ...(executionAuditId ? { executionAuditId } : {}) }),
       },
       "Stored procedure analysis failed"
     );
@@ -179,24 +125,21 @@ export default function ReviewPage() {
     if (res.ok) {
       if (res.data?.result) {
         setResult({
-          schemaVersion: res.data.schemaVersion ?? (schemaVersion === "auto" ? "v2" : schemaVersion),
+          model: res.data.model ?? null,
+          schemaVersion: res.data.schemaVersion ?? "v2",
           lowConfidence: res.data.lowConfidence === true,
           schemaFallback: res.data.schemaFallback === true,
           result: res.data.result,
         });
       } else {
-        setError("The selected model returned an empty result.");
+        setError("The model returned an empty result.");
       }
+    } else if (controller.signal.aborted) {
+      setError("Review cancelled.");
     } else if (res.status !== 401) {
       setError(failureMessage(res.status, res.error));
       const d = res.details as
-        | {
-            message?: unknown;
-            responseText?: unknown;
-            responsePreview?: unknown;
-            responseTail?: unknown;
-            responseCharacters?: unknown;
-          }
+        | { message?: unknown; responseText?: unknown; responsePreview?: unknown; responseTail?: unknown; responseCharacters?: unknown }
         | null;
       if (res.status === 502 && d && typeof d.responsePreview === "string") {
         let text: string;
@@ -214,211 +157,118 @@ export default function ReviewPage() {
         setRawOutput({ text: formatRawOutput(text), validation });
       }
     }
-    setAnalyzing(false);
+    abortRef.current = null;
+    setStep(null);
+    setStarted(null);
   }
 
-  const selectedModel = models.find((model) => model.id === modelId);
-  const selectedStatus = statuses.find((status) => status.id === modelId);
-  const canAnalyze = Boolean(
-    selectedModel?.compatible && sql.trim() && !analyzing
-  );
-
-  const compatibleModels = models.filter((model) => model.compatible);
+  const panel = { bg: "bg.panel", borderWidth: "1px", borderColor: "border.subtle", borderRadius: "xl", p: 6, mb: 6 } as const;
 
   return (
-    <main className="review-page">
-      <header className="review-hero">
-        <div>
-          <span className="review-eyebrow">Analysis</span>
-          <h1>Review Stored Procedure</h1>
-          <p>
-            Select an installed Hugging Face model and analyze a SQL Server
-            stored procedure locally.
-          </p>
-        </div>
-      </header>
-
-      {error && (
-        <div className="review-alert" role="alert">
-          {error}
-        </div>
-      )}
-
-      <section className="review-layout">
-        <div className="review-panel">
-          <div className="review-panel-heading">
-            <div>
-              <span className="review-step">01</span>
-              <h2>Configure analysis</h2>
-            </div>
-            <span className="review-local-badge">Local model</span>
+    <Box color="fg.default">
+      <Container maxW="container.xl" p={0}>
+        <header className="page-header">
+          <div>
+            <p className="page-kicker">Analysis</p>
+            <h2 className="page-title">Review Stored Procedure</h2>
+            <p className="analysis-note">
+              Get findings, risks and index ideas for a stored procedure from a local model. Nothing is executed.
+            </p>
+            <Text fontSize="xs" color="fg.muted" mt={1}>
+              Model: {result?.model ?? "the Review model chosen in Settings (automatic: the best instruction-tuned model)"} ·{" "}
+              <Link href="/settings" className="text-link">Change in Settings</Link>
+            </Text>
           </div>
+        </header>
 
-          <label className="review-field">
-            <span>Model</span>
-            <select
-              value={modelId}
-              onChange={(event) => {
-                setModelId(event.target.value);
-                setError("");
-              }}
-              disabled={loadingModels || models.length === 0 || analyzing}
-            >
-              {loadingModels ? (
-                <option value="">Loading installed models...</option>
-              ) : models.length === 0 ? (
-                <option value="">
-                  No downloaded models found
-                </option>
-              ) : (
-                compatibleModels.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.name}
-                  </option>
-                ))
+        <Box as="section" aria-labelledby="proc-title" {...panel}>
+          <Heading as="h3" id="proc-title" size="sm" color="fg.default" mb={4}>
+            <span className="step-no" aria-hidden="true">1</span>Stored procedure
+          </Heading>
+          <Textarea
+            aria-label="Stored procedure"
+            value={sql}
+            onChange={(event) => { setSql(event.target.value); setError(""); }}
+            placeholder={"CREATE PROCEDURE dbo.GetOrders\n  @CustomerId int\nAS\nBEGIN\n  SELECT OrderId, Total\n  FROM dbo.Orders\n  WHERE CustomerId = @CustomerId;\nEND"}
+            minH="280px" fontFamily="mono" fontSize="sm" bg="bg.canvas" borderColor="border.subtle"
+            _placeholder={{ color: "fg.muted" }} resize="vertical" spellCheck={false} disabled={analyzing}
+          />
+          <Text fontSize="xs" color="fg.muted" mt={1}>{sql.length.toLocaleString()} characters</Text>
+        </Box>
+
+        <Box as="section" aria-labelledby="evidence-title" {...panel}>
+          <Heading as="h3" id="evidence-title" size="sm" color="fg.default" mb={4}>
+            <span className="step-no" aria-hidden="true">2</span>Evidence (optional)
+          </Heading>
+          <RunPicker value={executionAuditId} onChange={setExecutionAuditId} disabled={analyzing} />
+        </Box>
+
+        <Box as="section" aria-labelledby="analyze-title" className="run-bar" {...panel}>
+          <Heading as="h3" id="analyze-title" size="sm" color="fg.default" mb={4}>
+            <span className="step-no" aria-hidden="true">3</span>Analyze
+          </Heading>
+          <Flex gap={3} align="center" wrap="wrap">
+            <Button colorPalette="brand" onClick={() => void analyzeProcedure()} loading={analyzing} loadingText="Analyzing..."
+              disabled={analyzing || !!notReady} aria-describedby={notReady ? "analyze-why" : undefined}>
+              Analyze SP
+            </Button>
+            {analyzing && <Button variant="outline" onClick={() => abortRef.current?.abort()}>Cancel</Button>}
+            {notReady && !analyzing && <Text id="analyze-why" fontSize="sm" color="fg.muted">{notReady}</Text>}
+          </Flex>
+          {step && (
+            <Box role="status" mt={3}>
+              <Text fontSize="sm" color="accent.default">{step}</Text>
+              {started !== null && (
+                <Text fontSize="xs" color="fg.muted" mt={1}>
+                  Waiting for the model&apos;s answer: {formatElapsed(now - started)} elapsed. A small local model usually needs a minute or more.
+                </Text>
               )}
-            </select>
-
-            {selectedModel && (
-              <small className="review-field-help">
-                {selectedModel.id}
-                {sizeLabel(selectedModel) && (
-                  <>
-                    {" "}
-                    <span data-testid="model-size">{sizeLabel(selectedModel)}</span>
-                  </>
-                )}
-              </small>
-            )}
-          </label>
-
-          {selectedStatus && (
-            <small className="review-field-help" data-testid="model-status">
-              {selectedStatus.lastError
-                ? `Model error: ${selectedStatus.lastError}`
-                : selectedStatus.loading
-                  ? "Model status: loading"
-                  : selectedStatus.loaded
-                    ? "Model status: loaded"
-                    : "Model status: not loaded (loads on first review)"}
-            </small>
+            </Box>
           )}
+          {error && <div role="alert" className="alert">{error}</div>}
+        </Box>
 
-          <label className="review-field">
-            <span>Result schema</span>
-            <select
-              value={schemaVersion}
-              onChange={(event) => setSchemaVersion(event.target.value as SchemaVersion | "auto")}
-              disabled={analyzing}
-            >
-              <option value="auto">Auto (recommended)</option>
-              <option value="v2">v2 (tables: findings, performance, security, testing)</option>
-              <option value="v1">v1 (summary and issues)</option>
-            </select>
-          </label>
-
-          {audits.length > 0 && (
-            <label className="review-field">
-              <span>Include telemetry from execution</span>
-              <select
-                value={executionAuditId}
-                onChange={(event) => setExecutionAuditId(event.target.value)}
-                disabled={analyzing}
-              >
-                <option value="">None</option>
-                {audits.map((audit) => (
-                  <option key={audit.id} value={audit.id}>
-                    {new Date(audit.createdAt).toLocaleString()} ({audit.id.slice(0, 8)})
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-
-          <label className="review-field">
-            <span>Stored procedure</span>
-            <textarea
-              value={sql}
-              onChange={(event) => {
-                setSql(event.target.value);
-                setError("");
-              }}
-              placeholder={`CREATE PROCEDURE dbo.GetOrders
-  @CustomerId int
-AS
-BEGIN
-  SELECT *
-  FROM dbo.Orders
-  WHERE CustomerId = @CustomerId;
-END`}
-              rows={20}
-              spellCheck={false}
-              disabled={analyzing}
-            />
-            <small className="review-field-help">
-              {sql.length.toLocaleString()} characters
-            </small>
-          </label>
-
-          <button
-            type="button"
-            className="review-analyze-button"
-            onClick={() => void analyzeProcedure()}
-            disabled={!canAnalyze}
-          >
-            {analyzing ? "Analyzing stored procedure..." : "Analyze SP"}
-          </button>
-        </div>
-
-        <div className="review-panel review-results-panel">
-          <div className="review-panel-heading">
-            <div>
-              <span className="review-step">02</span>
-              <h2>Analysis results</h2>
-            </div>
-          </div>
-
-          {analyzing ? (
-            <div className="review-state" role="status">
-              <div className="review-spinner" />
-              <strong>Running local analysis</strong>
-              <p>The selected model is processing your procedure.</p>
-            </div>
-          ) : result ? (
-            <>
-              {result.lowConfidence && (
-                <div className="review-alert" role="note" data-testid="low-confidence">
-                  Small model — low-confidence results; verify every finding
-                </div>
-              )}
-              {result.schemaFallback && (
-                <div className="review-alert" role="note" data-testid="schema-fallback">
-                  The model answered in the simpler v1 format instead of the requested v2 tables.
-                </div>
-              )}
-              <ReviewResultView schemaVersion={result.schemaVersion} result={result.result} />
-            </>
-          ) : rawOutput ? (
-            <>
-              <div className="review-alert" role="note" data-testid="raw-output-note">
-                The model&apos;s answer could not be turned into structured findings, so its raw
-                output is shown below. Treat it as unverified and check every claim.
+        {result && (
+          <Box as="section" aria-label="Analysis results" {...panel}>
+            {result.lowConfidence && (
+              <div className="review-alert" role="note" data-testid="low-confidence">
+                Small model: low-confidence results. Verify every finding.
               </div>
-              <pre className="review-code" aria-label="Response preview">{rawOutput.text}</pre>
-              {rawOutput.validation && <p>Validation: {rawOutput.validation}</p>}
-            </>
-          ) : (
-            <div className="review-state">
-              <div className="review-state-icon">✦</div>
-              <strong>No analysis yet</strong>
-              <p>
-                Select a model, paste a stored procedure, and choose Analyze
-                SP.
-              </p>
+            )}
+            {result.schemaFallback && (
+              <div className="review-alert" role="note" data-testid="schema-fallback">
+                The model answered in the short format instead of the requested tables.
+              </div>
+            )}
+            <Tabs.Root defaultValue="summary" lazyMount variant="line">
+              <Tabs.List>
+                <Tabs.Trigger value="summary">Summary</Tabs.Trigger>
+                <Tabs.Trigger value="findings">Findings</Tabs.Trigger>
+                <Tabs.Trigger value="indexes">Index ideas</Tabs.Trigger>
+              </Tabs.List>
+              {(["summary", "findings", "indexes"] as const).map((part) => (
+                <Tabs.Content key={part} value={part}>
+                  <ReviewResultView schemaVersion={result.schemaVersion} result={result.result} part={part} />
+                </Tabs.Content>
+              ))}
+            </Tabs.Root>
+            <Text fontSize="sm" color="fg.muted" mt={4}>
+              Need a rewritten procedure? Run it on <Link href="/execute" className="text-link">Execute &amp; Audit SP</Link> and use Refactor.
+            </Text>
+          </Box>
+        )}
+
+        {rawOutput && (
+          <Box as="section" aria-label="Analysis results" {...panel}>
+            <div className="review-alert" role="note" data-testid="raw-output-note">
+              The model&apos;s answer could not be turned into structured findings, so its raw
+              output is shown below. Treat it as unverified and check every claim.
             </div>
-          )}
-        </div>
-      </section>
-    </main>
+            <pre className="review-code" aria-label="Response preview">{rawOutput.text}</pre>
+            {rawOutput.validation && <p>Validation: {rawOutput.validation}</p>}
+          </Box>
+        )}
+      </Container>
+    </Box>
   );
 }

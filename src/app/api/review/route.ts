@@ -17,7 +17,7 @@ import {
 } from "@/lib/extract-json";
 import { dropUnsupportedEvidence } from "@/lib/review-evidence";
 import { verifyIndexRecommendations } from "@/lib/index-recommendations";
-import { missingDeclarations, newWriteTargets } from "@/lib/rewrite-check";
+import { chooseRefactorModel, getInstalledModels } from "@/lib/installed-models";
 import { resolveModel, runModel } from "@/lib/model-run";
 import { buildPrompt, expandHome, loadPrompt } from "@/lib/review-prompt";
 import {
@@ -33,7 +33,6 @@ import {
   validateReviewV1,
   type ReviewV1,
   type ReviewV2,
-  type RewriteStatus,
   type SchemaVersion,
 } from "@/lib/review-schema";
 
@@ -64,8 +63,8 @@ export async function POST(request: Request) {
     }
     const requestedVersion = isSchemaVersion(body.schemaVersion) ? body.schemaVersion : null;
 
-    if (!isString(body.modelId) || !body.modelId) {
-      return badRequest("modelId is required", "modelId");
+    if (body.modelId !== undefined && (!isString(body.modelId) || !body.modelId)) {
+      return badRequest("modelId must be an installed model id", "modelId");
     }
 
     const config = await readAppConfig();
@@ -74,12 +73,22 @@ export async function POST(request: Request) {
     if (!looksLikeSql(checked.sql)) return badRequest(NOT_SQL_ERROR, "sql");
     const sql = checked.sql.trim();
 
-    const resolved = await resolveModel(body.modelId);
+    // RV-1: without a modelId (the Review screen), use the Review model from Settings, or the best one installed.
+    let modelId = body.modelId as string | undefined;
+    if (!modelId) {
+      const best = chooseRefactorModel(await getInstalledModels(), config.reviewModel);
+      if (!best) {
+        return NextResponse.json({ error: "No compatible model is installed. Install one in Manage Models." }, { status: 404 });
+      }
+      modelId = best.id;
+    }
+    const resolved = await resolveModel(modelId);
     if (!resolved.ok) return resolved.response;
     const model = resolved.model;
     const lowConfidence = model.small === true;
-    // Small models default to v1 (D-035); an explicit schemaVersion is honoured.
-    const schemaVersion: SchemaVersion = requestedVersion ?? (lowConfidence ? "v1" : DEFAULT_SCHEMA_VERSION);
+    // Small models default to v1 (D-035); an explicit schemaVersion, then Settings, is honoured.
+    const configured = config.reviewSchema === "v1" || config.reviewSchema === "v2" ? config.reviewSchema : null;
+    let schemaVersion: SchemaVersion = requestedVersion ?? configured ?? (lowConfidence ? "v1" : DEFAULT_SCHEMA_VERSION);
 
     // Optional telemetry from one of this session's own EXECUTE audits (owner-only lookup).
     let telemetry: NormalizedTelemetry | undefined;
@@ -87,9 +96,6 @@ export async function POST(request: Request) {
     if (body.executionAuditId !== undefined) {
       if (!isString(body.executionAuditId) || !body.executionAuditId) {
         return badRequest("executionAuditId must be a non-empty string", "executionAuditId");
-      }
-      if (schemaVersion !== "v2") {
-        return badRequest("Telemetry-aware review requires schemaVersion v2", "schemaVersion");
       }
       const source = getAudit(body.executionAuditId, auth.session.sessionId);
       if (!source) {
@@ -104,6 +110,8 @@ export async function POST(request: Request) {
       }
       telemetry = normalizeTelemetry(stats);
       executionAuditId = source.id;
+      // RV-3: the telemetry prompt asks for v2 tables; a small model's v1 answer is still accepted below.
+      schemaVersion = "v2";
     }
 
     let promptPath: string;
@@ -130,18 +138,18 @@ export async function POST(request: Request) {
     if (!run.ok) return run.response;
     const rawResult = run.text;
     const finished = !run.hitTokenLimit;
-    // The prompts ask for the rewrite as plain SQL after the JSON, so it needs
-    // no JSON escaping; only the JSON part is parsed below.
+    // RV-2: Review returns findings only (Refactor writes the rewrite); a rewrite block a
+    // model still adds after the JSON is split off and discarded.
     const block = splitRewriteBlock(rawResult);
     const jsonText = block.json;
 
-    // Tries the requested schema, then (v2 without telemetry) the v1 shape:
-    // small models often answer a v2 prompt in the simpler v1 form.
+    // Tries the requested schema, then (for v2) the v1 shape: small models often
+    // answer a v2 prompt in the simpler v1 form.
     const parse = (text: string): { result: ReviewV1 | ReviewV2; version: SchemaVersion } => {
       try {
         return { result: extractJson(text, (value) => validateReview(schemaVersion, value), { finished }), version: schemaVersion };
       } catch (error) {
-        if (schemaVersion === "v2" && !telemetry) {
+        if (schemaVersion === "v2") {
           try {
             return { result: extractJson(text, validateReviewV1, { finished }), version: "v1" };
           } catch {
@@ -153,7 +161,6 @@ export async function POST(request: Request) {
     };
 
     let parsedReview: { result: ReviewV1 | ReviewV2; version: SchemaVersion } | undefined;
-    let rewriteTruncated = false;
     let parseError: unknown;
     try {
       parsedReview = parse(jsonText);
@@ -164,7 +171,6 @@ export async function POST(request: Request) {
       if (salvaged) {
         try {
           parsedReview = parse(salvaged);
-          rewriteTruncated = true;
         } catch {
           // report the original error
         }
@@ -198,12 +204,10 @@ export async function POST(request: Request) {
       );
     }
 
-    let result = parsedReview.result;
-    if (block.rewrite !== null) {
-      // Ended inside the rewrite block because of the token limit: drop it.
-      if (!block.closed && run.hitTokenLimit) rewriteTruncated = true;
-      else result = { ...result, rewrittenProcedure: block.rewrite };
-    }
+    // Findings only: no rewrite is kept, so the result view shows no restructure section.
+    let result: ReviewV1 | ReviewV2 = { ...parsedReview.result, rewrittenProcedure: "", rewriteNotes: [] };
+    delete result.rewriteStatus;
+    delete result.rewriteDetail;
     const resultVersion = parsedReview.version;
     if (resultVersion === "v2") result = dropUnsupportedEvidence(result as ReviewV2, sql);
     const indexes = verifyIndexRecommendations(result.indexRecommendations, sql);
@@ -219,39 +223,6 @@ export async function POST(request: Request) {
       };
     }
 
-    // Models sometimes wrap the rewrite in a Markdown code fence.
-    result = { ...result, rewrittenProcedure: result.rewrittenProcedure.replace(/^\s*```[a-z]*\s*$/gim, "").trim() };
-
-    // The rewrite is model output: keep it only when it reads as SQL.
-    let rewriteStatus: RewriteStatus = rewriteTruncated
-      ? "truncated"
-      : result.rewrittenProcedure.trim()
-        ? "provided"
-        : "none";
-    let rewriteDetail: string | undefined;
-    if (rewriteStatus === "provided" && !looksLikeSql(result.rewrittenProcedure)) rewriteStatus = "invalid";
-    if (rewriteStatus === "provided") {
-      // A restructure must not change what data the procedure modifies.
-      const added = newWriteTargets(sql, result.rewrittenProcedure);
-      const missing = missingDeclarations(sql, result.rewrittenProcedure);
-      if (added.length > 0) {
-        rewriteStatus = "unsafe";
-        rewriteDetail = `Writes to ${added.join(", ")}`;
-      } else if (missing.length > 0) {
-        rewriteStatus = "invalid";
-        rewriteDetail = `Uses ${missing.join(", ")} without declaring or creating it`;
-      }
-    }
-    result =
-      rewriteStatus === "provided"
-        ? { ...result, rewriteStatus }
-        : {
-            ...result,
-            rewrittenProcedure: "",
-            rewriteNotes: [],
-            rewriteStatus,
-            ...(rewriteDetail ? { rewriteDetail } : {}),
-          };
     const schemaFallback = resultVersion !== schemaVersion;
 
     const saved = insertAudit({

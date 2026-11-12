@@ -141,28 +141,40 @@ function Restructure({ result }: { result: ReviewV1 | ReviewV2 }) {
   );
 }
 
+/** RV-5: one part of the review, for a tabbed layout; omitted, the whole review. */
+export type ReviewPart = "summary" | "findings" | "indexes";
+
 export function ReviewResultView({
   schemaVersion,
   result,
   renderActions,
+  part,
 }: {
   schemaVersion: SchemaVersion;
   result: ReviewV1 | ReviewV2;
   renderActions?: (item: Recommendation) => ReactNode;
+  part?: ReviewPart;
 }) {
+  const show = (p: ReviewPart) => !part || part === p;
   if (schemaVersion === "v1") {
     const v1 = result as ReviewV1;
     return (
       <section className="review-report" aria-label="Review result v1">
-        <Meta confidence={v1.confidence} />
-        <Section title="Summary">
-          <p>{v1.summary}</p>
-        </Section>
-        <Section title="Issues and recommendations" count={v1.issues.length}>
-          <RecommendationGroups items={recommendationsFromV1(v1)} renderActions={renderActions} />
-        </Section>
-        <IndexRecommendations items={v1.indexRecommendations} />
-        <Restructure result={v1} />
+        {show("summary") && (
+          <>
+            <Meta confidence={v1.confidence} />
+            <Section title="Summary">
+              <p>{v1.summary}</p>
+            </Section>
+          </>
+        )}
+        {show("findings") && (
+          <Section title="Issues and recommendations" count={v1.issues.length}>
+            <RecommendationGroups items={recommendationsFromV1(v1)} renderActions={renderActions} />
+          </Section>
+        )}
+        {show("indexes") && <IndexRecommendations items={v1.indexRecommendations} />}
+        {!part && <Restructure result={v1} />}
       </section>
     );
   }
@@ -170,10 +182,20 @@ export function ReviewResultView({
   const v2 = result as ReviewV2;
   return (
     <section className="review-report" aria-label="Review result v2">
-      <Meta risk={v2.overallRisk} confidence={v2.confidence} />
-      <Section title="Summary">
-        <p>{v2.summary}</p>
-      </Section>
+      {show("summary") && (
+        <>
+          <Meta risk={v2.overallRisk} confidence={v2.confidence} />
+          <Section title="Summary">
+            <p>{v2.summary}</p>
+          </Section>
+          {v2.limitations.length > 0 && (
+            <Section title="Limitations" count={v2.limitations.length}>
+              <ul>{v2.limitations.map((l, i) => <li key={i}>{l}</li>)}</ul>
+            </Section>
+          )}
+        </>
+      )}
+      {show("findings") && (<>
       <Section title="Recommendations" count={v2.findingsTable.length}>
         <RecommendationGroups items={recommendationsFromV2(v2)} renderActions={renderActions} />
       </Section>
@@ -215,13 +237,9 @@ export function ReviewResultView({
         head={["Test", "Purpose", "Expected result"]}
         rows={v2.testingTable.map((r) => [r.test, r.purpose, r.expectedResult])}
       />
-      <IndexRecommendations items={v2.indexRecommendations} />
-      <Restructure result={v2} />
-      {v2.limitations.length > 0 && (
-        <Section title="Limitations" count={v2.limitations.length}>
-          <ul>{v2.limitations.map((l, i) => <li key={i}>{l}</li>)}</ul>
-        </Section>
-      )}
+      </>)}
+      {show("indexes") && <IndexRecommendations items={v2.indexRecommendations} />}
+      {!part && <Restructure result={v2} />}
     </section>
   );
 }
