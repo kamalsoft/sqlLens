@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, act } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, act, waitFor } from "@testing-library/react";
 import { ChakraProvider, defaultSystem } from "@chakra-ui/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import userEvent from "./user";
@@ -21,6 +21,7 @@ describe("ExecutePage", () => {
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     view();
+    fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
     await user.click(screen.getByRole("button", { name: "Procedure" }));
     await user.type(screen.getByLabelText("Procedure name"), "dbo.Get");
     await user.click(screen.getByRole("button", { name: "Add parameter" }));
@@ -56,17 +57,17 @@ describe("ExecutePage", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("tests a live connection via /api/connections/test", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(json({ ok: true, serverVersion: "16.0" }));
+  it("Connect checks the login and lists the databases to choose from", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(json({ databases: ["master", "TestDB"] }));
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     view();
-    fireEvent.change(screen.getByRole("combobox", { name: "" }), { target: { value: "mssql" } });
-    await user.type(screen.getByPlaceholderText("MyDatabase"), "db");
-    await user.click(screen.getByRole("button", { name: "Test connection" }));
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/connections/test");
+    await user.type(screen.getByLabelText(/^(Login|User name)$/), "sa");
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/execute/databases");
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).engine).toBe("mssql");
-    expect(await screen.findByText(/Connected: 16.0/)).toBeInTheDocument();
+    expect(await screen.findByText(/Connected\. 2 databases available/)).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Database" })).toBeInTheDocument();
   });
 
   it("Cancel aborts the in-flight execute fetch", async () => {
@@ -257,13 +258,68 @@ describe("ExecutePage null handling and validation", () => {
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     view();
-    fireEvent.change(screen.getByRole("combobox", { name: "" }), { target: { value: "mssql" } });
-    await user.type(screen.getByPlaceholderText("MyDatabase"), "db");
+    await user.type(screen.getByLabelText(/^(Login|User name)$/), "sa");
+    await user.type(screen.getByLabelText("Database"), "db");
     await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
     await user.clear(screen.getByLabelText("Port"));
-    await user.click(screen.getByRole("button", { name: "Test connection" }));
+    await user.click(screen.getByRole("button", { name: "Connect" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Port must be");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("ExecutePage SQL Server connection (PG-1, P9-01, DB-1)", () => {
+  it("offers SQL Server first and selected, and no PostgreSQL", () => {
+    vi.stubGlobal("fetch", vi.fn());
+    view();
+    const engine = screen.getByLabelText("Server type") as HTMLSelectElement;
+    expect(engine.value).toBe("mssql");
+    expect(Array.from(engine.options).map((o) => o.textContent)).toEqual(["SQL Server", "Simulation (no database needed)"]);
+    expect(screen.getByRole("heading", { name: "Connect to Server" })).toBeInTheDocument();
+  });
+
+  it("sends a Windows login with its domain, lists the databases and uses the one picked", async () => {
+    const fetchMock = vi.fn(async (url: string) =>
+      url === "/api/execute/databases" ? json({ databases: ["master", "TestDB"] }) : json({ ok: true, serverVersion: "16.0" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    view();
+    expect(screen.queryByLabelText("Domain")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Authentication"), { target: { value: "windows" } });
+    // Security condition: a Windows login with an unchecked certificate is called out on the form.
+    expect(screen.getByRole("note")).toHaveTextContent(/certificate is not checked/);
+    fireEvent.click(screen.getByLabelText("Trust server certificate"));
+    expect(screen.queryByRole("note")).toBeNull();
+    fireEvent.click(screen.getByLabelText("Trust server certificate"));
+    await user.type(screen.getByLabelText("Domain"), "CORP");
+    await user.type(screen.getByLabelText(/^(Login|User name)$/), "jsmith");
+    await user.type(screen.getByLabelText("Password"), "pw");
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+
+    const list = (await screen.findByRole("combobox", { name: "Database" })) as HTMLSelectElement;
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/execute/databases") as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      engine: "mssql",
+      connection: { host: "localhost", username: "jsmith", password: "pw", authType: "windows", domain: "CORP", database: "" },
+    });
+    fireEvent.change(list, { target: { value: "TestDB" } });
+    await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
+    await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === "/api/execute")).toBe(true));
+    const run = fetchMock.mock.calls.find(([url]) => url === "/api/execute") as unknown as [string, RequestInit];
+    expect(JSON.parse(run[1].body as string).connection).toMatchObject({ database: "TestDB", authType: "windows", domain: "CORP" });
+  });
+
+  it("drops the loaded list when the login changes", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json({ databases: ["TestDB"] })));
+    const user = userEvent.setup();
+    view();
+    await user.type(screen.getByLabelText(/^(Login|User name)$/), "sa");
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    expect(await screen.findByRole("combobox", { name: "Database" })).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/^(Login|User name)$/), "x");
+    expect(screen.queryByRole("combobox", { name: "Database" })).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Database" })).toBeInTheDocument();
   });
 });

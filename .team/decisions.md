@@ -267,7 +267,7 @@ C A and B: NTLM everywhere, SSPI when the app runs on Windows.
 Recommendation: A now, since it covers the current macOS setup without a new native dependency. B later only if the app is hosted on Windows.
 Constraints: the password is never persisted or logged (existing rule). Kerberos is out of scope. Security sign-off is required (auth and credentials).
 Impact if delayed: the user cannot connect to Windows-authenticated SQL Server instances.
-User decision: A (2026-11-11). P9-01 is not started; it needs `APPROVED: start P9-01`.
+User decision: A (2026-11-11). P9-01 implemented 2026-11-11 after "APPROVED: start all three" (PG-1, P9-01, DB-1); the database picker (DB-1) uses the same login.
 
 ### D-039 Empty-table check for P8-02 (replaces the TableCardinality rule)
 Status: APPROVED (option 1). Implemented 2026-11-11 under `APPROVED: start P8-02-count`; Security sign-off still required before merge.

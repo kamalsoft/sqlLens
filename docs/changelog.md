@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Execute & Audit: the connection panel is laid out like SQL Server's "Connect to Server" dialog: Server type (SQL Server, first and selected, or Simulation; PostgreSQL is no longer offered there, PG-1), Server name and port, Authentication (SQL Server or Windows, P9-01, D-038: NTLM with domain, user name and password), Login or User name, Password, Database, Trust server certificate. Its Connect button checks the login and fills the Database list (`POST /api/execute/databases`, DB-1); it replaces "Test connection", so the screen no longer calls `POST /api/connections/test` (the route stays). A Windows login with Trust server certificate on shows a warning on the form.
 - The Execute screen no longer has a Runs field. Each single-mode run on a real database executes a warm-up plus `measuredRuns` measured runs (default 2, so 3 executions), set under Settings → SQL execution; simulation and compare run once.
 - `data/appconfig.json` is committed with `allowLiveExecution: true` at the user's request, so a fresh checkout can run procedures against a database.
 - Compare and Refactor are off by default (`showCompare`, `showRefactor`); when off, the sidebar hides them and their pages say they are turned off in Settings (UX-A).
