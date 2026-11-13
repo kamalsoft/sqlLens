@@ -52,3 +52,22 @@ Append-only learnings (date, task ID, fact, evidence path:line). Scribe promotes
 - Token migration (session-tokens.ts:10) idempotent: legacy tokens are 43 chars, hashes are 64. OK.
 - Login limiter (request-guard.ts:53): per-username + global remain; global 20/min is a lockout-DoS lever for a local client. Accepted.
 - Conditions: C1 scrubText (redact.ts:10-15) misses URL creds (postgres://u:p@h), secret=/api_key=/token=, JSON "password":"x", double-quoted and space-containing values -> add patterns + tests. C2 sp-executor.ts:50 mkdir mode only applies on create, so chmod 0700 the existing dir (and 0600 existing logs).
+
+## 2026-11-12 Phase ED (features/sql-editor, uncommitted): CodeMirror 6 SqlEditor - SIGNED OFF
+- Supply chain: `npm audit --omit=dev` 0 vulns. Tree dedupes to a single @codemirror/view 6.43.15 and @lezer/common 1.5.5. Seven direct pins are exact. The 15 new lock entries all resolve from registry.npmjs.org. No new hasInstallScript: the 5 existing ones are better-sqlite3, fsevents, onnxruntime-node, protobufjs and unrs-resolver. The packages declare only `prepare`, and npm does not run that for registry installs.
+- CSP (next.config.ts:9-13): `style-src 'unsafe-inline'` covers style-mod <style> elements and inline style attributes. There is no eval or new Function in the dist files, and `connect-src 'self'` is unchanged. No CSP change needed.
+- DOM: SqlEditor.tsx has no innerHTML, dangerouslySetInnerHTML, eval or fetch calls. SQL goes into the editor only as CM doc text (lines 65 and 88) and comes out as a string via doc.toString() (line 76).
+- Search: @codemirror/search dist has no fetch, XHR, WebSocket or sendBeacon calls, and no innerHTML.
+
+## 2026-11-12 — Phase HL (lang-json/lang-xml + code-highlight) — BLOCKED
+- Supply chain OK: `npm audit --omit=dev` 0 vulns; all 829 lock `resolved` URLs are registry.npmjs.org; no new install scripts (lang-json 6.0.2, lang-xml 6.1.0, @lezer/json 1.0.3, @lezer/xml 1.0.6).
+- Injection OK: src/components/HighlightedCode.tsx renders React text nodes only; className comes from fixed `codeHighlighter` map (src/lib/code-highlight.ts:11). No innerHTML in new code. No CSP change needed.
+- DoS FAIL (measured in node, src/lib/code-highlight.ts:44):
+  1. Deep nesting under the 200 KB cap (`[`x30000, `<a>`x30000, unclosed `<a b="` repeats) throws RangeError (stack overflow in @lezer/common copyToBuffer). Uncaught inside useMemo; no error.tsx/ErrorBoundary in src -> page crash.
+  2. Malformed JSON `{` + `"\` repeated is quadratic: 20 KB 0.55 s, 40 KB 2.1 s, 199 KB 52.5 s main-thread hang.
+- Required: try/catch around parse -> plain fallback; gate JSON on JSON.parse success (linear) or lower cap to ~20 KB (cap applies to xml too); add regression tests for both inputs.
+
+## 2026-11-12 — Phase HL re-review (fixes in src/lib/code-highlight.ts) — still BLOCKED
+- Fixed/verified: JSON.parse gate (malformed JSON 0 ms; 99k-deep valid JSON overflow caught, plain, 284 ms); try/catch catches RangeError; 50 KB XML/SQL cap; 10 SQL probes at 50 KB all <70 ms.
+- NEW FAIL, XML memory (not caught by try/catch): unclosed tag starts grow heap quadratically in lezer xml error recovery. `"<".repeat(n)` as xml: 2k=58 MB, 4k=171 MB, 8k=590 MB; 50k -> V8 "heap out of memory" (vitest process killed). Reachable via auto: `"<a" + "<".repeat(n) + "/>"` passes detectLanguage. Variants `<a`, `<a=`, `<a b` also costly (70-250 MB at 8 KB), so a regex gate is fragile.
+- Required: gate XML like JSON, on a well-formedness check before lezer (e.g. DOMParser 'application/xml' with no <parsererror>, client only; plain on SSR/hydration, so no mismatch), or a cap of no more than ~2 KB; add a regression test for "<"x50000 as xml and as auto.

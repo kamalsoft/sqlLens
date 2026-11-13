@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, act, waitFor, within } from "@testi
 import { ChakraProvider, defaultSystem } from "@chakra-ui/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import userEvent from "./user";
+import { sqlValue, typeSql } from "./sql-box";
 
 const router = { replace: vi.fn(), push: vi.fn() };
 vi.mock("next/navigation", () => ({ useRouter: () => router, usePathname: () => "/execute" }));
@@ -90,7 +91,7 @@ describe("ExecutePage", () => {
     view();
     fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
     await user.click(screen.getByRole("radio", { name: "SQL batch" }));
-    await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
+    await typeSql("Original SQL", "select 1");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
     const cancel = await screen.findByRole("button", { name: "Cancel" });
     await user.click(cancel);
@@ -135,8 +136,8 @@ describe("ExecutePage null handling and validation", () => {
     fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
     await user.click(screen.getByRole("checkbox", { name: "Compare with an optimized version" }));
     await user.click(screen.getByRole("radio", { name: "SQL batch" }));
-    await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
-    await user.type(screen.getByPlaceholderText(/Paste your Optimized SP/), "select 2");
+    await typeSql("Original SQL", "select 1");
+    await typeSql("Optimized SQL", "select 2");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
     expect(await screen.findByText("careful")).toBeInTheDocument();
     expect(screen.queryByText(/I\/O Regression/)).toBeNull();
@@ -159,7 +160,7 @@ describe("ExecutePage null handling and validation", () => {
     view();
     fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
     await user.click(screen.getByRole("radio", { name: "SQL batch" }));
-    await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
+    await typeSql("Original SQL", "select 1");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
     const verdict = await screen.findByLabelText("Prod-readiness verdict");
     expect(verdict).toHaveTextContent("INSUFFICIENT EVIDENCE");
@@ -188,7 +189,7 @@ describe("ExecutePage null handling and validation", () => {
     view();
     fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
     await user.click(screen.getByRole("radio", { name: "SQL batch" }));
-    await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
+    await typeSql("Original SQL", "select 1");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
     expect(await screen.findByText("4 measured runs (warm-up of 1 dropped)")).toBeInTheDocument();
     expect(screen.getByLabelText("Prod-readiness verdict")).toHaveTextContent("UNSTABLE");
@@ -210,7 +211,7 @@ describe("ExecutePage null handling and validation", () => {
     view();
     fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
     await user.click(screen.getByRole("radio", { name: "SQL batch" }));
-    await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
+    await typeSql("Original SQL", "select 1");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
     // The full list is in the Recommendations tab; Summary shows the top three.
     await user.click(await screen.findByRole("tab", { name: "Recommendations" }));
@@ -239,8 +240,8 @@ describe("ExecutePage null handling and validation", () => {
     fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
     await user.click(screen.getByRole("checkbox", { name: "Compare with an optimized version" }));
     await user.click(screen.getByRole("radio", { name: "SQL batch" }));
-    await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
-    await user.type(screen.getByPlaceholderText(/Paste your Optimized SP/), "select 2");
+    await typeSql("Original SQL", "select 1");
+    await typeSql("Optimized SQL", "select 2");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
     const panel = await screen.findByLabelText("Original and optimized SQL");
     expect(panel).toHaveTextContent("select 1");
@@ -265,13 +266,13 @@ describe("ExecutePage null handling and validation", () => {
     fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
     expect(screen.queryByRole("button", { name: "Generate refactor" })).toBeNull();
     await user.click(screen.getByRole("radio", { name: "SQL batch" }));
-    await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select * from dbo.Customers");
+    await typeSql("Original SQL", "select * from dbo.Customers");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
     await user.click(await screen.findByRole("tab", { name: "Refactor" }));
     await user.click(await screen.findByRole("button", { name: "Generate refactor" }));
     await user.click(await screen.findByRole("button", { name: "Use as Optimized" }));
-    expect(screen.getByPlaceholderText(/Paste your Optimized SP/)).toHaveValue(refactored);
-    expect(screen.getByPlaceholderText(/Paste your Stored Procedure/)).toHaveValue("select * from dbo.Customers");
+    expect(sqlValue("Optimized SQL")).toBe(refactored);
+    expect(sqlValue("Original SQL")).toBe("select * from dbo.Customers");
   });
 
   it("reopens a saved run from Audit read-only, with its result and its saved refactor", async () => {
@@ -338,7 +339,7 @@ describe("ExecutePage null handling and validation", () => {
     view();
     fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
     await user.click(screen.getByRole("radio", { name: "SQL batch" }));
-    await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
+    await typeSql("Original SQL", "select 1");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
     await user.click(await screen.findByRole("tab", { name: "Raw output" }));
     await user.click(screen.getByRole("button", { name: "Copy raw output" }));
@@ -354,7 +355,7 @@ describe("ExecutePage null handling and validation", () => {
     await user.type(screen.getByLabelText(/^(Login|User name)$/), "sa");
     await user.type(screen.getByLabelText("Database"), "db");
     await user.click(screen.getByRole("radio", { name: "SQL batch" }));
-    await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
+    await typeSql("Original SQL", "select 1");
     await user.clear(screen.getByLabelText("Port"));
     await user.click(screen.getByRole("button", { name: "Connect" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Port must be");
@@ -399,7 +400,7 @@ describe("ExecutePage SQL Server connection (PG-1, P9-01, DB-1)", () => {
     });
     fireEvent.change(list, { target: { value: "TestDB" } });
     await user.click(screen.getByRole("radio", { name: "SQL batch" }));
-    await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
+    await typeSql("Original SQL", "select 1");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === "/api/execute")).toBe(true));
     const run = fetchMock.mock.calls.find(([url]) => url === "/api/execute") as unknown as [string, RequestInit];
@@ -472,7 +473,7 @@ describe("ExecutePage guided steps (EX-1 to EX-5)", () => {
     view();
     fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
     await user.click(screen.getByRole("radio", { name: "SQL batch" }));
-    await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
+    await typeSql("Original SQL", "select 1");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
 
     expect(await screen.findByRole("heading", { name: "Results" })).toBeInTheDocument();
@@ -499,8 +500,8 @@ describe("ExecutePage guided steps (EX-1 to EX-5)", () => {
     fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
     await user.click(screen.getByRole("checkbox", { name: "Compare with an optimized version" }));
     await user.click(screen.getByRole("radio", { name: "SQL batch" }));
-    await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
-    await user.type(screen.getByPlaceholderText(/Paste your Optimized SP/), "select 2");
+    await typeSql("Original SQL", "select 1");
+    await typeSql("Optimized SQL", "select 2");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
     expect(await screen.findByText("Run finished. Comparison ready.")).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Raw output" }));
@@ -525,7 +526,7 @@ describe("ExecutePage guided steps (EX-1 to EX-5)", () => {
     view();
     fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
     await user.click(screen.getByRole("radio", { name: "SQL batch" }));
-    await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
+    await typeSql("Original SQL", "select 1");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
 
     const bar = await screen.findByRole("region", { name: "Run setup" });

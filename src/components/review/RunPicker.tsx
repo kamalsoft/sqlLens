@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Box, Combobox, Portal, Text, createListCollection, useFilter } from '@chakra-ui/react';
 import { useApi } from '@/components/api-client';
 import { normalizeTelemetry, statsFromAuditResponse, type NormalizedTelemetry } from '@/lib/review-telemetry';
+import { HighlightedCode } from '@/components/HighlightedCode';
 
 type Run = {
   id: string; type: string; status: string; createdAt: string; recordNumber: number | null; simulated: boolean;
@@ -154,7 +155,7 @@ export function RunPicker({ value, onChange, disabled }: {
           <details className="connect-more grade-help">
             <summary>Exactly what is sent</summary>
             <Box as="pre" mt={2} p={3} bg="bg.code" borderRadius="md" fontSize="xs" whiteSpace="pre-wrap" maxH="240px" overflow="auto">
-              {JSON.stringify(telemetry, null, 2)}
+              <HighlightedCode code={JSON.stringify(telemetry, null, 2)} language="json" />
             </Box>
           </details>
         </Box>

@@ -3,6 +3,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import { ChakraProvider, defaultSystem } from "@chakra-ui/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import userEvent from "./user";
+import { typeSql } from "./sql-box";
 
 const router = { replace: vi.fn(), push: vi.fn() };
 vi.mock("next/navigation", () => ({ useRouter: () => router, usePathname: () => "/review" }));
@@ -64,7 +65,7 @@ function setup(reviewResponse: () => Response | Promise<Response>, runs: unknown
 const view = () => render(<ChakraProvider value={defaultSystem}><ReviewPage /></ChakraProvider>);
 
 async function run(user: ReturnType<typeof userEvent.setup>) {
-  await user.type(await screen.findByLabelText("Stored procedure"), "select 1");
+  await typeSql("Stored procedure", "select 1");
   await user.click(screen.getByRole("button", { name: "Analyze SP" }));
 }
 
@@ -183,14 +184,16 @@ describe("ReviewPage (RV-4, RV-5)", () => {
     await run(user);
     await user.click(await screen.findByRole("tab", { name: "Index ideas" }));
     expect(await screen.findByText("Supports the CustomerId filter")).toBeInTheDocument();
-    expect(screen.getByText(/CREATE NONCLUSTERED INDEX \[IX_Orders_CustomerId\]/)).toBeInTheDocument();
+    // HL-3: the DDL is highlighted, so its text is split into spans; the block's text is unchanged.
+    const ddl = Array.from(document.querySelectorAll("pre")).find((p) => p.textContent?.includes("CREATE NONCLUSTERED INDEX"));
+    expect(ddl?.textContent).toBe("CREATE NONCLUSTERED INDEX [IX_Orders_CustomerId] ON [dbo].[Orders] ([CustomerId]) INCLUDE ([Total]);");
+    expect(ddl?.querySelector(".tok-keyword")?.textContent).toBe("CREATE");
   });
 
   it("says why Analyze is not ready for non-SQL input and never calls the API", async () => {
     const fetchMock = setup(() => json(200, { schemaVersion: "v2", result: v2 }));
-    const user = userEvent.setup();
     view();
-    await user.type(await screen.findByLabelText("Stored procedure"), "please check my essay");
+    await typeSql("Stored procedure", "please check my essay");
     expect(screen.getByRole("button", { name: "Analyze SP" })).toBeDisabled();
     expect(screen.getByText(/does not look like SQL/)).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([u]) => u === "/api/review")).toBe(false);

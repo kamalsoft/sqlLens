@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { ApiResult } from "@/components/api-client";
 import { Section } from "@/components/review/ReviewResultView";
 import type { RefactorResult, RefactorStatus } from "@/lib/refactor-shared";
+import { HighlightedCode } from '@/components/HighlightedCode';
 
 /** RF-1: the refactor result, shared by the Refactor page and the Execute page's refactor panel. */
 
@@ -95,7 +96,7 @@ export function RefactorRawOutput({ rawOutput, validation }: { rawOutput: string
       <div className="review-alert" role="note">
         The model&apos;s answer could not be read, so its raw output is shown below. Treat it as unverified.
       </div>
-      <pre className="review-code" aria-label="Response preview">{rawOutput}</pre>
+      <pre className="review-code" aria-label="Response preview"><HighlightedCode code={rawOutput} /></pre>
       {validation && <p className="review-empty">Validation: {validation}</p>}
     </>
   );
@@ -137,7 +138,7 @@ export function RefactorResultView({ response, actions }: { response: RefactorRe
               <span>Not executed or validated against a database. Test before deploying.</span>
               <CopyButton text={result.refactoredSql} label="Copy refactored SQL" />
             </div>
-            <pre className="review-code review-code-tall" aria-label="Refactored SQL">{result.refactoredSql}</pre>
+            <pre className="review-code review-code-tall" aria-label="Refactored SQL"><HighlightedCode code={result.refactoredSql} language="sql" /></pre>
             {actions}
           </>
         ) : (
@@ -169,7 +170,7 @@ export function RefactorResultView({ response, actions }: { response: RefactorRe
                       <span>Index script. Not run.</span>
                       <CopyButton text={item.createStatement} label={`Copy index script for ${item.table}`} />
                     </div>
-                    <pre className="review-code">{item.createStatement}</pre>
+                    <pre className="review-code"><HighlightedCode code={item.createStatement} language="sql" /></pre>
                   </>
                 )}
               </li>
@@ -191,7 +192,7 @@ export function RefactorResultView({ response, actions }: { response: RefactorRe
                       <span>Suggestion only.</span>
                       <CopyButton text={view.createStatement} label={`Copy view ${view.name}`} />
                     </div>
-                    <pre className="review-code">{view.createStatement}</pre>
+                    <pre className="review-code"><HighlightedCode code={view.createStatement} language="sql" /></pre>
                   </>
                 )}
               </li>

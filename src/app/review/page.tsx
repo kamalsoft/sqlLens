@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Box, Button, Container, Flex, Heading, Tabs, Text, Textarea } from "@chakra-ui/react";
+import { Box, Button, Container, Flex, Heading, Tabs, Text } from "@chakra-ui/react";
+import { SqlEditor } from "@/components/SqlEditor";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { useApi } from "@/components/api-client";
 import { ReviewResultView } from "@/components/review/ReviewResultView";
@@ -13,6 +14,7 @@ import {
   type ReviewV2,
   type SchemaVersion,
 } from "@/lib/review-schema";
+import { HighlightedCode } from "@/components/HighlightedCode";
 
 type ReviewResponse = {
   id?: string;
@@ -185,13 +187,12 @@ export default function ReviewPage() {
           <Heading as="h3" id="proc-title" size="sm" color="fg.default" mb={4}>
             <span className="step-no" aria-hidden="true">1</span>Stored procedure
           </Heading>
-          <Textarea
-            aria-label="Stored procedure"
+          <SqlEditor
+            ariaLabel="Stored procedure"
             value={sql}
-            onChange={(event) => { setSql(event.target.value); setError(""); }}
+            onChange={(next) => { setSql(next); setError(""); }}
             placeholder={"CREATE PROCEDURE dbo.GetOrders\n  @CustomerId int\nAS\nBEGIN\n  SELECT OrderId, Total\n  FROM dbo.Orders\n  WHERE CustomerId = @CustomerId;\nEND"}
-            minH="280px" fontFamily="mono" fontSize="sm" bg="bg.canvas" borderColor="border.subtle"
-            _placeholder={{ color: "fg.muted" }} resize="vertical" spellCheck={false} disabled={analyzing}
+            minHeight="280px" disabled={analyzing}
           />
           <Text fontSize="xs" color="fg.muted" mt={1}>{sql.length.toLocaleString()} characters</Text>
         </Box>
@@ -264,7 +265,7 @@ export default function ReviewPage() {
               The model&apos;s answer could not be turned into structured findings, so its raw
               output is shown below. Treat it as unverified and check every claim.
             </div>
-            <pre className="review-code" aria-label="Response preview">{rawOutput.text}</pre>
+            <pre className="review-code" aria-label="Response preview"><HighlightedCode code={rawOutput.text} /></pre>
             {rawOutput.validation && <p>Validation: {rawOutput.validation}</p>}
           </Box>
         )}

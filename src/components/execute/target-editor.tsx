@@ -1,7 +1,8 @@
 'use client';
 
 import { Fragment, useMemo, useState, type ReactNode } from 'react';
-import { Box, Button, Combobox, Flex, Input, Portal, Text, Textarea, createListCollection, useFilter } from '@chakra-ui/react';
+import { Box, Button, Combobox, Flex, Input, Portal, Text, createListCollection, useFilter } from '@chakra-ui/react';
+import { SqlEditor } from '@/components/SqlEditor';
 
 export const PARAM_TYPES = [
   'int', 'bigint', 'decimal', 'nvarchar', 'varchar', 'bit', 'datetime', 'date', 'uniqueidentifier',
@@ -138,14 +139,15 @@ function Field({ caption, error, hint, children }: { caption: string; error?: st
 }
 
 export function TargetEditor({
-  kind, draft, onChange, placeholder, color, onLoadParams, loadNote, setNames, onSaveSet, onLoadSet, onDeleteSet,
+  kind, draft, onChange, placeholder, label, onLoadParams, loadNote, setNames, onSaveSet, onLoadSet, onDeleteSet,
   procedures, procedureNote, loadingProcedures, onRefreshProcedures,
 }: {
   kind: 'procedure' | 'batch';
   draft: TargetDraft;
   onChange: (d: TargetDraft) => void;
   placeholder: string;
-  color: string;
+  /** ED-3: accessible name of the SQL batch editor. */
+  label: string;
   /** UX-2: read the procedure's parameters from the database into the rows. */
   onLoadParams?: () => void;
   loadNote?: string | null;
@@ -170,13 +172,7 @@ export function TargetEditor({
   const [newSetName, setNewSetName] = useState('');
   if (kind === 'batch') {
     return (
-      <Textarea
-        value={draft.sql}
-        onChange={(e) => onChange({ ...draft, sql: e.target.value })}
-        placeholder={placeholder}
-        minH="240px" fontFamily="mono" fontSize="sm" bg="bg.canvas" color={color}
-        borderColor="border.subtle" _placeholder={{ color: 'fg.muted' }} resize="vertical"
-      />
+      <SqlEditor ariaLabel={label} value={draft.sql} onChange={(next) => onChange({ ...draft, sql: next })} placeholder={placeholder} />
     );
   }
   const setRow = (id: number, patch: Partial<ParamRow>) =>
