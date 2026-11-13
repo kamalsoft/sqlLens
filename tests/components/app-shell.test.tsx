@@ -38,6 +38,10 @@ describe("AppShell", () => {
     render(<AppShell><p>content</p></AppShell>);
 
     expect(await screen.findByTestId("current-user")).toHaveTextContent("admin");
+    // LG-1: the logo mark sits next to the name and is hidden from screen readers.
+    const mark = document.querySelector(".brand svg.logo-mark");
+    expect(mark).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByRole("heading", { name: "SQLLens" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Settings/ })).toBeInTheDocument();
 
     // HP-2: the top bar shows the user and its own Logout, always visible.

@@ -498,6 +498,11 @@ The Review page uses local React state for:
 
 Keep API result types synchronized between the route and the client.
 
+### Logo and icons
+
+- The mark is drawn twice: `src/components/Logo.tsx` (theme variables, used in the sidebar and sign-in page) and `src/app/icon.svg` (fixed colours equal to the dark tokens; a test checks them). Keep the two drawings in step.
+- `src/app/favicon.ico` (16 and 32 px) and `src/app/apple-icon.png` (180 px) are rendered from `icon.svg`: after changing it run `npm run icons` (`scripts/render-icons.mjs`, uses Playwright's Chromium). Next.js adds the `<link>` tags from these files.
+
 ### SQL input boxes
 
 - Use `SqlEditor` (`src/components/SqlEditor.tsx`, CodeMirror 6 with the MSSQL dialect) for any box where users paste or edit SQL; it gives line numbers, word wrap and T-SQL highlighting, and takes `value`, `onChange`, `placeholder`, `disabled`, `minHeight` and a required `ariaLabel`. `placeholder` and `ariaLabel` are read at mount; `value`, `disabled` and `minHeight` follow the props. The box is 55% of the window high (never below `minHeight`), can be dragged taller, and scrolls inside, so long procedures never stretch the page; put it in grid columns of `minmax(0, 1fr)` so wide lines do not widen the page. Text set by the parent is not added to the undo history.
