@@ -57,6 +57,18 @@ export function extractJson<T>(
     }
   }
 
+  // RJ-1: an odd number of stray quotes (`"5" wide"`) hides every balanced object from the scan above;
+  // repair the whole span from the first `{` to the last `}` instead.
+  const first = text.indexOf("{");
+  const last = text.lastIndexOf("}");
+  if (first !== -1 && last > first) {
+    try {
+      return validate(parseLenient(text.slice(first, last + 1)));
+    } catch {
+      // keep the earlier reason
+    }
+  }
+
   // Last resort: the answer ends with `}` but the main object never balanced,
   // usually an unterminated string. Close what is open and validate that.
   const closed = autoClosed(text, options.finished === true);
@@ -187,6 +199,17 @@ function parseLenient(candidate: string): unknown {
 const VALID_ESCAPES = '"\\/bfnrtu';
 const NAMED_ESCAPES: Record<string, string> = { "\n": "\\n", "\r": "\\r", "\t": "\\t" };
 
+/**
+ * True when the text after a quote is where JSON can continue: `,` `}` `]` `:`, the next value, or the end.
+ * Known limit: a stray quote that is itself followed by one of those (`"x", y"`) still ends the string early;
+ * that answer fails as it did before this repair. Only runs after JSON.parse has failed, so valid JSON is untouched.
+ */
+function endsString(text: string, from: number): boolean {
+  const rest = /^\s*(.)?/.exec(text.slice(from, from + 200));
+  const next = rest?.[1];
+  return next === undefined || ",}]:\"".includes(next);
+}
+
 function repairJson(text: string): string {
   let out = "";
   let quoted = false;
@@ -207,8 +230,15 @@ function repairJson(text: string): string {
           continue;
         }
         escaped = true;
-      } else if (character === '"') quoted = false;
-      else if (character < " ") {
+      } else if (character === '"') {
+        // RJ-1: a quote only ends the string when JSON can continue after it (`,` `}` `]` `:` or the next
+        // value). Otherwise it is a stray quote inside the value, such as SQL's -- "rows affected".
+        if (!endsString(text, index + 1)) {
+          out += '\\"';
+          continue;
+        }
+        quoted = false;
+      } else if (character < " ") {
         out += NAMED_ESCAPES[character] ?? `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`;
         continue;
       }
@@ -291,10 +321,12 @@ export function dropTruncatedRewrite(text: string): string | null {
   if (start === -1 || !last || last.index === undefined || last.index < start) return null;
 
   let escaped = false;
-  for (const character of text.slice(last.index + last[0].length)) {
+  for (let index = last.index + last[0].length; index < text.length; index += 1) {
+    const character = text[index];
     if (escaped) escaped = false;
     else if (character === "\\") escaped = true;
-    else if (character === '"') return null; // the string was closed: not this case
+    // The string was closed: not this case. A stray quote inside the SQL (-- "rows affected") is not a close (RJ-1).
+    else if (character === '"' && endsString(text, index + 1)) return null;
   }
 
   const before = text.slice(start, last.index);

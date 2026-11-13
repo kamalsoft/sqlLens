@@ -49,7 +49,7 @@ Allowed values (choose exactly one per field):
 
 Field rules:
 - findingsTable, performanceTable, securityTable, testingTable, limitations and indexRecommendations are arrays; use [] when empty.
-- evidence is text copied exactly from the SQL, or "not observed". Rows whose evidence is not in the SQL are discarded.
+- evidence is text copied exactly from the SQL, or "not observed". Keep evidence to one short line (at most 120 characters) quoted from the procedure: never the whole procedure, never a code fence. Rows whose evidence is not in the SQL are discarded.
 - Every object in an array must contain all of its keys, including testingTable[].test, testingTable[].purpose and testingTable[].expectedResult.
 - Do not rewrite the procedure: return findings only. A rewrite is made separately by Refactor.
 - Every string is ONE JSON string: use \n for line breaks and \" for double quotes, and never end a line with a backslash. Never put a raw line break inside a JSON string, and always close the string.

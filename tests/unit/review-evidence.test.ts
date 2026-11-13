@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dropUnsupportedEvidence } from "@/lib/review-evidence";
+import { MAX_EVIDENCE_CHARS, dropUnsupportedEvidence } from "@/lib/review-evidence";
 import type { ReviewV2 } from "@/lib/review-schema";
 
 const sql = "CREATE PROCEDURE dbo.P AS BEGIN\n  SELECT  Id FROM dbo.Orders WITH (NOLOCK);\nEND";
@@ -59,5 +59,22 @@ describe("dropUnsupportedEvidence", () => {
     const input = review();
     input.findingsTable[1].evidence = "  ";
     expect(dropUnsupportedEvidence(input, sql).findingsTable).toHaveLength(0);
+  });
+});
+
+describe("evidence tidying (RJ-2)", () => {
+  it("strips code fences, keeps quotes from the SQL, and shortens long ones", () => {
+    const longSql = "CREATE PROCEDURE dbo.P AS BEGIN\n" + "  SELECT Id FROM dbo.Orders WITH (NOLOCK);\n".repeat(20) + "END";
+    const r = review();
+    r.findingsTable = [
+      { category: "concurrency", finding: "fenced", evidence: "```sql\nWITH (NOLOCK)\n```", severity: "low", recommendation: "r" },
+      { category: "maintainability", finding: "whole procedure", evidence: longSql, severity: "low", recommendation: "r" },
+    ];
+    const out = dropUnsupportedEvidence(r, longSql);
+    expect(out.findingsTable.map((row) => row.finding)).toEqual(["fenced", "whole procedure"]);
+    expect(out.findingsTable[0].evidence).toBe("WITH (NOLOCK)");
+    const shortened = out.findingsTable[1].evidence;
+    expect(shortened.length).toBe(MAX_EVIDENCE_CHARS + 1);
+    expect(shortened.endsWith("…")).toBe(true);
   });
 });

@@ -33,7 +33,7 @@ Allowed values (choose exactly one per field):
 
 Field rules:
 - Use [] for every empty array.
-- evidence is exact SQL text copied from the procedure, or "not observed". Rows whose evidence is not in the SQL are discarded.
+- evidence is exact SQL text copied from the procedure, or "not observed". Keep evidence to one short line (at most 120 characters) quoted from the procedure: never the whole procedure, never a code fence. Rows whose evidence is not in the SQL are discarded.
 - Every object must contain all of its keys, including testingTable test, purpose, and expectedResult.
 - Do not rewrite the procedure: return findings only. A rewrite is made separately by Refactor.
 - Every string is one JSON string: \n for line breaks, \" for quotes, no raw line breaks, no trailing backslash.
