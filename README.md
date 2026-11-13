@@ -2,6 +2,12 @@
 
 SQLLens is an AI-assisted SQL stored procedure analysis and optimization platform designed to ingest stored procedures, execute them against SQL Server or PostgreSQL, capture execution telemetry, analyze IO and timing metrics, and propose optimization recommendations with LLM-backed reviews. The project combines a Next.js application shell, a local execution engine, telemetry parsers, and model management workflows for review, comparison, and auditing.
 
+![SQLLens overview: workflow, trust boundaries and model download pipeline](docs/resoures/overview.png)
+
+*Illustrative overview (AI-generated). For the exact, current design see [Architecture](docs/architecture.md) and the in-app Help → Architecture tab.*
+
+> **Disclaimer:** SQLLens is provided "as is", without warranty of any kind. The authors accept no responsibility or liability for any use of this code or for the validity of its results. See [Disclaimer](#disclaimer).
+
 ## Getting Started
 
 From the repository root:
@@ -208,6 +214,17 @@ Original Hugging Face repositories containing only `.safetensors` files are vali
 ### Failure behavior
 
 If required files are missing, files are empty, checksums do not match, or the repository cannot be downloaded, the script exits with status `1` and removes the temporary download.
+
+## Disclaimer
+
+SQLLens is provided **"as is"**, without warranty of any kind, express or implied, including but not limited to warranties of merchantability, fitness for a particular purpose, accuracy, and non-infringement.
+
+- **No responsibility for use.** You use this code, and any build or deployment of it, entirely at your own risk. The authors and contributors are not responsible or liable for any claim, damage, data loss, downtime, cost, or other liability arising from its use, misuse, or inability to use it.
+- **No guarantee of validity.** Reviews, grades, verdicts, refactored SQL, index suggestions, and other output are produced by software and by local AI models. They can be wrong, incomplete, or misleading, and are not professional advice. Verify every result, and check with your DBA before changing a production database.
+- **Live execution changes data.** With live execution on, stored procedures and batches run for real against the database you connect to and are not rolled back. Use development or test databases only.
+- **Third-party components.** Models, libraries, and services used with SQLLens are subject to their own licenses and terms, which you are responsible for reviewing.
+
+This notice does not replace legal advice or a software license.
 
 ## Documentation
 
