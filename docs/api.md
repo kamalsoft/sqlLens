@@ -33,7 +33,7 @@ All routes are local-only (D-008). Every route except `POST /api/auth/login` nee
 | PATCH | `/api/audit/[id]/recommendations` | Saves feedback on a record's recommendations: `{ items: [{ key, status, note? }] }`, 1-200 items, `key` 1-200 characters, `status` `accepted`, `rejected` or `pending`, `note` up to 2,000 characters. Returns `{ success: true, updated }`. 404 when the record is not the user's. | session (401) | `src/app/api/audit/[id]/recommendations/route.ts` |
 | POST | `/api/connections/test` | Tests a SQL Server or PostgreSQL connection: `{ engine: "mssql" \| "postgres", connection }` (same connection fields as `/api/execute`). 403 when `allowLiveExecution` is off, 429 above 10 tests a minute per session, 504 on timeout, 502 `Connection failed` (driver detail is not returned). | session (401) | `src/app/api/connections/test/route.ts` |
 
-Pages: `/` (Overview), `/review`, `/execute` (Execute & Audit SP; `?record=<id>` reopens a saved run read-only), `/compare` and `/refactor` (shown only when `showCompare` / `showRefactor` are on), `/audit`, `/audit/[id]`, `/settings`, `/manage-models`, `/login`, `/share/[token]` (`src/components/AppShell.tsx`).
+Pages: `/` (Overview), `/review`, `/execute` (Execute & Audit SP; `?record=<id>` reopens a saved run read-only), `/compare` and `/refactor` (shown only when `showCompare` / `showRefactor` are on), `/audit`, `/audit/[id]`, `/settings`, `/manage-models`, `/help` (About, Architecture diagram, FAQ; `?tab=architecture` opens a tab), `/login`, `/share/[token]` (`src/components/AppShell.tsx`). Every signed-in page has a top bar with the user and Logout, and every page (including sign-in) a one-line AI disclaimer footer.
 
 ## `POST /api/review`
 

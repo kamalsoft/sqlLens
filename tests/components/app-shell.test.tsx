@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "./user";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -40,7 +40,18 @@ describe("AppShell", () => {
     expect(await screen.findByTestId("current-user")).toHaveTextContent("admin");
     expect(screen.getByRole("link", { name: /Settings/ })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Logout" }));
+    // HP-2: the top bar shows the user and its own Logout, always visible.
+    const signedIn = screen.getByLabelText("Signed in as");
+    expect(signedIn).toHaveTextContent("admin");
+    const bar = signedIn.closest("header") as HTMLElement;
+    expect(bar).toHaveClass("topbar");
+    // HP-3: the disclaimer and Help link on every page; Help is in the menu.
+    const footer = screen.getByRole("contentinfo");
+    expect(footer).toHaveTextContent(/results can be wrong or incomplete\. Check with your DBA before changing a production database\./);
+    expect(within(footer).getByRole("link", { name: "Help" })).toHaveAttribute("href", "/help");
+    expect(screen.getByRole("link", { name: /\?Help/ })).toHaveAttribute("href", "/help");
+
+    await user.click(within(bar).getByRole("button", { name: "Logout" }));
     await waitFor(() => expect(replace).toHaveBeenCalledWith("/login"));
     const logout = fetchMock.mock.calls.find(([url]) => url === "/api/auth/logout")!;
     expect(logout[1].method).toBe("POST");
@@ -54,6 +65,9 @@ describe("AppShell", () => {
 
     expect(screen.getByText("login form")).toBeInTheDocument();
     expect(screen.queryByRole("navigation")).toBeNull();
+    // The disclaimer shows on sign-in too, without a Help link (Help needs a session).
+    expect(screen.getByRole("contentinfo")).toHaveTextContent(/Check with your DBA/);
+    expect(screen.queryByRole("link", { name: "Help" })).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -117,7 +131,7 @@ describe("AppShell leave guard (UX-B)", () => {
     const cancel = vi.fn();
     const user = userEvent.setup();
     shell(cancel);
-    await user.click(await screen.findByRole("button", { name: "Logout" }));
+    await user.click((await screen.findAllByRole("button", { name: "Logout" }))[0]);
     expect(await screen.findByRole("button", { name: "Cancel the task and leave" })).toBeInTheDocument();
     expect(replace).not.toHaveBeenCalled();
   });

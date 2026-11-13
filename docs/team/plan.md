@@ -506,6 +506,17 @@ User request (2026-11-12): highlight keywords in JSON and XML content across the
 
 Note: the JSON and XML parsers (small; SQL was already in the editor chunk) now also load on the audit, Review and Compare pages; accepted without lazy loading (architect review).
 
+## Phase HP — Help, top bar and disclaimer footer (APPROVED 2026-11-13; HP-1..HP-4 implemented, awaiting review)
+
+User decisions (2026-11-13): one Help page with tabs; content written for the app (linking to the full docs); Logout added to a top bar (the sidebar one stays).
+
+| ID | Task | Owner | Acceptance |
+|---|---|---|---|
+| HP-1 | `/help` page with tabs (revised by the user: Developer and Technical guides removed, Architecture diagram added): **About** (what SQLLens is, local-first, what it does and does not do, version), **FAQ** (about 12 questions: live execution, models, grades and verdicts, why a review failed, retention, sharing, security), **Developer guide** (setup, admin login, scripts, tests, project layout, conventions), **Technical guide** (architecture and data flow, routes, model worker, storage, security controls, limits). Links to `docs/*.md` on GitHub for detail. `?tab=` opens a tab directly. "Help" item in the sidebar. | Frontend + Scribe | Page renders all four tabs; keyboard tabs; content matches the code and docs. |
+| HP-2 | Slim top bar on every signed-in page: page context on the left, signed-in user and **Logout** on the right (same leave-guard as before). Not shown on `/login`; shown on `/share/[token]`, which needs a session. Later (user request): the sidebar's Signed in and Models online panels were removed, so the top bar is the only Logout. | Frontend | Logout from the top bar ends the session; asks first when a task is running; tests. |
+| HP-3 | Footer on every page, one line: "SQLLens uses AI: results can be wrong or incomplete. Check with your DBA before changing a production database." plus a Help link. | Frontend | Footer on every page including login; one line on desktop, wraps on small screens. |
+| HP-4 | Docs, changelog; Senior Architect review. | Scribe | Review done. |
+
 ## DoD traceability (9/9)
 
 | DoD criterion | Tasks |

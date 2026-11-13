@@ -12,7 +12,7 @@ npm run admin:set-password   # creates the "admin" login; password of at least 1
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and sign in as `admin`.
+Open [http://localhost:3000](http://localhost:3000) and sign in as `admin`. The in-app **Help** page has an About, the application architecture diagram and an FAQ.
 
 > Upgrade note: audit records and run logs older than **Keep Records (days)** in Settings (default 90) are deleted when the server starts and once a day. Raise it before upgrading if you need older history.
 
