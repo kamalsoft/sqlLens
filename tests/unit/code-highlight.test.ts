@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_HIGHLIGHT_CHARS, MAX_XML_SQL_CHARS, detectLanguage, highlightSegments } from "@/lib/code-highlight";
+import { MAX_HIGHLIGHT_CHARS, MAX_SEGMENTS, MAX_SQL_CHARS, detectLanguage, highlightSegments, xmlSegments } from "@/lib/code-highlight";
 
 const classOf = (code: string, lang: Parameters<typeof highlightSegments>[1], text: string) =>
   highlightSegments(code, lang)?.find((s) => s.text === text)?.cls;
@@ -70,8 +70,35 @@ describe("crafted input cannot crash or freeze the page (security review)", () =
     const { ms } = timed(code, lang);
     expect(ms).toBeLessThan(2000);
   });
-  it("XML and SQL above their lower limit stay plain", () => {
-    expect(highlightSegments("<a>" + "x".repeat(MAX_XML_SQL_CHARS) + "</a>", "xml")).toBeNull();
-    expect(highlightSegments("SELECT " + "1,".repeat(MAX_XML_SQL_CHARS), "sql")).toBeNull();
+  it("SQL above its lower limit stays plain; XML up to the general limit is highlighted", () => {
+    expect(highlightSegments("SELECT " + "1,".repeat(MAX_SQL_CHARS), "sql")).toBeNull();
+    expect(highlightSegments("<a>" + "x".repeat(100_000) + "</a>", "xml")).not.toBeNull();
+  });
+
+  it.each([
+    ["repeated <", "<".repeat(50_000), "xml"],
+    ["auto: tag full of <", "<a" + "<".repeat(50_000) + "/>", "auto"],
+    ["<a variants", "<a".repeat(25_000), "xml"],
+    ["<a= variants", "<a=".repeat(16_000), "xml"],
+    ["unclosed comment", "<!--".repeat(12_000), "xml"],
+    ["unclosed value", '<a b="'.repeat(30_000), "xml"],
+  ] as const)("XML %s: linear time and memory, text unchanged (security review)", (_name, code, lang) => {
+    const before = process.memoryUsage().heapUsed;
+    const start = performance.now();
+    const out = highlightSegments(code, lang);
+    expect(performance.now() - start).toBeLessThan(1000);
+    expect(process.memoryUsage().heapUsed - before).toBeLessThan(100 * 1024 * 1024);
+    if (out) expect(out.map((s) => s.text).join("")).toBe(code);
+  });
+
+  it("shows plain text when it would need more than MAX_SEGMENTS spans", () => {
+    expect(highlightSegments("<".repeat(MAX_SEGMENTS + 1), "xml")).toBeNull();
+    expect(highlightSegments("<a/>".repeat(10), "xml")).not.toBeNull();
+  });
+
+  it("the XML scanner keeps every character, for any input", () => {
+    for (const code of ["", "<", "</", "<?xml?>", "a<b c='d'>e</b>f", "<a b=\"c\" d='e' f/>", "<![CDATA[x<y]]><z/>", "<<a<b c<d"]) {
+      expect(xmlSegments(code).map((s) => s.text).join("")).toBe(code);
+    }
   });
 });

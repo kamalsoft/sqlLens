@@ -71,3 +71,9 @@ Append-only learnings (date, task ID, fact, evidence path:line). Scribe promotes
 - Fixed/verified: JSON.parse gate (malformed JSON 0 ms; 99k-deep valid JSON overflow caught, plain, 284 ms); try/catch catches RangeError; 50 KB XML/SQL cap; 10 SQL probes at 50 KB all <70 ms.
 - NEW FAIL, XML memory (not caught by try/catch): unclosed tag starts grow heap quadratically in lezer xml error recovery. `"<".repeat(n)` as xml: 2k=58 MB, 4k=171 MB, 8k=590 MB; 50k -> V8 "heap out of memory" (vitest process killed). Reachable via auto: `"<a" + "<".repeat(n) + "/>"` passes detectLanguage. Variants `<a`, `<a=`, `<a b` also costly (70-250 MB at 8 KB), so a regex gate is fragile.
 - Required: gate XML like JSON, on a well-formedness check before lezer (e.g. DOMParser 'application/xml' with no <parsererror>, client only; plain on SSR/hydration, so no mismatch), or a cap of no more than ~2 KB; add a regression test for "<"x50000 as xml and as auto.
+
+## 2026-11-12 — Phase HL third review (XML scanner, lang-xml removed) — SIGNED OFF
+- @codemirror/lang-xml and @lezer/xml absent from package.json and lockfile; `npm audit --omit=dev` 0 vulns.
+- xmlSegments (src/lib/code-highlight.ts:42): every branch advances i; unclosed comment, CDATA and quote jump to the end; no recursion; the detectLanguage regex has no overlapping quantifiers.
+- 16 probes at 200 KB (xml and auto): <, <a, <a=, <a b, <a b=", <!--, <![CDATA[, <>, < , </, mixed: all <=25 ms, heap growth <=16 MB, output lossless. Prior JSON and SQL fixes still hold.
+- Follow-up, not blocking: the worst case is about 200k segments, so about 200k React spans (the same tab only). Optional: show plain text above about 50k segments.
