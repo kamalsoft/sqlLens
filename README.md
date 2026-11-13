@@ -4,6 +4,12 @@ SQLLens is an AI-assisted SQL stored procedure analysis and optimization platfor
 
 ![SQLLens overview: workflow, trust boundaries and model download pipeline](docs/resoures/overview.png)
 
+## Demo
+
+![SQLLens demo: sign in, review a stored procedure, then browse Execute, Audit, Manage Models and Help](docs/media/demo.gif)
+
+[Watch the full-quality video (MP4)](docs/media/demo.mp4). Recorded against a throwaway database with `SQLLENS_FAKE_INFERENCE=1`, so the review result shown is canned, not real model output. To re-record, see the usage notes at the top of `scripts/record-demo.mjs`.
+
 *Illustrative overview (AI-generated). For the exact, current design see [Architecture](docs/architecture.md) and the in-app Help → Architecture tab.*
 
 > **Disclaimer:** SQLLens is provided "as is", without warranty of any kind. The authors accept no responsibility or liability for any use of this code or for the validity of its results. See [Disclaimer](#disclaimer).
