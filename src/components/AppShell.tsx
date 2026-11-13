@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { ConfirmDialog } from "./confirm-dialog";
+import { LogoMark } from "./Logo";
 import { useRunningTask, type RunningTasks } from "./leave-guard";
 
 type Feature = "showCompare" | "showRefactor";
@@ -112,7 +113,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   }
 
-  if (isLogin) return <>{children}<Footer withHelp={false} /></>;
+  if (isLogin) return <div className="login-shell">{children}<Footer withHelp={false} /></div>;
 
   const current = navItems.find((item) => pathname === item.href || (item.href !== "/" && pathname.startsWith(`${item.href}/`)));
   const logoutButton = (
@@ -131,7 +132,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="app-layout">
         <aside className="sidebar">
           <div className="brand">
-            <div className="brand-mark">S</div>
+            <LogoMark size={34} />
             <div>
               <h1 className="brand-name">SQLLens</h1>
             </div>

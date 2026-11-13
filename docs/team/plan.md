@@ -517,6 +517,18 @@ User decisions (2026-11-13): one Help page with tabs; content written for the ap
 | HP-3 | Footer on every page, one line: "SQLLens uses AI: results can be wrong or incomplete. Check with your DBA before changing a production database." plus a Help link. | Frontend | Footer on every page including login; one line on desktop, wraps on small screens. |
 | HP-4 | Docs, changelog; Senior Architect review. | Scribe | Review done. |
 
+## Phase LG — Logo and favicon (APPROVED 2026-11-13; LG-1..LG-3 implemented, awaiting review)
+
+User decision (2026-11-13): "Lens over database": a magnifying lens whose glass holds a database cylinder; cyan on dark, SVG.
+
+| ID | Task | Owner | Acceptance |
+|---|---|---|---|
+| LG-1 | `src/components/Logo.tsx`: the mark as inline SVG (theme colours, `aria-hidden` mark plus the "SQLLens" wordmark text); replaces the "S" square in the sidebar and is added to the sign-in page. | Frontend | Same height as today's mark; readable at 24 px; tests. |
+| LG-2 | Favicons by the Next.js file convention: `src/app/icon.svg` (modern browsers), `src/app/favicon.ico` (32 px, older browsers and `/favicon.ico` requests), `src/app/apple-icon.png` (180 px, home-screen icon). Fixed colours in the files (they are not themed pages). | Frontend | `<link rel="icon">` tags in the page head; icons load on `next start`; clear at 16 px. |
+| LG-3 | Changelog; Senior Architect review. | Scribe | Review done. |
+
+Unplanned fixes found while checking the sign-in page (in the changelog): the username and password inputs had no styling (invisible on the dark background), and the Phase HP disclaimer footer sat mid-page.
+
 ## DoD traceability (9/9)
 
 | DoD criterion | Tasks |

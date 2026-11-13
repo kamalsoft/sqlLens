@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { sanitizeNext } from "@/components/api-client";
+import { LogoMark } from "@/components/Logo";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -49,11 +50,15 @@ export default function LoginPage() {
 
   return (
     <main className="login-page" style={{ maxWidth: 380, margin: "12vh auto", padding: 24 }}>
-      <h1>Sign in to SQLLens</h1>
+      <div className="login-brand">
+        <LogoMark size={48} />
+        <h1>Sign in to SQLLens</h1>
+      </div>
       <form onSubmit={(event) => void handleSubmit(event)} className="form-grid">
         <div className="field full">
           <label className="label" htmlFor="login-username">Username</label>
           <input
+            className="input"
             id="login-username"
             name="username"
             autoComplete="username"
@@ -66,6 +71,7 @@ export default function LoginPage() {
         <div className="field full">
           <label className="label" htmlFor="login-password">Password</label>
           <input
+            className="input"
             id="login-password"
             name="password"
             type="password"

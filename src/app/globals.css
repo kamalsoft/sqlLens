@@ -87,16 +87,12 @@ body {
   padding: 8px 10px;
 }
 
-.brand-mark {
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  border-radius: 10px;
-  background: var(--primary);
-  color: var(--fg-onAccent);
-  font-weight: 800;
-}
+/* LG-1: the logo mark (src/components/Logo.tsx). */
+.logo-mark { flex: none; display: block; border-radius: 10px; box-shadow: 0 0 0 1px var(--border-subtle); }
+/* The sign-in page keeps the disclaimer footer at the bottom of the window. */
+.login-shell { min-height: 100vh; display: flex; flex-direction: column; }
+.login-shell .app-footer { margin-top: auto; }
+.login-brand { display: flex; flex-direction: column; align-items: center; gap: 14px; margin-bottom: 20px; text-align: center; }
 
 .brand-name {
   margin: 0;
