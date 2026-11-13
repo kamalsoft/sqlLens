@@ -137,29 +137,47 @@ body {
   text-align: center;
 }
 
-.sidebar-footer {
-  margin-top: auto;
-}
-
-.status-inline {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text);
-  font-size: 0.9rem;
-}
-
-.live-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--success);
-  box-shadow: 0 0 12px var(--status-ok);
-}
-
 .content {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.content-body {
+  flex: 1;
   padding: 24px 28px;
+}
+
+/* HP-2: slim bar with the page name, the signed-in user and Logout. */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 28px;
+  background: var(--bg-canvas);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.topbar-title { color: var(--fg-muted); font-size: 0.875rem; }
+.topbar-user { display: flex; align-items: center; gap: 12px; color: var(--fg-default); font-size: 0.875rem; }
+.topbar-user .button { padding: 6px 14px; }
+
+/* HP-3: the one-line AI disclaimer on every page. */
+.app-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 10px 28px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--fg-muted);
+  font-size: 0.8rem;
+  text-align: center;
 }
 
 .container {
@@ -1879,3 +1897,119 @@ body {
 .tok-number { color: var(--grade-F); }
 .tok-comment { color: var(--fg-muted); font-style: italic; }
 .tok-punct { color: var(--fg-muted); }
+
+/* HP-1: Help page. */
+.help-hero {
+  margin: 20px 0;
+  padding: 24px 28px;
+  border-radius: 16px;
+  border: 1px solid var(--border-subtle);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent-default) 12%, transparent), color-mix(in srgb, var(--grade-B) 6%, transparent) 60%, transparent), var(--bg-panel);
+}
+.help-hero h3 { font-size: 1.25rem; font-weight: 700; margin-bottom: 8px; color: var(--fg-default); }
+.help-hero p { color: var(--fg-default); line-height: 1.7; max-width: 70ch; }
+.help-badge {
+  display: inline-block; margin-top: 14px; padding: 4px 12px; border-radius: 999px;
+  border: 1px solid var(--border-subtle); color: var(--fg-muted); font-size: 0.8rem;
+}
+.help-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 20px 0; }
+.help-card {
+  display: flex; flex-direction: column; gap: 6px; padding: 18px; border-radius: 14px;
+  border: 1px solid var(--border-subtle); background: var(--bg-panel); color: var(--fg-default);
+  transition: border-color 0.15s, transform 0.15s;
+}
+.help-card:hover, .help-card:focus-visible { border-color: var(--accent-default); transform: translateY(-2px); }
+.help-card-icon {
+  width: 34px; height: 34px; display: grid; place-items: center; border-radius: 10px;
+  background: color-mix(in srgb, var(--accent-default) 12%, transparent); color: var(--accent-default); font-size: 1.1rem;
+}
+.help-card-title { font-weight: 600; }
+.help-card-text { color: var(--fg-muted); font-size: 0.875rem; line-height: 1.55; }
+.help-callout {
+  margin: 20px 0; padding: 18px 22px; border-radius: 14px;
+  border: 1px solid var(--status-warn); border-left-width: 4px; background: color-mix(in srgb, var(--status-warn) 6%, transparent);
+}
+.help-callout h3 { font-weight: 600; margin-bottom: 8px; color: var(--status-warn); }
+.help-callout ul, .help-section ul { padding-left: 20px; list-style: disc; display: grid; gap: 6px; line-height: 1.6; }
+.help-section { margin: 24px 0; }
+.help-section h3 { font-size: 1.05rem; font-weight: 600; margin-bottom: 10px; color: var(--fg-default); }
+.help-lead { color: var(--fg-muted); line-height: 1.6; margin: 8px 0; }
+.help-diagram-frame {
+  margin: 12px 0; padding: 12px; border-radius: 14px; border: 1px solid var(--border-subtle);
+  background: var(--bg-canvas); overflow-x: auto;
+}
+.help-diagram { display: block; width: 100%; min-width: 640px; height: auto; font-family: inherit; }
+.help-legend { display: flex; flex-wrap: wrap; gap: 8px 20px; color: var(--fg-muted); font-size: 0.8rem; }
+.help-legend i { display: inline-block; width: 14px; height: 10px; border: 2px solid; border-radius: 3px; margin-right: 6px; vertical-align: middle; }
+.help-steps { display: grid; gap: 10px; counter-reset: none; }
+.help-steps li {
+  display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 12px;
+  background: var(--bg-panel); border: 1px solid var(--border-subtle); line-height: 1.55;
+}
+.help-step-no {
+  flex: none; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%;
+  background: var(--accent-solid); color: var(--fg-onAccent); font-weight: 700; font-size: 0.8rem;
+}
+.help-faq {
+  border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg-panel);
+  margin-bottom: 10px; overflow: hidden;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, background-color 0.25s ease;
+}
+.help-faq:hover { border-color: color-mix(in srgb, var(--accent-default) 50%, var(--border-subtle)); }
+.help-faq[open] {
+  border-color: var(--accent-default);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent-default) 10%, transparent);
+}
+.help-faq summary {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 14px 18px; cursor: pointer; list-style: none;
+  font-weight: 600; line-height: 1.45; letter-spacing: 0.005em; color: var(--fg-default);
+}
+.help-faq summary::-webkit-details-marker { display: none; }
+.help-faq summary:focus-visible { outline: 2px solid var(--accent-solid); outline-offset: -2px; border-radius: 12px; }
+.help-faq-chevron {
+  flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+  color: var(--accent-default); background: color-mix(in srgb, var(--accent-default) 10%, transparent);
+  font-size: 1.1rem; line-height: 1; transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.help-faq[open] .help-faq-chevron { transform: rotate(90deg); }
+.help-faq-a {
+  padding: 0 18px 16px 18px; max-width: 78ch;
+  color: var(--fg-default); line-height: 1.7; word-spacing: 0.02em;
+  animation: help-reveal 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.help-faq-a code { font-size: 0.85em; padding: 1px 6px; border-radius: 6px; background: var(--bg-code); }
+.help-faq-group { margin: 28px 0; }
+.help-faq-group h3 { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.help-count {
+  display: inline-grid; place-items: center; min-width: 24px; height: 22px; padding: 0 7px; border-radius: 999px;
+  font-size: 0.75rem; font-weight: 600; color: var(--fg-muted); border: 1px solid var(--border-subtle);
+}
+
+/* Smooth motion: tab panels fade in, cards lift, the diagram draws itself. */
+.help-panel { animation: help-reveal 0.35s cubic-bezier(0.22, 1, 0.36, 1); }
+.help-card {
+  transition: border-color 0.3s ease, transform 0.3s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.3s ease, background-color 0.3s ease;
+}
+.help-card:hover, .help-card:focus-visible {
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--accent-default) 14%, transparent);
+  background: color-mix(in srgb, var(--accent-default) 4%, var(--bg-panel));
+}
+.help-card:hover .help-card-icon { transform: scale(1.08); }
+.help-card-icon { transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1); }
+.help-steps li { transition: border-color 0.25s ease, transform 0.25s ease; }
+.help-steps li:hover { border-color: color-mix(in srgb, var(--accent-default) 50%, var(--border-subtle)); transform: translateX(3px); }
+.arch-node { animation: arch-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.arch-arrow { animation: arch-fade 0.6s ease 0.7s both; }
+.arch-dot { fill: var(--accent-default); }
+.arch-optional { animation: arch-dash 1.6s linear infinite; }
+@keyframes help-reveal { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes arch-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes arch-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes arch-dash { to { stroke-dashoffset: -18; } }
+@media (prefers-reduced-motion: reduce) {
+  .help-panel, .help-faq-a, .arch-node, .arch-arrow, .arch-optional { animation: none; }
+  .arch-dot { display: none; }
+  .help-card, .help-card-icon, .help-faq-chevron, .help-steps li { transition: none; }
+  .help-card:hover, .help-steps li:hover { transform: none; }
+}

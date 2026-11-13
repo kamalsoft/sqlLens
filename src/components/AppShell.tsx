@@ -20,7 +20,21 @@ const navItems: { href: string; label: string; icon: string; feature?: Feature }
   { href: "/audit", label: "Audit", icon: "☰" },
   { href: "/settings", label: "Settings", icon: "⚙" },
   { href: "/manage-models", label: "Manage Models", icon: "◎" },
+  { href: "/help", label: "Help", icon: "?" },
 ];
+
+/** HP-3: on every page, including sign-in. */
+export const DISCLAIMER =
+  "SQLLens uses AI: results can be wrong or incomplete. Check with your DBA before changing a production database.";
+
+function Footer({ withHelp }: { withHelp: boolean }) {
+  return (
+    <footer className="app-footer">
+      <span>⚠ {DISCLAIMER}</span>
+      {withHelp && <Link href="/help" className="text-link">Help</Link>}
+    </footer>
+  );
+}
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -98,7 +112,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   }
 
-  if (isLogin) return <>{children}</>;
+  if (isLogin) return <>{children}<Footer withHelp={false} /></>;
+
+  const current = navItems.find((item) => pathname === item.href || (item.href !== "/" && pathname.startsWith(`${item.href}/`)));
+  const logoutButton = (
+    <button
+      type="button"
+      className="button button-secondary"
+      onClick={() => (task ? setPending({ href: "logout", task }) : void handleLogout())}
+      disabled={loggingOut}
+    >
+      {loggingOut ? "Signing out..." : "Logout"}
+    </button>
+  );
 
   return (
     <div className="app-shell">
@@ -129,33 +155,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             })}
           </nav>
 
-          <div className="sidebar-footer">
-            {username && (
-              <div className="panel panel-card compact-panel">
-                <div className="page-kicker">Signed in</div>
-                <div data-testid="current-user">{username}</div>
-                <button
-                  type="button"
-                  className="button button-secondary"
-                  onClick={() => (task ? setPending({ href: "logout", task }) : void handleLogout())}
-                  disabled={loggingOut}
-                >
-                  {loggingOut ? "Signing out..." : "Logout"}
-                </button>
-              </div>
-            )}
-            <div className="panel panel-card compact-panel">
-              <div className="page-kicker">Status</div>
-              <div className="status-inline">
-                <span className="live-dot" />
-                Models online
-              </div>
-            </div>
-          </div>
         </aside>
 
         <main className="content">
-          <div className="container">{children}</div>
+          {/* HP-2: always visible, so signing out never needs a scroll. */}
+          <header className="topbar">
+            <span className="topbar-title">{current?.label ?? "SQLLens"}</span>
+            {username && (
+              <span className="topbar-user">
+                <span aria-label="Signed in as" data-testid="current-user">{username}</span>
+                {logoutButton}
+              </span>
+            )}
+          </header>
+          <div className="content-body">
+            <div className="container">{children}</div>
+          </div>
+          <Footer withHelp />
         </main>
         {asking && (
           <ConfirmDialog
