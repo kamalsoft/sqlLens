@@ -2,7 +2,7 @@
 
 ## Application structure
 
-One Next.js server process on the user's machine serves the pages and the API. Everything below is checked against the code (2026-11-13).
+One Next.js server process on the user's machine serves the pages and the API. Everything below is checked against the code (2026-11-12).
 
 ```text
 src/

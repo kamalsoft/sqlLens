@@ -309,6 +309,27 @@ describe("POST /api/review", () => {
     expect((await review(post("/api/review", { ...valid, schemaVersion: "v1" }, cookie))).status).toBe(502);
   });
 
+  it("reads an answer with unescaped quotes, and names malformed JSON as malformed (RJ-1, RJ-3)", async () => {
+    const quoted = '{"summary": "Keeps -- "rows affected" off with SET NOCOUNT ON", "issues": []}';
+    setPipelineFactoryForTests(async () => generatorReturning(quoted));
+    const ok = await review(post("/api/review", { ...valid, schemaVersion: "v1" }, cookie));
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).result.summary).toBe('Keeps -- "rows affected" off with SET NOCOUNT ON');
+
+    // A cut-off v1 answer with stray quotes in its rewrite string still recovers the findings (architect review).
+    const cut = '{"summary": "s", "issues": [{"severity": "high", "title": "t", "explanation": "e"}],\n"rewrittenProcedure": "SET NOCOUNT ON -- "rows affected"\nSELECT';
+    setPipelineFactoryForTests(async () => generatorReturning(cut, { hitTokenLimit: true }));
+    const recovered = await review(post("/api/review", { ...valid, schemaVersion: "v1" }, cookie));
+    expect(recovered.status).toBe(200);
+    expect((await recovered.json()).result).toMatchObject({ summary: "s", rewrittenProcedure: "" });
+
+    // Finished (ends with "}") but unreadable: not reported as cut off.
+    setPipelineFactoryForTests(async () => generatorReturning('{"summary": "a\\", "issues": []}'));
+    const bad = await review(post("/api/review", { ...valid, schemaVersion: "v1" }, cookie));
+    expect(bad.status).toBe(502);
+    expect((await bad.json()).error).toMatch(/JSON was malformed/);
+  });
+
   it("without modelId uses the Review model from Settings, else the automatic choice; reviewSchema applies (RV-1)", async () => {
     setPipelineFactoryForTests(async () => generatorReturning(JSON.stringify({ summary: "s", issues: [] })));
     writeConfig({ reviewModel: "acme/small", reviewSchema: "v1" });

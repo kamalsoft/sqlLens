@@ -506,9 +506,9 @@ User request (2026-11-12): highlight keywords in JSON and XML content across the
 
 Note: the JSON and XML parsers (small; SQL was already in the editor chunk) now also load on the audit, Review and Compare pages; accepted without lazy loading (architect review).
 
-## Phase HP — Help, top bar and disclaimer footer (APPROVED 2026-11-13; HP-1..HP-4 implemented, awaiting review)
+## Phase HP — Help, top bar and disclaimer footer (APPROVED 2026-11-12; HP-1..HP-4 implemented, awaiting review)
 
-User decisions (2026-11-13): one Help page with tabs; content written for the app (linking to the full docs); Logout added to a top bar (the sidebar one stays).
+User decisions (2026-11-12): one Help page with tabs; content written for the app (linking to the full docs); Logout added to a top bar (the sidebar one stays).
 
 | ID | Task | Owner | Acceptance |
 |---|---|---|---|
@@ -517,9 +517,9 @@ User decisions (2026-11-13): one Help page with tabs; content written for the ap
 | HP-3 | Footer on every page, one line: "SQLLens uses AI: results can be wrong or incomplete. Check with your DBA before changing a production database." plus a Help link. | Frontend | Footer on every page including login; one line on desktop, wraps on small screens. |
 | HP-4 | Docs, changelog; Senior Architect review. | Scribe | Review done. |
 
-## Phase LG — Logo and favicon (APPROVED 2026-11-13; LG-1..LG-3 implemented, awaiting review)
+## Phase LG — Logo and favicon (APPROVED 2026-11-12; LG-1..LG-3 implemented, awaiting review)
 
-User decision (2026-11-13): "Lens over database": a magnifying lens whose glass holds a database cylinder; cyan on dark, SVG.
+User decision (2026-11-12): "Lens over database": a magnifying lens whose glass holds a database cylinder; cyan on dark, SVG.
 
 | ID | Task | Owner | Acceptance |
 |---|---|---|---|
@@ -528,6 +528,17 @@ User decision (2026-11-13): "Lens over database": a magnifying lens whose glass 
 | LG-3 | Changelog; Senior Architect review. | Scribe | Review done. |
 
 Unplanned fixes found while checking the sign-in page (in the changelog): the username and password inputs had no styling (invisible on the dark background), and the Phase HP disclaimer footer sat mid-page.
+
+## Phase RJ — Review JSON with unescaped quotes (APPROVED 2026-11-12; RJ-1..RJ-4 implemented, awaiting review)
+
+Reported failure: the model pasted the whole procedure into `evidence`; its comment `-- "rows affected"` ended the JSON string early and the page said the model "stopped before finishing".
+
+| ID | Task | Acceptance |
+|---|---|---|
+| RJ-1 | `repairJson`: a quote inside a string ends it only when `,` `}` `]` `:` or the next value follows; otherwise it is escaped. If no balanced object parses, the span from the first `{` to the last `}` is repaired as a whole (odd stray quotes). | The reported answer parses; correct JSON and missing-comma repair unchanged; tests. |
+| RJ-2 | Prompts: evidence is one short line (at most 120 characters), never the whole procedure or a code fence. Server: unfence evidence before the check, shorten it to 300 characters after. | Tests. |
+| RJ-3 | A finished answer (ends with `}`) that cannot be read is reported as malformed JSON, not as cut off. | Route test. |
+| RJ-4 | Tests, changelog, API note; Senior Architect review. | Review done. |
 
 ## DoD traceability (9/9)
 

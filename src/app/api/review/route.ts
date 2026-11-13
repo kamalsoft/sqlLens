@@ -179,15 +179,19 @@ export async function POST(request: Request) {
       const unclosed = hasUnclosedObject(jsonText);
       const truncated = unclosed && run.hitTokenLimit;
       const repeating = truncated && looksRepetitive(rawResult);
+      // RJ-3: an answer that ends with "}" was finished; it only looks open because its JSON is malformed.
+      const endsLikeObject = /\}\s*(```)?\s*$/.test(jsonText);
       return NextResponse.json(
         {
           error: repeating
             ? `The model got stuck repeating itself and used all ${config.maxNewTokens} new tokens before finishing the JSON. Retry, or use a larger model; raising maxNewTokens will not help.`
             : truncated
-              ? `The model output was cut off before the JSON was complete (limit ${config.maxNewTokens} new tokens). Raise maxNewTokens in Settings or use schema v1.`
-              : unclosed
-                ? "The model stopped before finishing the JSON. Retry, or use a larger model."
-                : "Unable to parse model response",
+            ? `The model output was cut off before the JSON was complete (limit ${config.maxNewTokens} new tokens). Raise maxNewTokens in Settings or use schema v1.`
+            : !unclosed
+            ? "Unable to parse model response"
+            : endsLikeObject
+            ? "The model's JSON was malformed (for example a quote inside a value was not escaped), so it could not be read. Retry, or use a larger model."
+            : "The model stopped before finishing the JSON. Retry, or use a larger model.",
           details: {
             message: error instanceof Error ? error.message : String(error),
             model: model.id,

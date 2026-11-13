@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Box, Container, Tabs } from '@chakra-ui/react';
 import { DISCLAIMER } from '@/components/AppShell';
 
-const REPO = 'https://github.com/kamalsoft/sqlens/blob/main';
+const REPO = 'https://github.com/kamalsoft/sqlLens/blob/main';
 const TABS = ['about', 'architecture', 'faq'] as const;
 type Tab = (typeof TABS)[number];
 
@@ -182,7 +182,9 @@ export default function HelpPage() {
             <Tabs.Trigger value="faq">FAQ</Tabs.Trigger>
           </Tabs.List>
 
-          <Tabs.Content value="about" className="help-panel">
+          <Tabs.Content value="about">
+            {/* The fade sits on an inner wrapper: on the panel itself Chakra would wait for it to end before hiding the panel. */}
+            <div className="help-panel">
             <section className="help-hero" aria-label="What SQLLens is">
               <h3>Understand, run and improve SQL Server stored procedures</h3>
               <p>
@@ -211,9 +213,11 @@ export default function HelpPage() {
                 <li>Replace your DBA. {DISCLAIMER}</li>
               </ul>
             </section>
+            </div>
           </Tabs.Content>
 
-          <Tabs.Content value="architecture" className="help-panel">
+          <Tabs.Content value="architecture">
+            <div className="help-panel">
             <section className="help-section" aria-label="Application architecture">
               <h3>Application architecture</h3>
               <p className="help-lead">How the parts of SQLLens connect, as built today. Dashed lines happen only when you turn them on or ask: live SQL and model downloads.</p>
@@ -242,9 +246,11 @@ export default function HelpPage() {
                 <Doc path="docs/api.md">API reference</Doc>.
               </p>
             </section>
+            </div>
           </Tabs.Content>
 
-          <Tabs.Content value="faq" className="help-panel">
+          <Tabs.Content value="faq">
+            <div className="help-panel">
             {FAQ.map((group) => (
               <section key={group.topic} className="help-section help-faq-group" aria-label={group.topic}>
                 <h3>
@@ -261,6 +267,7 @@ export default function HelpPage() {
                 ))}
               </section>
             ))}
+            </div>
           </Tabs.Content>
         </Tabs.Root>
       </Container>

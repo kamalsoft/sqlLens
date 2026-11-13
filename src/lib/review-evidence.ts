@@ -37,6 +37,19 @@ function supported(evidence: string, sql: string): boolean {
   return true;
 }
 
+/** Longest evidence shown; the check against the SQL uses the whole quote. */
+export const MAX_EVIDENCE_CHARS = 300;
+
+/** RJ-2: strips Markdown code fences a model wraps around a quote. */
+function unfence(evidence: string): string {
+  return evidence.replace(/^\s*```[\w-]*[^\S\n]*\n?/, "").replace(/\n?[^\S\n]*```\s*$/, "").trim();
+}
+
+/** RJ-2: long quotes (a model sometimes pastes the whole procedure) are cut, so a row stays readable. */
+function shorten(evidence: string): string {
+  return evidence.length > MAX_EVIDENCE_CHARS ? `${evidence.slice(0, MAX_EVIDENCE_CHARS).trimEnd()}…` : evidence;
+}
+
 /**
  * Drops v2 table rows whose evidence is not quoted from the submitted SQL.
  * Small models copy the prompt's example rows; this keeps them out of results.
@@ -45,10 +58,11 @@ export function dropUnsupportedEvidence(review: ReviewV2, sqlText: string): Revi
   const sql = normalize(sqlText);
   let removed = 0;
   const keep = <T extends { evidence: string }>(rows: T[]): T[] =>
-    rows.filter((row) => {
-      if (supported(row.evidence, sql)) return true;
+    rows.flatMap((row) => {
+      const evidence = unfence(row.evidence);
+      if (supported(evidence, sql)) return [{ ...row, evidence: shorten(evidence) }];
       removed += 1;
-      return false;
+      return [];
     });
 
   const result: ReviewV2 = {

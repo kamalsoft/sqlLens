@@ -148,3 +148,41 @@ AS EXEC sp_executesql '
     expect(() => extractJson("{'a': 1}", validateReviewV1)).toThrow(/JSON/);
   });
 });
+
+describe("stray quotes inside a value (RJ-1)", () => {
+  const passThrough = (value: unknown) => value as Record<string, unknown>;
+  it("reads the reported answer: a whole procedure, with -- \"rows affected\", pasted into evidence", () => {
+    const text = [
+      "{",
+      '  "summary": "The stored procedure `usp_GetOptimizedFinancialSummary` filters and ranks orders.",',
+      '  "findingsTable": [',
+      "    {",
+      '      "category": "correctness",',
+      '      "evidence": "```',
+      "CREATE OR ALTER PROCEDURE [dbo].[usp_GetOptimizedFinancialSummary]",
+      "AS",
+      "BEGIN",
+      '    -- Suppress "rows affected" messages to reduce network traffic and CPU overhead',
+      "    SET NOCOUNT ON;",
+      "END;",
+      '```",',
+      '      "severity": "low"',
+      "    }",
+      "  ],",
+      '  "limitations": ["Execution plan information is not provided."]',
+      "}",
+    ].join("\n");
+    const out = extractJson(text, passThrough, { finished: true });
+    const row = (out.findingsTable as Array<Record<string, string>>)[0];
+    expect(row.evidence).toContain('-- Suppress "rows affected" messages');
+    expect(row.severity).toBe("low");
+    expect(out.limitations).toEqual(["Execution plan information is not provided."]);
+  });
+
+  it("reads an odd number of stray quotes, and leaves correct JSON alone", () => {
+    expect(extractJson('{"summary": "5" wide", "issues": []}', passThrough)).toEqual({ summary: '5" wide', issues: [] });
+    expect(extractJson('{"a": "say \\"hi\\"", "b": ["x", "y"]}', passThrough)).toEqual({ a: 'say "hi"', b: ["x", "y"] });
+    // A missing comma between values is still repaired, not read as a stray quote.
+    expect(extractJson('{"a": "x" "b": "y"}', passThrough)).toEqual({ a: "x", b: "y" });
+  });
+});
