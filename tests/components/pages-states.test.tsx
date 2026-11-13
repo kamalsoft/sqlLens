@@ -2,6 +2,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { ChakraProvider, defaultSystem } from "@chakra-ui/react";
 import userEvent from "./user";
+import { typeSql } from "./sql-box";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const replace = vi.fn();
@@ -35,7 +36,7 @@ describe("Review page states", () => {
     const user = userEvent.setup();
     render(<ChakraProvider value={defaultSystem}><ReviewPage /></ChakraProvider>);
 
-    await user.type(await screen.findByLabelText("Stored procedure"), "select 1");
+    await typeSql("Stored procedure", "select 1");
     await user.click(screen.getByRole("button", { name: "Analyze SP" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent(/Sending the procedure \(1 line, 8 characters\)/);

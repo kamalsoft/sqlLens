@@ -15,6 +15,7 @@ import {
 import { SharePanel } from "@/components/audit/SharePanel";
 import { MetricComparisonTable, fmt, type MetricsMap } from "@/components/audit/MetricComparisonTable";
 import { CopyButton } from "@/components/refactor/RefactorResultView";
+import { HighlightedCode } from "@/components/HighlightedCode";
 
 type AuditRecord = {
   id: string;
@@ -66,7 +67,7 @@ function RawJson({ label, value }: { label: string; value: unknown }) {
         <span>{text.length.toLocaleString()} characters</span>
         <CopyButton text={text} label={`Copy ${label.toLowerCase()}`} />
       </div>
-      <pre className="review-code" aria-label={`Stored ${label.toLowerCase()}`}>{text}</pre>
+      <pre className="review-code" aria-label={`Stored ${label.toLowerCase()}`}><HighlightedCode code={text} language="json" /></pre>
     </details>
   );
 }
@@ -138,7 +139,7 @@ function ExecutionView({ response }: { response: ExecResponse }) {
         ))}
       </dl>
       {response.execution?.outputs && Object.keys(response.execution.outputs).length > 0 && (
-        <pre aria-label="OUTPUT parameters">{JSON.stringify(response.execution.outputs, null, 2)}</pre>
+        <pre aria-label="OUTPUT parameters"><HighlightedCode code={JSON.stringify(response.execution.outputs, null, 2)} language="json" /></pre>
       )}
     </section>
   );
@@ -302,7 +303,7 @@ export default function AuditDetailPage() {
                   <span>Refactored SQL (never executed)</span>
                   <CopyButton text={refactor.refactoredSql} label="Copy refactored SQL" />
                 </div>
-                <pre className="review-code">{refactor.refactoredSql}</pre>
+                <pre className="review-code"><HighlightedCode code={refactor.refactoredSql} language="sql" /></pre>
               </>
             )}
           </section>

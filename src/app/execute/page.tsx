@@ -18,6 +18,7 @@ import { readParamSets, setNamesFor, withSet, withoutSet, writeParamSets, type P
 import {
   TargetEditor, buildTarget, emptyDraft, isDraftEmpty, targetError, newParamRow, type ParamType, type TargetDraft,
 } from '@/components/execute/target-editor';
+import { HighlightedCode } from '@/components/HighlightedCode';
 
 type ComparisonAnalysis = AuditAnalysis & {
   improvementPercent?: number | null;
@@ -236,7 +237,7 @@ function OptimizedPanel({ original, optimized, originalText, optimizedText }: {
             </Text>
             <Text fontSize="xs" color="fg.muted" mt={1}>{side.analysis.prodVerdict?.verdict ?? ''}</Text>
             <Box as="pre" mt={3} p={3} bg="bg.code" borderRadius="md" fontSize="xs" color="fg.default" maxH="320px" overflow="auto" whiteSpace="pre-wrap">
-              {side.text || '(empty)'}
+              {side.text ? <HighlightedCode code={side.text} /> : '(empty)'}
             </Box>
           </Box>
         ))}
@@ -362,7 +363,7 @@ function AnalysisPanel({ analysis, title, params, outputs, part = 'all' }: {
             <Text fontSize="sm" fontWeight="semibold" color="fg.default" mb={1} textTransform="uppercase" letterSpacing="wider">OUTPUT parameters</Text>
             <Text fontSize="xs" color="fg.muted" mb={3}>Values the procedure handed back through its OUTPUT parameters.</Text>
             <Box as="pre" fontSize="xs" color="accent.default" bg="bg.canvas" p={3} borderRadius="lg" overflowX="auto" fontFamily="mono">
-              {JSON.stringify(outputs, null, 2)}
+              <HighlightedCode code={JSON.stringify(outputs, null, 2)} language="json" />
             </Box>
           </Box>
         )}
@@ -505,7 +506,7 @@ function RawStatsPanel({ execution, defaultOpen = false, label }: { execution: E
           </Flex>
           <Box as="pre" fontSize="xs" color="status.ok" bg="bg.canvas" p={4} borderRadius="lg"
             overflowX="auto" fontFamily="mono" whiteSpace="pre-wrap" lineHeight="tall">
-            {execution.stats.rawOutput}
+            <HighlightedCode code={execution.stats.rawOutput} />
           </Box>
           {execution.recordNumber && (
             <Text fontSize="xs" color="fg.muted" mt={3}>Saved to the audit log as record #{execution.recordNumber}.</Text>
@@ -1080,7 +1081,8 @@ export default function ExecutePage() {
               : 'Runs the SQL you paste. It runs in a transaction that is rolled back afterwards, unless the script commits.'}
             {mode === 'compare' ? ' Both versions run, one after the other, and are compared.' : ''}
           </Text>
-        <Grid templateColumns={{ base: '1fr', lg: mode === 'compare' ? '1fr 1fr' : '1fr' }} gap={5}>
+        {/* minmax(0, 1fr): a wide SQL line scrolls inside its box instead of widening the page. */}
+        <Grid templateColumns={{ base: 'minmax(0, 1fr)', lg: mode === 'compare' ? 'repeat(2, minmax(0, 1fr))' : 'minmax(0, 1fr)' }} gap={5}>
           <Box bg="bg.panel" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" p={5}>
             <Flex align="center" gap={2} mb={3}>
               {mode === 'compare' && <Badge variant="outline" color="accent.default" borderColor="accent.default">ORIGINAL</Badge>}
@@ -1089,7 +1091,7 @@ export default function ExecutePage() {
               </Text>
             </Flex>
             <TargetEditor
-              kind={kind} draft={original} onChange={setOriginal} color="fg.default"
+              kind={kind} draft={original} onChange={setOriginal} label="Original SQL"
               placeholder="-- Paste your Stored Procedure here..."
               onLoadParams={engine === 'mssql' ? () => void loadParams('original') : undefined}
               loadNote={loadNote.original}
@@ -1109,7 +1111,7 @@ export default function ExecutePage() {
                 <Text fontSize="sm" fontWeight="semibold" color="fg.default" textTransform="uppercase" letterSpacing="wider">Optimized version</Text>
               </Flex>
               <TargetEditor
-                kind={kind} draft={optimized} onChange={setOptimized} color="fg.default"
+                kind={kind} draft={optimized} onChange={setOptimized} label="Optimized SQL"
                 placeholder="-- Paste your Optimized SP here..."
                 onLoadParams={engine === 'mssql' ? () => void loadParams('optimized') : undefined}
                 loadNote={loadNote.optimized}

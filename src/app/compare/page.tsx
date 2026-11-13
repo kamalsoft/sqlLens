@@ -4,13 +4,15 @@ import { useEffect, useRef, useState } from 'react';
 import { useLeaveGuard } from '@/components/leave-guard';
 import Link from 'next/link';
 import {
-  Box, Container, Heading, Text, Textarea, Button, Flex,
+  Box, Container, Heading, Text, Button, Flex,
   Spinner, Badge, Grid, GridItem,
 } from '@chakra-ui/react';
 import { useApi } from '@/components/api-client';
 import type { MetricComparison } from '@/lib/audit-analyzer';
 import { COMPARE_SCHEMA_VERSION, type CompareModelResult } from '@/lib/compare';
 import { NOT_SQL_ERROR, looksLikeSql } from '@/lib/validation/sql-input';
+import { SqlEditor } from '@/components/SqlEditor';
+import { HighlightedCode } from '@/components/HighlightedCode';
 
 type Model = { id: string; name: string; compatible: boolean };
 
@@ -144,7 +146,7 @@ export default function ComparePage() {
         </Box>
 
         {/* Input Grid */}
-        <Grid templateColumns={{ base: '1fr', lg: '1fr 1fr' }} gap={5} mb={6}>
+        <Grid templateColumns={{ base: 'minmax(0, 1fr)', lg: 'repeat(2, minmax(0, 1fr))' }} gap={5} mb={6}>
           <GridItem>
             <Box bg="bg.panel" borderWidth="1px" borderColor="border.subtle" borderRadius="xl" p={5} h="full">
               <Flex align="center" gap={2} mb={3}>
@@ -153,9 +155,10 @@ export default function ComparePage() {
                   Current SP
                 </Text>
               </Flex>
-              <Textarea
+              <SqlEditor
+                ariaLabel="Current SP"
                 value={original}
-                onChange={(e) => setOriginal(e.target.value)}
+                onChange={setOriginal}
                 placeholder={`CREATE PROCEDURE usp_GetOrders
 AS
 BEGIN
@@ -170,15 +173,7 @@ BEGIN
   CLOSE cur
   DEALLOCATE cur
 END`}
-                minH="260px"
-                fontFamily="mono"
-                fontSize="sm"
-                bg="bg.canvas"
-                color="fg.default"
-                borderColor="border.subtle"
-                _focus={{ borderColor: 'accent.default', boxShadow: '0 0 0 1px var(--chakra-colors-accent-default)' }}
-                _placeholder={{ color: 'fg.muted' }}
-                resize="vertical"
+                minHeight="260px"
               />
               <Text fontSize="xs" color="fg.muted" mt={2}>{original.length} characters</Text>
             </Box>
@@ -192,9 +187,10 @@ END`}
                   Optimized SP
                 </Text>
               </Flex>
-              <Textarea
+              <SqlEditor
+                ariaLabel="Optimized SP"
                 value={optimized}
-                onChange={(e) => setOptimized(e.target.value)}
+                onChange={setOptimized}
                 placeholder={`CREATE PROCEDURE usp_GetOrders_v2
 AS
 BEGIN
@@ -204,15 +200,7 @@ BEGIN
   FROM Orders o WITH (NOLOCK)
   WHERE o.status = 'ACTIVE'
 END`}
-                minH="260px"
-                fontFamily="mono"
-                fontSize="sm"
-                bg="bg.canvas"
-                color="fg.default"
-                borderColor="border.subtle"
-                _focus={{ borderColor: 'accent.default', boxShadow: '0 0 0 1px var(--chakra-colors-accent-default)' }}
-                _placeholder={{ color: 'fg.muted' }}
-                resize="vertical"
+                minHeight="260px"
               />
               <Text fontSize="xs" color="fg.muted" mt={2}>{optimized.length} characters</Text>
             </Box>
@@ -249,7 +237,7 @@ END`}
             <Text color="status.bad" fontSize="sm" mt={1}>{error}</Text>
             {details && (
               <Box as="pre" aria-label="Response preview" mt={3} p={3} bg="bg.canvas" borderRadius="md" fontSize="xs" color="fg.default" whiteSpace="pre-wrap" overflowWrap="anywhere" maxH="320px" overflow="auto">
-                {details}
+                <HighlightedCode code={details} />
               </Box>
             )}
           </Box>

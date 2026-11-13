@@ -480,6 +480,32 @@ From the whole-app security audit of 2026-11-12 (`docs/security.md`, "Known gaps
 
 Deferred (backlog): SEC-7 (require HTTPS off localhost) and SEC-11 (tamper-evident audit records), which matter only when the app is shared beyond one machine.
 
+## Phase ED — SQL editor for every SQL box (APPROVED 2026-11-12; ED-1..ED-4 implemented, awaiting review)
+
+User decisions (2026-11-12): CodeMirror 6; use it in every SQL box (Review, Execute & Audit SP batch boxes, Compare).
+
+| ID | Task | Owner | Acceptance |
+|---|---|---|---|
+| ED-1 | Add pinned CodeMirror 6 packages (`@codemirror/view`, `state`, `language`, `commands`, `search`, `lang-sql` with the MSSQL / T-SQL dialect, `@lezer/highlight`); production `npm audit` stays clean. | Lead | Installed; audit clean; build passes. |
+| ED-2 | `src/components/SqlEditor.tsx`: client-only shared editor. Line numbers, word wrap (numbers stay aligned with wrapped lines), T-SQL highlighting (keywords, functions, types, strings, numbers, comments, @variables) in colours from the app theme tokens (dark and light), bracket matching, undo/redo, Ctrl/Cmd+F search, active-line highlight, placeholder, read-only/disabled, `aria-label`, Tab keeps keyboard focus escape (Esc then Tab). Same props as the text boxes it replaces (`value`, `onChange`, `placeholder`, `disabled`, `minHeight`, `ariaLabel`). | Frontend | Component tests: renders value, reports edits, line numbers, wrap, keywords get highlight classes, disabled is read-only, accessible name. |
+| ED-3 | Use it for the Review "Stored procedure" box, the Execute & Audit SP "SQL batch" boxes (original and optimized), and Compare's two SQL boxes. | Frontend | Existing page tests pass (adapted to the editor); no behaviour change besides the editor. |
+| ED-4 | Works with the security headers (CodeMirror adds inline styles; `style-src 'unsafe-inline'` already allows them); docs and changelog. | Frontend + Security | Checked on `next start` with the CSP on; docs updated. |
+
+Not included: SQL formatting button, autocomplete of table or column names (could follow later).
+
+## Phase HL — Highlight JSON, XML and SQL wherever the app shows them (APPROVED 2026-11-12; HL-1..HL-4 implemented, awaiting review)
+
+User request (2026-11-12): highlight keywords in JSON and XML content across the app. Builds on Phase ED (same colours).
+
+| ID | Task | Owner | Acceptance |
+|---|---|---|---|
+| HL-1 | Add pinned `@codemirror/lang-json` (`@codemirror/lang-xml` was added, then removed after the security review); production `npm audit` stays clean. | Lead | Installed; audit clean. |
+| HL-2 | `src/components/CodeBlock.tsx`: read-only highlighted block. Language `json`, `xml`, `sql` or `auto` (detects JSON, XML such as execution plans, else SQL). Static highlighting with `@lezer/highlight` `highlightCode` rendered as React spans (no editor, no HTML injection). JSON keys, strings, numbers, true/false/null; XML tags, attributes, values, comments; SQL as in the editor. Same theme colours as `SqlEditor`. JSON only when `JSON.parse` succeeds and up to 200 KB; XML by a linear one-pass scanner up to 200 KB (the lezer XML parser used quadratic memory on crafted input, so `@codemirror/lang-xml` was removed); SQL up to 50 KB; any parser failure shows plain text (security review). Keeps the existing `aria-label`, scroll and wrap behaviour. | Frontend | Unit tests: each language gets highlight spans, plain fallback for large text, text content unchanged. |
+| HL-3 | Use it for every code block: Audit record (stored request and response, OUTPUT parameters, prompt text, refactored SQL); Review and Refactor raw model output; Compare response preview; Execute raw output, OUTPUT parameters and per-side raw text; Run picker telemetry JSON; refactor evidence; index and view CREATE statements; restructured procedure. | Frontend | Existing page tests pass; screen-reader names unchanged. |
+| HL-4 | Docs and changelog; Senior Architect review; Security check of the new packages. | Frontend | Reviews done. |
+
+Note: the JSON and XML parsers (small; SQL was already in the editor chunk) now also load on the audit, Review and Compare pages; accepted without lazy loading (architect review).
+
 ## DoD traceability (9/9)
 
 | DoD criterion | Tasks |

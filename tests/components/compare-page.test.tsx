@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { ChakraProvider, defaultSystem } from "@chakra-ui/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import userEvent from "./user";
+import { typeSql } from "./sql-box";
 
 const router = { replace: vi.fn(), push: vi.fn() };
 vi.mock("next/navigation", () => ({ useRouter: () => router, usePathname: () => "/compare" }));
@@ -26,9 +27,8 @@ function setup(compare: () => Response) {
 }
 
 async function fill(original: string, optimized: string) {
-  const [a, b] = screen.getAllByRole("textbox");
-  fireEvent.change(a, { target: { value: original } });
-  fireEvent.change(b, { target: { value: optimized } });
+  await typeSql("Current SP", original);
+  await typeSql("Optimized SP", optimized);
 }
 
 describe("ComparePage", () => {

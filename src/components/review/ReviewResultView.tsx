@@ -6,6 +6,7 @@ import {
   recommendationsFromV1,
   recommendationsFromV2,
 } from "./RecommendationGroups";
+import { HighlightedCode } from "@/components/HighlightedCode";
 
 export function Section({
   title,
@@ -92,7 +93,7 @@ export function IndexRecommendations({ items }: { items?: IndexRecommendation[] 
               )}
             </p>
             {item.reason && <p>{item.reason}</p>}
-            {item.createStatement && <pre className="review-code">{item.createStatement}</pre>}
+            {item.createStatement && <pre className="review-code"><HighlightedCode code={item.createStatement} language="sql" /></pre>}
           </li>
         ))}
       </ul>
@@ -129,7 +130,7 @@ function Restructure({ result }: { result: ReviewV1 | ReviewV2 }) {
               ))}
             </ul>
           )}
-          <pre className="review-code" aria-label="Restructured procedure">{sql}</pre>
+          <pre className="review-code" aria-label="Restructured procedure"><HighlightedCode code={sql} language="sql" /></pre>
         </>
       ) : (
         <p className="review-empty" data-testid="rewrite-status">

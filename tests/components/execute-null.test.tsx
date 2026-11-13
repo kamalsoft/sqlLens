@@ -3,6 +3,7 @@ import { fireEvent, cleanup, render, screen } from "@testing-library/react";
 import { ChakraProvider, defaultSystem } from "@chakra-ui/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import userEvent from "./user";
+import { typeSql } from "./sql-box";
 
 const router = { replace: vi.fn(), push: vi.fn() };
 vi.mock("next/navigation", () => ({ useRouter: () => router, usePathname: () => "/execute" }));
@@ -35,7 +36,7 @@ describe("ExecutePage null metrics", () => {
     render(<ChakraProvider value={defaultSystem}><ExecutePage /></ChakraProvider>);
     fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "simulation" } });
     await user.click(screen.getByRole("radio", { name: "SQL batch" }));
-    await user.type(screen.getByPlaceholderText(/Paste your Stored Procedure/), "select 1");
+    await typeSql("Original SQL", "select 1");
     await user.click(screen.getByRole("button", { name: /Execute & Audit/ }));
 
     // P8-04: the grade badge reads "Not graded" when the grade is withheld, so one fewer "Not captured".

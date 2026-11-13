@@ -1866,3 +1866,16 @@ body {
   display: grid;
   gap: 12px;
 }
+
+/* HL-2: syntax colours for the SQL editor and read-only code blocks (src/lib/code-highlight.ts). */
+.tok-keyword { color: var(--accent-default); font-weight: 600; }
+.tok-type { color: var(--grade-B); }
+.tok-function { color: var(--grade-C); }
+.tok-variable { color: var(--status-ok); }
+.tok-property { color: var(--status-ok); }
+.tok-tag { color: var(--accent-default); }
+.tok-attr { color: var(--grade-C); }
+.tok-string { color: var(--status-warn); }
+.tok-number { color: var(--grade-F); }
+.tok-comment { color: var(--fg-muted); font-style: italic; }
+.tok-punct { color: var(--fg-muted); }
